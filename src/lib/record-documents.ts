@@ -20,10 +20,12 @@
 //                   retired. A retired spec's document is still a document
 //                   that said something about this item, and every dismissal
 //                   here is reversible — so it is counted, apart.
-//   an answer       spec_answers.source_id, which is the INTAKE RUN for both
+//   an answer       spec_answers.source_id, which is the INTAKE RUN for
 //                   source_kind 'document' and 'email' (confirm-spec-document.ts
-//                   writes run.runId in both branches; a manual answer writes
-//                   null). An answer back at 'missing' is not counted: it no
+//                   writes run.runId in both branches) and for 'attribute', an
+//                   answer composed from the record's specs (0050; the run of
+//                   the spec that supplied the value). A manual answer writes
+//                   null. An answer back at 'missing' is not counted: it no
 //                   longer says anything, whatever its source column still holds.
 //   evidence        change_sets.evidence_attachment_id, on a change that made a
 //                   VERSION of this record (record_snapshots). The version is
@@ -425,7 +427,7 @@ export async function loadRecordDocuments(
         from spec_answers
        where record_id = ${recordId}
          and source_id is not null
-         and source_kind in ('document', 'email')
+         and source_kind in ('document', 'email', 'attribute')
          and state <> 'missing'
        group by source_id
     `,

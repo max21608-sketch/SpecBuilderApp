@@ -8,12 +8,13 @@
 // acquire one, and would sit forever with no checklist and no way to get one.
 //
 // Setting the category also CREATES THE ANSWER ROWS, with the same insert-select
-// the BOQ confirm uses. A category with no answers scores 0/0 and reads as
-// complete, which is the same class of error as an empty programme rendering as
-// a healthy one.
+// the BOQ confirm uses, and fills the ones the record's attributes already
+// answer. A category with no answers scores 0/0 and reads as complete, which is
+// the same class of error as an empty programme rendering as a healthy one.
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { changeSetForEdit } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
+import { recomposeAnswers } from "@/lib/attribute-retire";
 import { type ItemLevel } from "@/lib/spec-vocab";
 
 export type SetCategoryResult = { recordId: string; categoryId: string; answersCreated: number; version: number };
@@ -95,6 +96,16 @@ export async function setRecordCategory(
     on conflict (record_id, requirement_id, revision_no) do nothing
     returning id
   `;
+
+  // AND FILLS THEM FROM WHAT THE RECORD ALREADY HOLDS (audit E5, 2026-11-06).
+  // Intake does not wait for a category, so a bill line routinely arrives with
+  // its sizes and fabrics as attributes and no questions for them to answer.
+  // Creating the rows `missing` and stopping left a record whose Specs tab
+  // showed W1900 x D790 and a fabric while its checklist, its gates and TGQ
+  // said nobody had looked, until some later document happened to recompose
+  // it. The one recompose every other attribute write uses, inside this change
+  // and before its version, so the version holds the answers it filled.
+  await recomposeAnswers(txn, recordId, null, actor);
 
   await snapshotRecords(txn, [recordId], changeSetId);
 

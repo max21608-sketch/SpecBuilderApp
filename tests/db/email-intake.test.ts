@@ -258,9 +258,9 @@ describeIfDb("email intake", () => {
   });
 
   it("leaves an email-sourced answer out of reach of a later drawing", async () => {
-    // `applyAnswerFills` touches a missing answer, or one a shop-drawings run
-    // wrote. An email answer is a person's confirmation with evidence attached,
-    // exactly like a typed one.
+    // `applyAnswerFills` touches a missing answer, or one it composed itself
+    // (`attribute`, 0050). An email answer is a person's confirmation with
+    // evidence attached, exactly like a typed one.
     const { planAnswerFills, applyAnswerFills } = await import("@/lib/promote-answers");
     const field = await client.query(
       `select spec_field_id from requirements where id = $1`, [requirementId],

@@ -173,6 +173,17 @@ describeIfDb("the documents behind a record", () => {
       [recordId, requirement.rows[0].id, requirement.rows[0].spec_field_id, emailRunId],
     );
 
+    // An answer COMPOSED from the drawing's specs (0050's `attribute`): its
+    // source_id is the drawing's run, and it is that document's answer as much
+    // as an email's is the email's.
+    const composed = await client.query(`select id, spec_field_id from requirements order by id offset 1 limit 1`);
+    await client.query(
+      `insert into spec_answers (record_id, requirement_id, spec_field_id, value, state, source_kind, source_id,
+                                 confirmed_by, confirmed_at, created_by, updated_by)
+       values ($1, $2, $3, '__QA W840mm', 'confirmed', 'attribute', $4, 'qa', now(), 'qa', 'qa')`,
+      [recordId, composed.rows[0].id, composed.rows[0].spec_field_id, drawingRunId],
+    );
+
     // The email's own change carries its .eml as evidence — the same file.
     await changeWithVersion(recordId, 1, "email_confirm", {
       reason: "__QA Invented email of the 14th",
@@ -234,7 +245,7 @@ describeIfDb("the documents behind a record", () => {
     expect(rows[0]?.filename).toBe("bill.xlsx");
 
     expect(byFile.get("bill.xlsx")?.relations).toEqual(["Bill row 12"]);
-    expect(byFile.get("X-100.pdf")?.relations).toEqual(["2 specs, pages 2–3"]);
+    expect(byFile.get("X-100.pdf")?.relations).toEqual(["2 specs, pages 2–3", "1 checklist answer"]);
     expect(byFile.get("X-100.pdf")?.open).toEqual({ href: `/api/imports/${drawingRunId}/source#page=2`, inline: true });
     expect(byFile.get("X-100 rev0.pdf")?.relations).toEqual(["1 retired spec, page 5"]);
 

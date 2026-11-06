@@ -204,7 +204,7 @@ describeIfDb("adding a configuration by hand", () => {
         where sa.record_id = $1 and f.json_id = 3`,
       [result.recordId],
     );
-    expect(dims.rows[0]?.source_kind).toBe("document");
+    expect(dims.rows[0]?.source_kind).toBe("attribute");
     expect(String(dims.rows[0]?.value)).toContain("W840");
 
     // The fabric's field is blank on the configuration.

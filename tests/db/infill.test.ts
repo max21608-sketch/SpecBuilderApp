@@ -213,9 +213,10 @@ describeIfDb("the infill screen's writes", () => {
     );
     expect(answer.rows[0].value).toBe(expected);
     expect(answer.rows[0].state).toBe("confirmed");
-    // `document` with a NULL source is the discriminator for a composed cell a
-    // person's typing produced — which is what lets the NEXT slot recompose it.
-    expect(answer.rows[0].source_kind).toBe("document");
+    // `attribute` (0050) is what marks a composed cell, whoever's typing or
+    // document produced it, and it is what lets the NEXT slot recompose it.
+    // A NULL source says no document: a person typed the slots.
+    expect(answer.rows[0].source_kind).toBe("attribute");
     expect(answer.rows[0].source_id).toBeNull();
   }, SLOW);
 

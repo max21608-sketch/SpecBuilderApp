@@ -250,7 +250,7 @@ export default function FinishesLibrary({
       await reloadThen(
         `Updated on ${res.data.recordsTouched} item${res.data.recordsTouched === 1 ? "" : "s"}.` +
           (stuck.length > 0
-            ? ` ${stuck.length} of them (${stuck.map((row) => row.label).join(", ")}) has a value somebody typed by hand, so it did not follow — change it there if it should.`
+            ? ` ${stuck.length} of them (${stuck.map((row) => row.label).join(", ")}) has an answer a person set on its checklist, so it did not follow — change it there if it should.`
             : ""),
         true,
       );
@@ -774,8 +774,8 @@ export default function FinishesLibrary({
               {/* The TOTAL again, whatever the phase filter says. */}
               <p className="mt-2 text-xs text-neutral-500">
                 Saving changes what all {uses} linked item{uses === 1 ? "" : "s"} show and export
-                {runFilter ? ", on every phase, not only the one being shown" : ""}. An answer somebody typed by hand
-                stays theirs and will be named.
+                {runFilter ? ", on every phase, not only the one being shown" : ""}. An answer a person set on an item&rsquo;s
+                checklist stays theirs and will be named.
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <Button variant="primary" size="sm" disabled={busy} onClick={() => void save(finish)}>

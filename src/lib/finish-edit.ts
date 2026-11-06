@@ -57,7 +57,11 @@ export type FinishEditResult = {
   finishId: string;
   recordsTouched: number;
   answersFilled: number;
-  /** Linked records whose answer for this field a person owns, so it did not move. */
+  /**
+   * Linked records whose answer for this field a person owns (typed, or
+   * confirmed off an email or a schedule: anything but `attribute`), so it
+   * did not move. The name predates 0050, when only `manual` was counted.
+   */
   recordsWithManualAnswers: { recordId: string; label: string }[];
   changeSetId: string;
 };
@@ -276,15 +280,19 @@ export async function carryFinishToItems(
     const { filled } = await recomposeAnswers(txn, recordId, null, actor);
     answersFilled += filled;
 
-    // An answer a person typed is theirs and did not move. Reported, because
+    // An answer a person owns is theirs and did not move. Reported, because
     // "12 items" with one of them quietly not following is worse than a
-    // smaller number honestly stated.
+    // smaller number honestly stated. A person owns every answer this code
+    // did not compose: typed (`manual`), confirmed off an email, or confirmed
+    // by a reviewer off a schedule (`document`). This used to ask for
+    // `manual` alone, so before 0050 a bill-sourced answer, which nothing
+    // could reach, was reported as following (audit E1).
     const owned = await txn`
       select 1 from spec_answers ans
       join record_attributes a on a.record_id = ans.record_id and a.spec_field_id = ans.spec_field_id
       where ans.record_id = ${recordId}
         and ans.revision_no = 0
-        and ans.source_kind = 'manual'
+        and ans.source_kind <> 'attribute'
         and ans.state <> 'missing'
         and a.finish_id = ${finishId}
         and a.status = 'active'

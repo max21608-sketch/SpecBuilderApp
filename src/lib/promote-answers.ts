@@ -24,9 +24,9 @@
 //      values nobody has decided. TBC is a real, distinct, gate-blocking state
 //      and it survives the trip.
 //   2. A PERSON'S ANSWER IS NEVER OVERWRITTEN. Only an answer still `missing`,
-//      or one this code wrote itself, is touched. `source_kind` is what tells
-//      them apart, which is why /api/answers/[id] clears it the moment a human
-//      edits: from then on the answer is theirs.
+//      or one this code wrote itself, is touched. `source_kind = 'attribute'`
+//      (0050) is what marks the second, and /api/answers/[id] writes `manual`
+//      the moment a human edits: from then on the answer is theirs.
 //   3. A dimension does not map to a field by `spec_field_id` -- it carries a
 //      SLOT, and all five slots compose into the single BWS Dimensions field
 //      through `composeDimensionCell`. That is the same function the record
@@ -256,9 +256,27 @@ export async function loadDimensionNote(txn: TxnSql, recordId: string): Promise<
  *
  *   - the question must belong to the record's OWN category (`requirements` is
  *     scoped by `category_id`, and the subquery below joins through it);
- *   - the answer must still be `missing`, or one this code wrote before
- *     (`source_kind = 'intake_run'`). A person's answer matches neither, which
+ *   - the answer must still be `missing`, or one this code composed before
+ *     (`source_kind = 'attribute'`, 0050). A person's answer is neither, which
  *     is the whole of rule 2.
+ *
+ * Every fill is written `attribute`, whatever document the attribute came
+ * from. `source_id` is the run of the attribute that supplied the value (null
+ * for one a person typed), so the answer still says where to go and check.
+ *
+ * ---- WHY THE KIND IS RECORDED, NOT INFERRED (audit E1, 2026-11-06) --------
+ *
+ * Until 0050 this wrote `document`, the same kind `confirm-spec-document.ts`
+ * writes for a reviewer's own answer off a schedule, and told the two apart by
+ * the DOCUMENT behind `source_id`: a `document` answer was in reach only when
+ * its run was a shop drawing, or when it had no run (a typed spec). That held
+ * while a shop drawing was the only document writing attributes. The bill, the
+ * schedules, the tracker and email then began to, each recomposing with its
+ * own run as the source, and from that moment their answers matched neither
+ * clause: no correction, retire, library edit or BW standard could reach them,
+ * and a retired bill fabric went on shipping through its answer. A rule that
+ * guesses provenance from a neighbouring column is right until the next
+ * feature, so the provenance is now a value of its own.
  *
  * A fill naming no question writes nothing and is not an error: a category may
  * simply not ask for that BWS field, and the attribute remains the record of
@@ -279,68 +297,26 @@ export async function applyAnswerFills(
     // confirmed: a card supplying only the height leaves a cell whose newest
     // slot may be another drawing's.
     const sourceRunId = fill.sourceRunId ?? runId;
-    // Two shapes of fill, two statements. One predicate doing both needed a
-    // `case` inside an `is not distinct from` and was unreadable, which is
-    // its own kind of bug in a rule about not overwriting somebody's work.
+    // Two shapes of fill, two statements: the composed dimensions cell is
+    // found by its BWS field's json_id (all five slots compose into it), every
+    // other fill by its own field. The guard is the same in both.
+    //
+    // THE GUARD: `missing`, or `attribute`. Nothing else, and in particular
+    // not `document`, which since 0050 is only ever a reviewer confirming a
+    // value off a specification document straight onto a question. `manual`
+    // is a person typing; `email` is a person confirming off a message with
+    // the message attached. All three are decisions, and a recompose never
+    // overwrites a decision.
     const rows =
       fill.jsonId !== null
         ? await txn`
             update spec_answers a
             set value = ${fill.value}, qualifier = ${fill.qualifier}, value_raw = ${fill.valueRaw}, state = ${fill.state},
                 confirmed_by = ${confirming ? actor : null}, confirmed_at = ${confirmedAt},
-                source_kind = 'document', source_id = ${sourceRunId}, updated_by = ${actor}
+                source_kind = 'attribute', source_id = ${sourceRunId}, updated_by = ${actor}
             where a.record_id = ${recordId}
               and a.revision_no = 0
-              -- NEVER a person's answer, and never another DOCUMENT KIND's.
-              -- manual is a person typing; email is a person confirming a
-              -- value off a message, with that message attached as evidence --
-              -- both are decisions and neither is in reach here.
-              -- document is also what confirm-spec-document.ts writes, so
-              -- matching on it alone would let a shop drawing quietly beat an
-              -- answer a reviewer confirmed off an FF&E schedule. Narrowed to
-              -- answers a DRAWINGS run wrote, which is exactly the set this
-              -- code may recompose as later slots arrive.
-              and (
-                a.state = 'missing'
-                -- ---- ANY document-composed cell, not only a drawing's ------
-                --
-                -- This branch is the COMPOSED DIMENSIONS CELL and nothing else
-                -- (jsonId is set instead of specFieldId for it alone). A
-                -- composed cell is a PROJECTION of the record's dimension
-                -- attributes, never an answer anybody authored, so it must
-                -- always equal their composition — letting it go stale is the
-                -- exact disagreement this file exists to prevent.
-                --
-                -- Narrowed against the case the drawings-only clause below
-                -- guards: that one is about a shop drawing beating a value a
-                -- reviewer CONFIRMED off a schedule, which is a decision. This
-                -- cell is not. An email giving W, D and H and a second email
-                -- giving SH must recompose to W x D x H x SH; before this, the
-                -- second email wrote its attribute and could not reach the
-                -- cell, so the record held four slots and its answer showed
-                -- three.
-                --
-                -- manual and email stay out of reach, so a person's own
-                -- checklist answer is still never overwritten.
-                or a.source_kind = 'document'
-                -- ---- AND AN ANSWER A HAND-TYPED SPEC COMPOSED (0028) -------
-                --
-                -- document with a NULL source is a precise discriminator and
-                -- not a loose one: every document path writes a run id, so the
-                -- only way to be here is createAttribute, where the attribute
-                -- names no document because a person typed it.
-                --
-                -- Without this clause the FIRST typed dimension wrote W1900mm
-                -- and the next two could never reach the cell -- the record
-                -- showed W, D and H while its Dimensions answer said W1900mm,
-                -- which is the exact disagreement this file exists to prevent,
-                -- arriving from the one direction it did not cover. Caught by
-                -- tests/db/manual-capture.test.ts.
-                --
-                -- manual and email stay out of reach, so a person's own
-                -- checklist answer is still never overwritten by anything.
-                or (a.source_kind = 'document' and a.source_id is null)
-              )
+              and (a.state = 'missing' or a.source_kind = 'attribute')
               and a.requirement_id in (
                 select q.id from requirements q
                 join spec_records r on r.id = ${recordId} and r.category_id = q.category_id
@@ -353,40 +329,10 @@ export async function applyAnswerFills(
             update spec_answers a
             set value = ${fill.value}, qualifier = ${fill.qualifier}, value_raw = ${fill.valueRaw}, state = ${fill.state},
                 confirmed_by = ${confirming ? actor : null}, confirmed_at = ${confirmedAt},
-                source_kind = 'document', source_id = ${sourceRunId}, updated_by = ${actor}
+                source_kind = 'attribute', source_id = ${sourceRunId}, updated_by = ${actor}
             where a.record_id = ${recordId}
               and a.revision_no = 0
-              -- NEVER a person's answer, and never another DOCUMENT KIND's.
-              -- document is also what confirm-spec-document.ts writes, so
-              -- matching on it alone would let a shop drawing quietly beat an
-              -- answer a reviewer confirmed off an FF&E schedule. Narrowed to
-              -- answers a DRAWINGS run wrote, which is exactly the set this
-              -- code may recompose as later slots arrive.
-              and (
-                a.state = 'missing'
-                or (a.source_kind = 'document'
-                    and exists (
-                      select 1 from intake_runs ir
-                      where ir.id = a.source_id and ir.document_kind = 'shop_drawings'
-                    ))
-                -- ---- AND AN ANSWER A HAND-TYPED SPEC COMPOSED (0028) -------
-                --
-                -- document with a NULL source is a precise discriminator and
-                -- not a loose one: every document path writes a run id, so the
-                -- only way to be here is createAttribute, where the attribute
-                -- names no document because a person typed it.
-                --
-                -- Without this clause the FIRST typed dimension wrote W1900mm
-                -- and the next two could never reach the cell -- the record
-                -- showed W, D and H while its Dimensions answer said W1900mm,
-                -- which is the exact disagreement this file exists to prevent,
-                -- arriving from the one direction it did not cover. Caught by
-                -- tests/db/manual-capture.test.ts.
-                --
-                -- manual and email stay out of reach, so a person's own
-                -- checklist answer is still never overwritten by anything.
-                or (a.source_kind = 'document' and a.source_id is null)
-              )
+              and (a.state = 'missing' or a.source_kind = 'attribute')
               and a.requirement_id in (
                 select q.id from requirements q
                 join spec_records r on r.id = ${recordId} and r.category_id = q.category_id
@@ -424,12 +370,13 @@ export async function applyAnswerFills(
  * answer goes back to `missing` — which is the honest state: nobody has looked
  * at this since the value was withdrawn.
  *
- * The same two protections as a fill, for the same reasons:
- *   * a PERSON'S answer is never retracted. If somebody typed it, it is
- *     theirs, and the change set records that it now stands on nothing.
- *   * only an answer a SHOP-DRAWINGS run wrote is in scope, so a value
- *     confirmed off an FF&E schedule is not withdrawn by a drawing being
- *     retired.
+ * The same protection as a fill, for the same reason: only an answer this
+ * code composed (`attribute`, 0050) is in scope. A person's answer, typed,
+ * confirmed off an email, or confirmed by a reviewer off a schedule straight
+ * onto the question, is never retracted; the change set records that it now
+ * stands on nothing. Until 0050 this asked for an answer a SHOP-DRAWINGS run
+ * wrote, so a retired BILL fabric kept its confirmed answer and the export,
+ * which falls back to the answer where no attribute holds a field, shipped it.
  * ============================================================================
  */
 export function planAnswerRetractions(attributes: PromotableAttribute[]): { specFieldId: string | null; jsonId: number | null }[] {
@@ -445,14 +392,12 @@ export function planAnswerRetractions(attributes: PromotableAttribute[]): { spec
 }
 
 /**
- * Puts back to `missing` any answer a shop drawing wrote whose BWS field the
+ * Puts back to `missing` any answer this code composed whose BWS field the
  * record's attributes no longer say anything about.
  *
  * Takes the fields that ARE still claimed, so one statement can clear
- * everything else this code owns. That is narrower than it looks: the
- * predicate still requires the answer to have been written by a shop-drawings
- * run, so a person's answer and an FF&E schedule's answer are both out of
- * reach.
+ * everything else this code owns, and nothing it does not: the predicate is
+ * `source_kind = 'attribute'`.
  */
 export async function applyAnswerRetractions(
   txn: TxnSql,
@@ -465,19 +410,15 @@ export async function applyAnswerRetractions(
 
   const rows = await txn`
     update spec_answers a
-    set value = null, value_raw = null, state = 'missing',
+    set value = null, qualifier = null, value_raw = null, state = 'missing',
         confirmed_by = null, confirmed_at = null,
-        source_kind = 'document', source_id = a.source_id, updated_by = ${actor}
+        source_kind = 'attribute', source_id = a.source_id, updated_by = ${actor}
     where a.record_id = ${recordId}
       and a.revision_no = 0
       and a.state <> 'missing'
-      -- Written by a SHOP DRAWING, and by nothing else. A person's answer and
-      -- an FF&E schedule's answer are both outside this.
-      and a.source_kind = 'document'
-      and exists (
-        select 1 from intake_runs ir
-        where ir.id = a.source_id and ir.document_kind = 'shop_drawings'
-      )
+      -- Composed by this code, and nothing else (0050). A person's answer,
+      -- and a reviewer's own answer off a schedule, are outside this.
+      and a.source_kind = 'attribute'
       -- And whose field no attribute still speaks to.
       and a.spec_field_id is not null
       and not exists (

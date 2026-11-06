@@ -55,7 +55,7 @@ export type FinishStandardResult = {
   /** Every active item carrying the code: what this reached. */
   recordsTouched: number;
   answersFilled: number;
-  /** Linked items whose answer a person typed, so it did not follow. */
+  /** Linked items whose answer a person owns (anything but `attribute`, 0050), so it did not follow. */
   recordsWithManualAnswers: { recordId: string; label: string }[];
   changeSetId: string;
 };
