@@ -260,7 +260,7 @@ function InboxView() {
         // visible, which is the 2026-09-15 precedent: asking per message was
         // ceremony rather than consent, and the decision belongs where a
         // morning's post can be seen at once.
-        subtitle="Mail addressed to a project's inbox, or forwarded from it, is assigned and read automatically the moment it arrives — one charged model call each. Anything placed by a subject reference or a known sender waits below for you to confirm."
+        subtitle="Mail addressed to a project's inbox, or forwarded from it, is assigned and read automatically the moment it arrives — one charged model call each. Anything placed by a subject reference, a known sender or a header any sender could have written, or past a project's daily cap of automatic reads, waits below for you to confirm."
         actions={
           // AN .eml IS UPLOADED ON THE PROJECT IT BELONGS TO, through the pack
           // upload, because a spec document arrives as part of a delivery and
@@ -556,11 +556,16 @@ function InboxView() {
                               asked to choose cannot see which project routing
                               meant. Named, and never PRESELECTED: the picker
                               still offers every project and chooses none, for
-                              the reason the ambiguous one does. */}
+                              the reason the ambiguous one does. WHY it was
+                              held is the reason above, which since audit A5 and
+                              A8 is one of three: a weak signal, an inbox named
+                              by a line any sender can write, or the project's
+                              daily cap on automatic reads. A fixed sentence
+                              here would contradict two of them. */}
                           {message.routing_status !== "ambiguous" && candidates.length > 0 && (
                             <span className="mt-1 block">
-                              Routing read it as {candidates.map((project) => project.bws_project_number).join(", ")} —
-                              held because that signal is not strong enough to spend a charged read on its own.
+                              Routing read it as {candidates.map((project) => project.bws_project_number).join(", ")}.
+                              Nothing has been read yet.
                             </span>
                           )}
                         </Td>

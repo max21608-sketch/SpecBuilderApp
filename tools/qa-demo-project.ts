@@ -86,7 +86,7 @@ import { loadExtractionRegisters } from "@/lib/spec-document-registers";
 import { resolveProposals, PROPOSAL_SCHEMA_VERSION } from "@/lib/spec-document";
 import { recordMessage } from "@/lib/email-ingest";
 import { emailRegistrationKey } from "@/lib/email-registration";
-import { autoAssignDecision, describeAutoAssignment, ROUTER_ACTOR } from "@/lib/email-routing";
+import { autoAssignDecision, describeAutoAssignment, describeHeld, ROUTER_ACTOR } from "@/lib/email-routing";
 import { createFinish } from "@/lib/finish-edit";
 import { openChangeSet } from "@/lib/change-sets";
 import { takeBaseline } from "@/lib/baselines";
@@ -1073,6 +1073,9 @@ for (const raw of INBOX) {
     storagePath,
     mimeSize: bytes.byteLength,
     actor: ACTOR,
+    // Standing in for Graph, so the recipients Graph would REPORT go with it:
+    // routing trusts only those to place a message by itself (audit A8).
+    reportedRecipients: [...message.to, ...(message.cc ?? [])],
   });
   // What an ARRIVING message of this shape would have done. This script assigns
   // nothing here, so the line is a statement about the app's rule, not about
@@ -1081,7 +1084,7 @@ for (const raw of INBOX) {
   const outcome = decision.assign
     ? `${describeAutoAssignment(decision.signal)} (arriving; this script assigns nothing)`
     : recorded.routing.status === "assigned"
-      ? `held — ${recorded.routing.evidence}; that signal is not strong enough to spend a charged read`
+      ? `held — ${recorded.routing.evidence}. ${describeHeld(decision) ?? ""}`
       : recorded.routing.status;
   say(`  ${message.subject.slice(0, 40)}`, outcome);
 }
@@ -1103,6 +1106,7 @@ say("inbox", `${INBOX.length} messages, all held`);
     mimeSize: bytes.byteLength,
     actor: ACTOR,
     intendedProjectId: projectId,
+    reportedRecipients: [...reviewEmail.to, ...(reviewEmail.cc ?? [])],
   });
 
   // Copied under the project's own prefix, never moved: the mailbox path is

@@ -14,7 +14,7 @@
 // A blank cell reads as a document nobody has got to yet.
 // ============================================================================
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import InboxPage from "@/app/dashboard/inbox/page";
 
 const replace = vi.fn();
@@ -210,6 +210,36 @@ describe("the inbox — an automatic assignment", () => {
     expect(screen.getByText(/Routing read it as AP401/)).toBeInTheDocument();
     const picker = screen.getByLabelText(/Which project FW: client comments/);
     expect(picker).toHaveValue("");
+  });
+
+  // audit A1: a message taken off a project keeps the run that project read.
+  // Putting it back there reads nothing; anywhere else is a new charged read.
+  // The button has to say which BEFORE the click.
+  it("says putting a message back on the project that read it costs nothing", async () => {
+    const held = PAYLOAD.messages.find((m) => m.id === "msg-3")!;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ...PAYLOAD,
+              messages: PAYLOAD.messages.map((m) => (m === held ? { ...m, read_on: ["proj-1"] } : m)),
+              projects: [...PAYLOAD.projects, { id: "proj-2", bws_project_number: "AP402", name: "Elsewhere" }],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+    render(<InboxPage />);
+    const picker = await screen.findByLabelText(/Which project FW: client comments/);
+    fireEvent.change(picker, { target: { value: "proj-1" } });
+    expect(screen.getByRole("button", { name: "Put it back" })).toBeInTheDocument();
+    expect(screen.getByText("Already read on AP401: putting it back there reads nothing.")).toBeInTheDocument();
+
+    fireEvent.change(picker, { target: { value: "proj-2" } });
+    expect(screen.getByRole("button", { name: "Assign & read" })).toBeInTheDocument();
+    expect(screen.getByText("Reading it again on AP402 is a charged read.")).toBeInTheDocument();
   });
 
   it("says a deferred read is waiting for a slot, not reading and not failed", async () => {

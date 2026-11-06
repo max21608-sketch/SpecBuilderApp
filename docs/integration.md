@@ -83,6 +83,8 @@ checks the happy path cannot tell a scoped grant from an unscoped one.
 | `GRAPH_CLIENT_ID` | The app registration for **this** app |
 | `GRAPH_CLIENT_SECRET` | Rotates on expiry; nothing warns you |
 | `GRAPH_MAILBOX` | The single mailbox, e.g. `p17231@benwhistler.com` |
+| `GRAPH_CLIENT_STATE` | **Required.** The secret Graph echoes on every notification (32+ random characters, one per environment). Without it creating or renewing the subscription refuses as "not configured" and the webhook accepts nothing. Only its hash is stored; rotating it means recreating the subscription |
+| `AUTO_READ_DAILY_CAP` | Optional. Charged reads one project may start by itself per UTC day before routed mail is held for a person (default **20**, Max 2026-11-06). A person's Assign is never capped |
 
 Set these in every hosted environment that will run the code, **before**
 deploying the code that needs them. Changing a variable does not alter an
@@ -112,6 +114,53 @@ person:
 - [ ] Reading the mailbox left every message **unread** in Outlook.
 - [ ] The audit trail names the ingestion as a system actor, distinguishable
       from a person.
+
+### The spend guards (audit 2026-11-06, A1, A5, A8, B8)
+
+Routed mail starts a charged read with nobody watching, so these are checked
+with real messages before ingestion is left on. Each says what to send and what
+must happen. The Inbox screen shows every outcome; a held message is on the
+"Could not be placed" list with its sentence.
+
+1. **A forged forwarding header is held.** From an address OUTSIDE the
+   organisation, send a message to the app mailbox carrying
+   `X-Forwarded-To: <a project inbox>` (and, separately, `Resent-To:` and
+   `X-MS-Exchange-Inbox-Rules-Loop:` naming it). Each must be HELD, naming the
+   project, with "any sender can write" in its reason, and start no read.
+2. **A real forward is assigned, and says why.** Let the project inbox's own
+   rule forward (or redirect) a message to the app mailbox. It must be
+   assigned automatically. Then download its `.eml` from the Inbox row, read the
+   headers, and confirm
+   `X-MS-Exchange-Organization-AutoForwarded: true` is present: that stamp is
+   the ONLY thing the router now trusts for a forward. If this organisation's
+   rule shape does not carry it, every forward will be held (safe, but a click
+   each); record what the headers DO carry in `docs/plans/README.md` before
+   widening the rule, never instead of it.
+3. **A To line naming a project inbox, delivered elsewhere, is held.** From
+   outside, deliver to the app mailbox ONLY while the `To:` header names a
+   project inbox (an ordinary mail client cannot do this, because it delivers
+   to whatever To says; a test tool can, e.g. `swaks --to <app mailbox>
+   --header "To: <project inbox>"`, or a plain Bcc to the app mailbox). It
+   must be HELD. Confirm Exchange stamped
+   `X-MS-Exchange-Organization-Recipient-P2-Type: Bcc` on the Bcc case; that
+   header is what holds it. Record what the swaks case carries: Graph's
+   reported recipients are Exchange's reading of the same To line, so if
+   nothing stamped marks that shape, the cap in step 4 is its only bound.
+4. **The daily cap holds rather than drops.** On a TEST project, set
+   `AUTO_READ_DAILY_CAP=1` (fresh build), send two messages to its inbox. The
+   first is assigned and read; the second is HELD with "The automatic-read cap
+   for this project (1 a day) is reached; a person starts this read", and
+   pressing Assign on it starts the read. Put the variable back.
+5. **The same email twice is one message.** Send one message so it reaches the
+   app mailbox by two routes (to the project inbox AND cc'd to the app
+   mailbox), and upload its saved `.eml` on the project too. There must be ONE
+   inbox row and ONE read; the upload says "This email is already in the inbox
+   as …".
+6. **A message taken off a project can be put on another.** Unassign an
+   automatically placed message and assign it to a different project: the
+   button reads "Reading it again on P… is a charged read", a new read starts
+   on that project, and its `.eml` opens. Assign it back to the first: "Put it
+   back", and nothing is read.
 
 ## Failure handling and rollback
 

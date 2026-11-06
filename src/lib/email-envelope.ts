@@ -49,6 +49,15 @@ export type EmailEnvelope = {
   textBody: string | null;
   htmlBody: string | null;
   attachments: EmailAttachmentMeta[];
+  /**
+   * The To and Cc addresses Microsoft Graph REPORTED for the delivered item
+   * (`toRecipients` / `ccRecipients`), lowercased. Absent on anything that did
+   * not arrive through Graph: an uploaded `.eml` is bytes a person handed us,
+   * and nothing but the headers it carries says who it was sent to. Routing
+   * reads it as the evidence the mailbox's own server stands behind; see
+   * `email-routing.ts`, "WHICH EVIDENCE MAY SPEND MONEY".
+   */
+  reportedRecipients?: string[] | null;
 };
 
 /**

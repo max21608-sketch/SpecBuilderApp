@@ -83,6 +83,7 @@ import { sql } from "@/lib/db";
 import { DomainConflictError, withTransaction, type TxnSql } from "@/lib/db-transaction";
 import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
 import { takeReadSlot, deferRead } from "@/lib/extraction-slots";
+import { autoReadCapSentence, autoReadDailyCap, isAutomaticActor, takeAutomaticRead } from "@/lib/auto-read-cap";
 import {
   assertMailboxScopedPathname,
   assertProjectScopedPathname,
@@ -318,6 +319,19 @@ async function assignInTransaction(
       returning id
     `;
     attachmentId = attachment[0] ? String(attachment[0].id) : null;
+  }
+
+  // A READ NOBODY PRESSED ANYTHING FOR IS COUNTED (audit A5). Over the
+  // project's daily cap the assignment is refused HERE, before a run exists,
+  // and the router's caller holds the message with this sentence and the
+  // project named, where one click on the inbox is a person's read. Checked
+  // after the re-link above, because putting a message back on a run it
+  // already has reads nothing and spends nothing.
+  if (isAutomaticActor(input.actor)) {
+    const cap = autoReadDailyCap();
+    if (!(await takeAutomaticRead(txn, input.projectId, cap))) {
+      throw new DomainConflictError("auto_read_cap", autoReadCapSentence(cap), { status: 429 });
+    }
   }
 
   const run = await txn`
