@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -53,14 +56,14 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
-    "@neondatabase/serverless": "^0.10.4",
+    "@neondatabase/serverless": "0.10.4",
     "@vercel/blob": "^2.6.1",
-    "@vercel/queue": "^0.4.0",
+    "@vercel/queue": "0.4.0",
     "csv-parse": "^7.0.2",
     "exceljs": "^4.4.0",
     "jose": "^5.9.6",
     "jszip": "^3.10.2",
-    "next": "^15.1.4",
+    "next": "^15.5.25",
     "pdfjs-dist": "^4.10.38",
     "pg": "^8.13.1",
     "postal-mime": "^3.0.0",

@@ -160,6 +160,13 @@ refuses.
 
 Run these in order. Nothing here is automatic.
 
+0. **CI green on the SHA, db tier included.** On GitHub, the commit's checks
+   must show BOTH jobs of the CI workflow passed: `check` (lint, typecheck,
+   the pure and component tiers, the build) and `db-tier` (the whole suite
+   with the database tier required, against a throwaway Postgres). `check`
+   alone is not enough: until 2026-11-06 it was the whole of CI, and every
+   database-tier test skipped behind its green tick (audit H1). A SHA whose
+   `db-tier` is red, missing or still running is not promoted.
 1. **Back up the pilot database.**
    `node --env-file=.env.pilot.local db/backup.mjs --yes-pilot`
    Read the `Target: DATABASE_ENVIRONMENT=pilot (<host>)` line it prints before
@@ -194,6 +201,49 @@ Run these in order. Nothing here is automatic.
 If step 2 was skipped and step 8 finds a broken screen, the app is ahead of its
 schema. Apply the migration and redeploy; do not roll the code back first, or
 the ledger and the code disagree in the other direction.
+
+**What holds the order, and what Max turns on.** The checklist says pilot only
+fast-forwards to a commit already on staging. Two things now check it, and one
+setting is what would actually stop a breach:
+
+- `.github/workflows/pilot-is-ancestor.yml` runs on every push to `pilot` and
+  daily, and fails with both SHAs named when `pilot` is not an ancestor of
+  `staging` (`git merge-base --is-ancestor`). It reports; it cannot refuse a
+  push.
+- **Max turns on**, in GitHub under the repository's Settings, Branches, a
+  branch protection rule for the pattern `pilot` (or the same under Rules,
+  Rulesets, targeting the branch `pilot`):
+  - *Allow force pushes*: **off** (a ruleset says *Block force pushes*: on).
+  - *Allow deletions*: **off** (*Restrict deletions*: on).
+  - *Require linear history*: **on**. A fast-forward is linear; a merge
+    commit made on pilot is refused.
+  - *Require status checks to pass before merging*: **on**, with the two
+    checks `check` and `db-tier` from the CI workflow. On a branch that is
+    pushed to directly, as pilot is, this refuses a push of a commit whose
+    checks have not passed (they ran when the commit reached staging, and
+    GitHub keeps them on the commit), which makes "CI green on the SHA" a
+    rule rather than a reminder. Leave *Require branches to be up to date* off: pilot is never
+    merged into.
+  - *Do not allow bypassing the above settings*: Max's call. Off leaves an
+    admin a way round in an emergency, and using it is a decision to write
+    down; on holds everybody, Max included.
+
+  The same first two (no force push, no deletion) are worth having on
+  `staging`, which every pilot commit must come from.
+
+**Node.** `package.json` declares `"engines": { "node": "22.x" }`, the
+version both CI jobs run (`actions/setup-node`, `node-version: 22`). Max's
+Mac runs Node 24, which is newer and runs everything here; npm only warns
+about the mismatch (`engine-strict` is off), and the warning is the reminder
+that what CI proves is Node 22.
+
+**Vercel reads that field too, and it wins over the project setting.** A
+Vercel project builds and runs with the Node major `engines.node` names,
+whatever its *Node.js Version* setting says. Neither project's setting is
+recorded in this repo, so the first staging deployment after the field landed
+is the check: its build log prints the Node version, and it should read 22.
+If a project had been on 24, this field moved it to 22, which is the version
+CI proves.
 
 ## Creating the pilot environment
 

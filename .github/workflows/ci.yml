@@ -1,14 +1,37 @@
-# The fabric-ordering app has no CI: lint, typecheck and test are run by hand,
-# which means they are run when someone remembers. Start with it instead.
+# Two jobs, and both must pass.
 #
-# Database-tier tests skip without DATABASE_URL and that is correct here -- CI
-# has no sandbox to point at, and pointing it at a shared one would let two
-# runs race. Logic that must not go untested belongs in the pure tier.
+# `check` is the fast one: lint, typecheck, the pure and component tiers, and
+# a build, with no database. Its `npm test` SKIPS every file under tests/db,
+# which is correct for it and was, until 2026-11-06, the whole of CI: the
+# confirm paths, the export scope, the change-history coverage assertion and
+# every CHECK guard skipped behind a green tick on every push (audit H1).
+#
+# `db-tier` is the suite with the database tier REQUIRED. It needs no sandbox,
+# and must never have one: the sandbox is company data, and a shared database
+# lets two runs race. It runs the LOCAL STACK instead (docs/environments.md),
+# the same pieces `npm run checks:local` runs on a Mac:
+#
+#   - a throwaway Postgres 17, the major Neon runs for sandbox and pilot;
+#   - db/run-migrations.mjs and db/run-seed.mjs, which print the host and
+#     refuse without DATABASE_ENVIRONMENT. It is declared `sandbox` because
+#     src/lib/env.ts pairs `development` with nothing else; the HOST,
+#     localhost, is what makes it safe. Neither flag that unlocks pilot or
+#     production is ever passed here;
+#   - tools/localstack/ci.mjs, which starts the stack server and runs vitest
+#     with the preload. src/lib/db.ts speaks Neon's HTTP protocol, which a
+#     plain Postgres cannot answer, and the stack server answers it.
+#
+# No model key, Graph secret or Capsule token is set, and ci-env.mjs takes
+# them out if one ever is: nothing in the suite may call the model, and
+# tests/manual/verify-model.test.ts stays skipped without VERIFY_MODEL=1.
+#
+# The deploy targets are `staging` and `pilot`; this repo has no other branch
+# that deploys.
 name: CI
 
 on:
   push:
-    branches: [staging, main]
+    branches: [staging, pilot]
   pull_request:
 
 jobs:
@@ -28,3 +51,41 @@ jobs:
         env:
           APP_ENV: development
           DATABASE_ENVIRONMENT: sandbox
+
+  db-tier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          # Trust on the loopback port, as Postgres.app does on the Mac the
+          # local stack was built on: the URL carries no password, and the
+          # container is destroyed with the job.
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: specbuilder_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d specbuilder_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      LOCAL_STACK: "1"
+      APP_ENV: development
+      DATABASE_ENVIRONMENT: sandbox
+      DATABASE_URL: postgres://postgres@localhost:5432/specbuilder_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply every migration
+        run: node db/run-migrations.mjs
+      - name: Seed the requirement matrix and vocabularies
+        run: node db/run-seed.mjs
+      - name: The whole suite, database tier required
+        run: node tools/localstack/ci.mjs

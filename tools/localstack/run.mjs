@@ -20,19 +20,22 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const repoRoot = path.resolve(here, "..", "..");
 const preloadUrl = pathToFileURL(path.join(here, "preload.mjs")).href;
 
-export function localStackEnv(extra = {}) {
-  assertLocalStack("a local-stack command");
+// `base` is the environment the child starts from: process.env for every
+// launcher but CI, whose `ci.mjs` hands in the env `ci-env.mjs` built (keys
+// taken OUT, which spreading `extra` over process.env cannot do).
+export function localStackEnv(extra = {}, base = process.env) {
+  assertLocalStack("a local-stack command", base);
   for (const name of [".env", ".env.local", ".env.development", ".env.development.local"]) {
     if (existsSync(path.join(repoRoot, name))) {
       console.warn(`[localstack] ${name} exists in this checkout; it is NOT loaded (__NEXT_PROCESSED_ENV is set).`);
     }
   }
-  const nodeOptions = [process.env.NODE_OPTIONS, `--import=${preloadUrl}`].filter(Boolean).join(" ");
+  const nodeOptions = [base.NODE_OPTIONS, `--import=${preloadUrl}`].filter(Boolean).join(" ");
   return {
-    ...process.env,
+    ...base,
     NODE_OPTIONS: nodeOptions,
     __NEXT_PROCESSED_ENV: "true",
-    FORCE_COLOR: process.env.FORCE_COLOR ?? "1",
+    FORCE_COLOR: base.FORCE_COLOR ?? "1",
     ...extra,
   };
 }
