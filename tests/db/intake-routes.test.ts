@@ -68,10 +68,21 @@ describeIfDb("intake routes", () => {
         [projectId],
       )
     ).rows[0].id;
+    // BY SLUG, never by uuid order. `order by c.id limit 1` picked whichever
+    // category's random uuid sorted first: dining tables on the shared local
+    // database, bar and counter stools on a fresh one (the CI rehearsal,
+    // 2026-11-06). Stools are on Matthew's matrix, where a level-less record
+    // HAS a TGQ count, so the level tests below asserted null over 8 and
+    // failed only on the database that had rolled the other uuid. Dining
+    // tables is a cabinetry sheet his matrix does not map (seed 0005), which
+    // is what those tests are about: the placeholder half of TGQ, where a
+    // record needs a level before anything is tiered.
     categoryId = (
       await client.query(
-        `select c.id from item_categories c join requirements q on q.category_id = c.id
-         group by c.id having count(q.id) >= 1 order by c.id limit 1`,
+        `select c.id from item_categories c
+          where c.slug = 'dining-tables'
+            and exists (select 1 from requirements q where q.category_id = c.id)
+            and not exists (select 1 from spec_matrix_category_map m where m.item_category_id = c.id)`,
       )
     ).rows[0].id;
     const fieldRows = await client.query(`select id, json_id, name from spec_fields order by sort_order`);
@@ -1272,8 +1283,10 @@ describeIfDb("intake routes", () => {
       `update spec_answers set state = 'tbc', value = '__QA TBC', updated_by = 'qa' where id = $1`,
       [answer.rows[0].id],
     );
+    // Another seeded sheet by slug, for the reason the fixture's own category
+    // is chosen by slug: uuid order can land on a leftover __qa category.
     const other = await client.query(
-      `select id from item_categories where id <> $1 order by id limit 1`, [categoryId],
+      `select id from item_categories where slug = 'side-coffee-bedside-tables' and id <> $1`, [categoryId],
     );
 
     const { PATCH } = await import("@/app/api/records/[id]/route");
