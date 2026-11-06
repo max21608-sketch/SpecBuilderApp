@@ -7,8 +7,10 @@
 // drops the database job, the seed, or the pilot trigger fails here rather
 // than going green again in silence. And `ciStackEnv` is the half of the CI
 // run that is code, held directly.
-import { readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { CI_STRIPPED, ciStackEnv } from "../../tools/localstack/ci-env.mjs";
@@ -18,14 +20,14 @@ import { CI_STRIPPED, ciStackEnv } from "../../tools/localstack/ci-env.mjs";
 const requireHere = createRequire(import.meta.url);
 const yaml = requireHere("js-yaml") as { load(text: string): unknown };
 
-type Step = { name?: string; run?: string; uses?: string; env?: Record<string, string> };
+type Step = { name?: string; run?: string; uses?: string; with?: Record<string, unknown>; env?: Record<string, string> };
 type Job = {
   "runs-on": string;
   env?: Record<string, string | undefined>;
   services?: Record<string, { image: string; env?: Record<string, string> }>;
   steps: Step[];
 };
-type Workflow = { on: Record<string, unknown>; jobs: Record<string, Job> };
+type Workflow = { on: Record<string, unknown>; jobs: Record<string, Job>; permissions?: unknown };
 
 const root = path.resolve(__dirname, "../..");
 const read = (file: string) => readFileSync(path.join(root, file), "utf8");
@@ -159,5 +161,88 @@ describe("ciStackEnv", () => {
     expect(env.EMAIL_MODE).toBe("disabled");
     expect(env.MAIL_INGESTION_MODE).toBe("disabled");
     expect(env.AUTH_SECRET).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+// Pilot only ever fast-forwards to a commit already on staging (audit H10).
+// The job checks it; branch protection (docs/environments.md) enforces it.
+describe("pilot-is-ancestor.yml", () => {
+  const text = read(".github/workflows/pilot-is-ancestor.yml");
+  const workflow = yaml.load(text) as Workflow;
+
+  it("runs on a push to pilot and on a daily schedule", () => {
+    expect((workflow.on.push as { branches: string[] }).branches).toEqual(["pilot"]);
+    const schedule = workflow.on.schedule as { cron: string }[];
+    expect(schedule).toHaveLength(1);
+    // minute hour * * *: once a day.
+    expect(schedule[0]!.cron).toMatch(/^\d+ \d+ \* \* \*$/);
+  });
+
+  it("asks git whether pilot is an ancestor of staging, after fetching full history", () => {
+    const job = Object.values(workflow.jobs)[0]!;
+    const checkout = job.steps.find((s) => s.uses?.startsWith("actions/checkout"));
+    expect(checkout?.with?.["fetch-depth"]).toBe(0);
+    const script = runLines(job).join("\n");
+    expect(script).toContain('git merge-base --is-ancestor "$pilot" "$staging"');
+    expect(script).toContain("exit 1");
+  });
+
+  it("can only read the repository", () => {
+    expect(workflow.permissions).toEqual({ contents: "read" });
+  });
+});
+
+// The step's own shell, run against a scratch repository with an `origin`,
+// so the sentence and the exit code are what a real breach would produce.
+describe("pilot-is-ancestor.yml, its script run against a scratch repository", () => {
+  const workflow = yaml.load(read(".github/workflows/pilot-is-ancestor.yml")) as Workflow;
+  const job = Object.values(workflow.jobs)[0]!;
+  const script = job.steps.find((s) => s.run?.includes("merge-base"))!.run!;
+
+  function scratch() {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "pilot-ancestor-"));
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", args, {
+        cwd,
+        encoding: "utf8",
+        env: { ...process.env, GIT_AUTHOR_NAME: "qa", GIT_AUTHOR_EMAIL: "qa@invalid", GIT_COMMITTER_NAME: "qa", GIT_COMMITTER_EMAIL: "qa@invalid" },
+      }).trim();
+    const origin = path.join(dir, "origin.git");
+    const work = path.join(dir, "work");
+    execFileSync("git", ["init", "--bare", "-q", origin]);
+    execFileSync("git", ["clone", "-q", origin, work]);
+    const commit = (message: string) => {
+      git(work, "commit", "-q", "--allow-empty", "-m", message);
+      return git(work, "rev-parse", "HEAD");
+    };
+    const run = () =>
+      spawnSync("bash", ["-e", "-c", script], { cwd: work, encoding: "utf8" });
+    return { dir, git, work, commit, run };
+  }
+
+  it("passes when pilot is behind staging, and fails naming both SHAs when it is not on it", () => {
+    const repo = scratch();
+    try {
+      repo.git(repo.work, "checkout", "-q", "-b", "staging");
+      const first = repo.commit("one");
+      repo.git(repo.work, "push", "-q", "origin", `${first}:refs/heads/pilot`);
+      const second = repo.commit("two");
+      repo.git(repo.work, "push", "-q", "origin", "staging");
+
+      const ok = repo.run();
+      expect(ok.status, ok.stderr).toBe(0);
+      expect(ok.stdout).toContain(`pilot (${first}) is on staging (${second}).`);
+
+      // A commit made on pilot alone.
+      repo.git(repo.work, "checkout", "-q", "-b", "pilot-only", first);
+      const stray = repo.commit("only on pilot");
+      repo.git(repo.work, "push", "-q", "-f", "origin", `${stray}:refs/heads/pilot`);
+
+      const bad = repo.run();
+      expect(bad.status).toBe(1);
+      expect(bad.stdout).toContain(`pilot is at ${stray}, which is not on staging (${second})`);
+    } finally {
+      rmSync(repo.dir, { recursive: true, force: true });
+    }
   });
 });

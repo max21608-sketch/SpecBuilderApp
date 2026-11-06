@@ -1,0 +1,48 @@
+# Pilot only ever moves forward, to a commit already on staging
+# (docs/environments.md, "Promoting to pilot"). Until 2026-11-06 nothing but
+# that checklist held it (audit H10): a commit that exists only on `pilot` is
+# a build nobody can reproduce from staging, and the next fast-forward is then
+# refused with no sentence saying why.
+#
+# This job is the check, not the guard. The GUARD is branch protection on
+# `pilot` (no force-push, linear history), a GitHub setting rather than a file;
+# docs/environments.md lists exactly what to turn on. This job says, on every
+# push to pilot and once a day, whether the two branches still stand in the
+# order the checklist promises, naming both SHAs when they do not.
+#
+# Two GitHub rules decide when it fires: a push runs the copy of this file IN
+# THE PUSHED COMMIT, so it starts checking pilot pushes once pilot has been
+# fast-forwarded past the commit that adds it; and a schedule runs only from
+# the default branch's copy.
+name: Pilot is an ancestor of staging
+
+on:
+  push:
+    branches: [pilot]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ancestor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: pilot is on staging
+        run: |
+          git fetch --no-tags origin \
+            +refs/heads/pilot:refs/remotes/origin/pilot \
+            +refs/heads/staging:refs/remotes/origin/staging
+          pilot=$(git rev-parse origin/pilot)
+          staging=$(git rev-parse origin/staging)
+          if git merge-base --is-ancestor "$pilot" "$staging"; then
+            echo "pilot ($pilot) is on staging ($staging)."
+          else
+            echo "::error::pilot is at $pilot, which is not on staging ($staging). Pilot only ever fast-forwards to a commit already on staging. Find out how $pilot got there before promoting again, and never force either branch to hide it."
+            exit 1
+          fi
