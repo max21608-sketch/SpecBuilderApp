@@ -66,15 +66,47 @@ export function blobPathname(storagePath: string): string {
 }
 
 /**
+ * What a pathname may look like at all, before anybody asks whose it is.
+ *
+ * THE TRAP (audit A7). The SDK does not encode a pathname: `get` builds
+ * `https://<store>.blob.vercel-storage.com/<pathname>` by concatenation and
+ * fetches it, and a URL parser RESOLVES `%2e%2e` as a dot-dot segment. So
+ * `projects/<this>/%2e%2e/<other>/x.pdf` passed a check for a literal `..`,
+ * passed the prefix check, and was fetched as `projects/<other>/x.pdf`. A
+ * literal `?` or `#` cuts the URL short the same way, at a different file.
+ *
+ * So the rules are about what a URL parser would DO with the string: no
+ * percent-encoded octet, no `?` or `#`, no backslash, no control character,
+ * and no segment that is empty, `.` or `..`. Everything else is allowed,
+ * deliberately. An ASCII allowlist was the obvious fix and it is wrong here:
+ * the intake upload stores a client's document under the name the client gave
+ * it, so `Ronnie Scott’s – Drawings.pdf` is a real pathname in a real project,
+ * and refusing its apostrophe would make the document unreadable by its own
+ * project. A stored full URL is decoded by `blobPathname` before it gets here,
+ * so a pathname legitimately holds no encoding at all.
+ */
+export function assertPathnameShape(pathname: string): string {
+  const clean = pathname.replace(/^\/+/, "");
+  if (
+    clean.length === 0 ||
+    /%[0-9A-Fa-f]{2}/.test(clean) ||
+    /[?#\\]/.test(clean) ||
+    // eslint-disable-next-line no-control-regex
+    /[\u0000-\u001f\u007f]/.test(clean) ||
+    clean.split("/").some((segment) => segment === "" || segment === "." || segment === "..")
+  ) {
+    throw new UntrustedBlobError("That file reference is not valid.");
+  }
+  return clean;
+}
+
+/**
  * The scope check. Called at token issue, at registration, and again on every
  * read — three times deliberately, because each is reached by a different route
  * and a check that lives in only one of them is a check the other two skipped.
  */
 export function assertProjectScopedPathname(pathname: string, projectId: string): string {
-  const clean = pathname.replace(/^\/+/, "");
-  if (clean.includes("..") || clean.includes("\\")) {
-    throw new UntrustedBlobError("That file reference is not valid.");
-  }
+  const clean = assertPathnameShape(pathname);
   if (!clean.startsWith(projectUploadPrefix(projectId))) {
     throw new UntrustedBlobError("That file does not belong to this project.");
   }
@@ -101,10 +133,7 @@ export const MAILBOX_PREFIX = "mailbox/";
  * not trusted because of where it was read from.
  */
 export function assertMailboxScopedPathname(pathname: string): string {
-  const clean = pathname.replace(/^\/+/, "");
-  if (clean.includes("..") || clean.includes("\\")) {
-    throw new UntrustedBlobError("That file reference is not valid.");
-  }
+  const clean = assertPathnameShape(pathname);
   if (!clean.startsWith(MAILBOX_PREFIX)) {
     throw new UntrustedBlobError("That file is not one the mailbox stored.");
   }
