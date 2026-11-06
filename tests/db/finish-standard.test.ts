@@ -34,6 +34,7 @@ import { composeCheckSheet, CHECK_SHEET_HEADER } from "@/lib/export-check-sheet"
 import { diffSnapshots, parseAtoms } from "@/lib/snapshot-diff";
 import { sql } from "@/lib/db";
 import { POST as standardRoute } from "@/app/api/projects/[id]/finishes/[finishId]/standard/route";
+import type { VerifiedEvidence } from "@/lib/change-sets";
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
@@ -288,7 +289,13 @@ describeIfDb("BW's own finish, set once per code", () => {
           projectId,
           finishId,
           expectedVersion: Number(finish.version),
-          evidence: { pathname: `projects/${projectId}/evidence/__qa-yes.eml`, filename: "__qa-yes.eml" },
+          // What `verifyEvidence` returns for a file the store holds: the
+          // store is not this tier's, and the HEAD is proved in the pure tier.
+          evidence: {
+            pathname: `projects/${projectId}/evidence/__qa-yes.eml`,
+            filename: "__qa-yes.eml",
+            stored: { size: 120, contentType: "message/rfc822" },
+          } as VerifiedEvidence,
           actor: "qa",
         }),
       );

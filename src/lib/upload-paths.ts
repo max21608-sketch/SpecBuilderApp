@@ -28,7 +28,6 @@ export function projectUploadPrefix(projectId: string): string {
  */
 export function pathnameSafeName(name: string): string {
   const safe = name
-    // eslint-disable-next-line no-control-regex
     .replace(/[#?\\/\u0000-\u001f\u007f]/g, "_")
     .replace(/%(?=[0-9A-Fa-f]{2})/g, "_")
     .trim();

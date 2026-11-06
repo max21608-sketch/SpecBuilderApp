@@ -6,6 +6,14 @@
 // hands over a pathname it has just uploaded under this project's prefix, and
 // the server re-checks that before it will attach it to anything.
 //
+// THE TYPE AND THE SIZE ARE THE STORE'S (audit A2, A15). The browser's
+// declared `contentType` was stored verbatim and served back inline, which let
+// an editor attach a script as a swatch. The pathname is now HEADed before
+// anything is written: a file the store never received is refused, and so is
+// one the store does not call a picture (`picture-types.ts`). The `filename`,
+// `contentType` and `size` a request carries are accepted for older screens
+// and believed for nothing.
+//
 // REPLACING SUPERSEDES, never deletes. A record version may point at the old
 // row, and a version whose picture had been deleted would be a version of a
 // state nobody can see any more.
@@ -13,8 +21,15 @@ import { sql, json } from "@/lib/db";
 import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
-import { assertProjectScopedPathname, blobPathname, streamTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
+import {
+  assertProjectScopedPathname,
+  blobPathname,
+  headTrustedBlob,
+  streamTrustedBlob,
+  UntrustedBlobError,
+} from "@/lib/blob-source";
 import { openChangeSet } from "@/lib/change-sets";
+import { isPictureContentType, pictureServing } from "@/lib/picture-types";
 
 export const dynamic = "force-dynamic";
 
@@ -42,9 +57,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const source = await streamTrustedBlob(blobPathname(String(row.storage_path)), String(row.project_id), {
       range: request.headers.get("range"),
     });
+    // Inline only when the STORED type is a picture: a row written before the
+    // POST took the store's word still holds whatever a browser declared.
+    const served = pictureServing(String(row.content_type || source.contentType || ""));
     const headers = new Headers({
-      "content-type": String(row.content_type || source.contentType || "image/png"),
-      "content-disposition": "inline",
+      "content-type": served.contentType,
+      "content-disposition": served.inline ? "inline" : "attachment",
       "accept-ranges": "bytes",
       // NDA-covered client material, and re-fetched once per library row.
       "cache-control": "private, max-age=3600",
@@ -59,6 +77,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     return json({ ok: false, error: "That image could not be read." }, 502);
   }
 }
+
+/** A swatch is a chip of cloth, not a drawing sheet. Comfortably above a full-page crop. */
+const MAX_SWATCH_BYTES = 15 * 1024 * 1024;
 
 const Body = z
   .object({
@@ -89,6 +110,29 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return json({ ok: false, error: "Say where this picture came from — the document and page." }, 400);
   }
 
+  // THE STORE IS ASKED BEFORE THE TRANSACTION: blob I/O inside one holds a
+  // row lock across a network call (`assignMessage`'s rule). The project comes
+  // from the finish, never from the request, and is re-checked under the lock.
+  const owner = await sql`select project_id from project_finishes where id = ${id}`;
+  if (!owner[0]) return json({ ok: false, error: "No such finish." }, 404);
+  const projectId = String(owner[0].project_id);
+  let pathname: string;
+  try {
+    pathname = assertProjectScopedPathname(parsed.data.pathname, projectId);
+  } catch {
+    return json({ ok: false, error: "That image is not one of this project's files." }, 400);
+  }
+  const stored = await headTrustedBlob(pathname, projectId).catch(() => null);
+  if (!stored) {
+    return json({ ok: false, error: "That picture never reached the document store. Choose it again." }, 400);
+  }
+  if (!isPictureContentType(stored.contentType)) {
+    return json({ ok: false, error: "That file is not a picture. Choose a PNG, JPEG, GIF or WebP image." }, 400);
+  }
+  if (stored.size > MAX_SWATCH_BYTES) {
+    return json({ ok: false, error: "That picture is larger than 15 MB. Crop it smaller and choose it again." }, 400);
+  }
+
   try {
     const result = await withTransaction(async (txn) => {
       const rows = await txn`
@@ -96,12 +140,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       `;
       const finish = rows[0];
       if (!finish) throw new DomainConflictError("not_found", "No such finish.", { status: 404 });
-      const projectId = String(finish.project_id);
-
-      let pathname: string;
-      try {
-        pathname = assertProjectScopedPathname(parsed.data.pathname, projectId);
-      } catch {
+      if (String(finish.project_id) !== projectId) {
         throw new DomainConflictError("not_this_project", "That image is not one of this project's files.", { status: 400 });
       }
 
@@ -123,8 +162,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
         values
           ('project_finishes', ${id}, 'finish_swatch', ${pathname},
-           ${parsed.data.filename ?? "swatch.png"}, ${parsed.data.contentType ?? "image/png"},
-           ${parsed.data.size ?? null}, ${user.email})
+           ${parsed.data.filename ?? "swatch.png"}, ${stored.contentType}, ${stored.size}, ${user.email})
       `;
       return { finishId: id, source: parsed.data.source };
     });

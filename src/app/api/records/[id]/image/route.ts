@@ -18,6 +18,7 @@
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { blobPathname, streamTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
+import { pictureServing } from "@/lib/picture-types";
 import { ITEM_IMAGE_ALTERNATIVE_KIND, ITEM_IMAGE_KIND } from "@/lib/item-image";
 
 export const dynamic = "force-dynamic";
@@ -67,9 +68,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       range: request.headers.get("range"),
     });
 
+    // Inline only for a picture type (`picture-types.ts`, audit A2).
+    const served = pictureServing(String(row.content_type || source.contentType || ""));
     const headers = new Headers({
-      "content-type": String(row.content_type || source.contentType || "image/png"),
-      "content-disposition": "inline",
+      "content-type": served.contentType,
+      "content-disposition": served.inline ? "inline" : "attachment",
       "accept-ranges": "bytes",
       // Private and per-user. This is a crop of NDA-covered client drawings; a
       // shared cache holding it is a disclosure waiting to happen. Unlike the

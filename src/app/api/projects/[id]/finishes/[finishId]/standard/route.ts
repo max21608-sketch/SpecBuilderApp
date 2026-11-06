@@ -16,6 +16,7 @@ import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { agreeFinishStandard, setFinishStandard } from "@/lib/finish-standard";
+import { verifyEvidence } from "@/lib/change-sets";
 
 const Evidence = z
   .object({
@@ -75,6 +76,8 @@ export async function POST(
     return json({ ok: false, error: "That request is not valid.", field: parsed.error.issues[0]?.path.join(".") }, 400);
   }
 
+  // The store is asked about any evidence before the transaction (audit A15).
+  const evidence = await verifyEvidence(parsed.data.evidence);
   try {
     const body = parsed.data;
     const result = await withTransaction((txn) =>
@@ -83,7 +86,7 @@ export async function POST(
             projectId: id,
             finishId,
             expectedVersion: body.version,
-            evidence: body.evidence ?? null,
+            evidence,
             reason: body.reason ?? null,
             actor: user.email,
           })
@@ -93,7 +96,7 @@ export async function POST(
             expectedVersion: body.version,
             choice: body.standard,
             reason: body.reason ?? null,
-            evidence: body.evidence ?? null,
+            evidence,
             actor: user.email,
           }),
     );

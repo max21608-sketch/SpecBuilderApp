@@ -17,6 +17,7 @@
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { streamTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
+import { pictureServing } from "@/lib/picture-types";
 import { assertBoqDocument } from "@/lib/boq-import";
 import { effectiveRowImage, rowImageFor } from "@/lib/bill-row-image";
 
@@ -58,9 +59,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   try {
     const source = await streamTrustedBlob(image.pathname, String(run.project_id));
+    // Inline only for a picture type (`picture-types.ts`, audit A2).
+    const served = pictureServing(image.contentType || source.contentType || "");
     const headers = new Headers({
-      "content-type": image.contentType || source.contentType || "image/png",
-      "content-disposition": "inline",
+      "content-type": served.contentType,
+      "content-disposition": served.inline ? "inline" : "attachment",
       // Private and per-user: a picture out of an NDA-covered client document.
       "cache-control": "private, max-age=3600",
       "x-content-type-options": "nosniff",

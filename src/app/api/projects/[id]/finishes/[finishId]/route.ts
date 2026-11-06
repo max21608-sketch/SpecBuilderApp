@@ -12,7 +12,7 @@ import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
 import { editFinish } from "@/lib/finish-edit";
-import { changeSetForEdit } from "@/lib/change-sets";
+import { changeSetForEdit, verifyEvidence } from "@/lib/change-sets";
 import { FINISH_KINDS } from "@/lib/finishes";
 
 const Patch = z
@@ -121,6 +121,8 @@ export async function PATCH(
       return json({ ok: true, ...result });
     }
 
+    // The store is asked about any evidence before the transaction (audit A15).
+    const evidence = await verifyEvidence(body.evidence);
     const result = await withTransaction((txn) =>
       editFinish(txn, {
         projectId: id,
@@ -128,7 +130,7 @@ export async function PATCH(
         expectedVersion: body.version,
         fields: body,
         reason: body.reason ?? `Filled in ${String(current.code)}.`,
-        evidence: body.evidence ?? null,
+        evidence,
         actor: user.email,
       }),
     );

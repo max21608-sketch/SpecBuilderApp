@@ -36,7 +36,7 @@
 // is never touched: an attribute is its own row.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { changeSetForEdit, type ChangeSetKind, type UploadedEvidence } from "@/lib/change-sets";
+import { changeSetForEdit, type ChangeSetKind, type VerifiedEvidence } from "@/lib/change-sets";
 import { recomposeAnswers } from "@/lib/attribute-retire";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { loadPalettes, palettesByFieldJsonId } from "@/lib/palette-load";
@@ -176,7 +176,7 @@ export async function setAttributeStandard(
     expectedVersion: number;
     choice: StandardChoice;
     reason?: string | null;
-    evidence?: UploadedEvidence | null;
+    evidence?: VerifiedEvidence | null;
     actor: string;
   },
 ): Promise<StandardWriteResult> {
@@ -264,7 +264,7 @@ export async function agreeAttributeStandard(
   }: {
     attributeId: string;
     expectedVersion: number;
-    evidence?: UploadedEvidence | null;
+    evidence?: VerifiedEvidence | null;
     reason?: string | null;
     actor: string;
   },

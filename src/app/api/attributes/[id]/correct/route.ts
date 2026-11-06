@@ -16,6 +16,7 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { correctAttribute } from "@/lib/attribute-correct";
 import { ATTRIBUTE_UNITS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
+import { verifyEvidence } from "@/lib/change-sets";
 
 const Body = z
   .object({
@@ -95,6 +96,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     );
   }
 
+  // The store is asked about any evidence before the transaction (audit A15).
+  const evidence = await verifyEvidence(parsed.data.evidence);
   try {
     const result = await withTransaction((txn) =>
       correctAttribute(txn, {
@@ -105,7 +108,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         dimensionSlot: parsed.data.dimensionSlot,
         state: parsed.data.state,
         reason: parsed.data.reason,
-        evidence: parsed.data.evidence ?? null,
+        evidence,
         actor: user.email,
       }),
     );

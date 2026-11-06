@@ -28,7 +28,7 @@
 // ============================================================================
 import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { changeSetForEdit, openChangeSet, type UploadedEvidence } from "@/lib/change-sets";
+import { changeSetForEdit, openChangeSet, type VerifiedEvidence } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { recomposeAnswers } from "@/lib/attribute-retire";
 import {
@@ -168,7 +168,7 @@ export async function editFinish(
     expectedVersion: number;
     fields: FinishFields;
     reason: string;
-    evidence?: UploadedEvidence | null;
+    evidence?: VerifiedEvidence | null;
     actor: string;
     /**
      * An ALREADY OPEN change to attach this edit to, instead of opening one.

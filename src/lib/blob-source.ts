@@ -91,7 +91,6 @@ export function assertPathnameShape(pathname: string): string {
     clean.length === 0 ||
     /%[0-9A-Fa-f]{2}/.test(clean) ||
     /[?#\\]/.test(clean) ||
-    // eslint-disable-next-line no-control-regex
     /[\u0000-\u001f\u007f]/.test(clean) ||
     clean.split("/").some((segment) => segment === "" || segment === "." || segment === "..")
   ) {
