@@ -223,20 +223,38 @@ describeIfDb("a project-wide question, answered once", () => {
     expect(versionsAfter.rows).toEqual(versionsBefore.rows);
   });
 
-  it("replaces the exception when it is ticked with a reason", async () => {
-    const question = await card();
-    const c = question.rows.find((row) => row.recordId === recordC)!;
-    const result = await answer({
-      key: question.key,
-      value: "__QA Lift OK",
-      state: "confirmed",
-      seen: seen(question),
-      overrides: [c.answerId],
-      reason: "__QA the crane was the old building",
-    });
-    expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({ written: 0, overridden: 1, records: 1 });
-    expect(await accessAnswer(recordC)).toMatchObject({ state: "confirmed", value: "__QA Lift OK" });
+  it("replaces the exception when it is ticked with a reason, and keeps that reason even with a change open", async () => {
+    // THE TYPED REASON IS NOT DISCARDED (audit E8, 2026-11-06). With a change
+    // open, this passed `reason: null` so the press would attach to it, and
+    // the sentence the card REQUIRES before an override was thrown away: the
+    // trail said only the meeting's name over an answer somebody replaced.
+    // A change set is append-only (0012), so the open one cannot take it; the
+    // rule every other edit follows is `changeSetForEdit`'s, a reason given
+    // with an edit is about that edit and gets its own change.
+    const open = await client.query(
+      `insert into change_sets (project_id, kind, reason, actor)
+       values ($1, 'manual_edit', '__QA Monday site meeting', '__qa-project-wide@example.test') returning id`,
+      [projectId],
+    );
+    try {
+      const question = await card();
+      const c = question.rows.find((row) => row.recordId === recordC)!;
+      const result = await answer({
+        key: question.key,
+        value: "__QA Lift OK",
+        state: "confirmed",
+        seen: seen(question),
+        overrides: [c.answerId],
+        reason: "__QA the crane was the old building",
+      });
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ written: 0, overridden: 1, records: 1, attachedToOpenChange: false });
+      expect(await accessAnswer(recordC)).toMatchObject({ state: "confirmed", value: "__QA Lift OK" });
+      const written = await client.query(`select reason from change_sets where id = $1`, [result.body.changeSetId]);
+      expect(String(written.rows[0].reason)).toContain("__QA the crane was the old building");
+    } finally {
+      await client.query(`update change_sets set closed_at = now() where id = $1`, [open.rows[0].id]);
+    }
   });
 
   it("is then off the project's TGQ figure, which the card and the summary agree on", async () => {

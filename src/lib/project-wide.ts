@@ -342,13 +342,23 @@ export async function applyProjectWide(
     state === "tbc"
       ? `Recorded “${question.heading}” as TBC for the project, on ${n} item${n === 1 ? "" : "s"}.`
       : `Recorded “${question.heading}” as “${value}” for the project, on ${n} item${n === 1 ? "" : "s"}.`;
+  const typed = reason?.trim() ? reason.trim() : null;
   const { changeSetId, attached } = await changeSetForEdit(txn, {
     projectId,
     actor,
     kind: "manual_edit",
-    // The open change wins: a reason always opens a fresh change set, which
-    // would detach this from the meeting it happened in.
-    reason: open ? null : reason?.trim() ? `${reason.trim()} — ${sentence}` : sentence,
+    // WITH NOTHING TYPED, the open change wins: this app's own sentence would
+    // open a fresh change set and detach the press from the meeting it
+    // happened in.
+    //
+    // A TYPED REASON IS KEPT, open change or not (audit E8, 2026-11-06). The
+    // card asks for one before it replaces a settled answer, and this used to
+    // pass null whenever a change was open, so the one sentence explaining an
+    // override was dropped and the trail showed only the meeting's name. A
+    // change set is append-only (0012) and cannot take it afterwards, so it
+    // follows `changeSetForEdit`'s rule for every other edit: a reason given
+    // WITH an edit is about that edit, and gets a change of its own.
+    reason: typed ? `${typed} — ${sentence}` : open ? null : sentence,
   });
 
   // EVERY RECORD THIS WRITES, locked in id order before the first answer
