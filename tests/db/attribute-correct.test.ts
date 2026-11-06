@@ -433,11 +433,11 @@ describeIfDb("correcting a spec", () => {
   // something else — so the new row stays UNLINKED and the library is untouched.
   it("unlinks a corrected finish whose words now disagree with the library", async () => {
     const recordId = await item("__QA Armchair, fabric corrected");
-    const finishId = await libraryFinish("__QA UPH-07", "Yarn Tessarae YC04158");
+    const finishId = await libraryFinish("__QA UPH-07", "Yarn Harbour LW44102");
     const before = await documentSpec(recordId, {
       attrGroup: "material",
       label: "SOFA",
-      value: "Yarn Tessarae YC04158",
+      value: "Yarn Harbour LW44102",
       unit: null,
       dimensionSlot: null,
       specFieldId: comFieldId,
@@ -471,7 +471,7 @@ describeIfDb("correcting a spec", () => {
     const library = await client.query(`select description, state from project_finishes where id = $1`, [
       finishId,
     ]);
-    expect(library.rows[0].description).toBe("Yarn Tessarae YC04158");
+    expect(library.rows[0].description).toBe("Yarn Harbour LW44102");
     expect(library.rows[0].state).toBe("confirmed");
   }, SLOW);
 

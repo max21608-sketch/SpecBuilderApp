@@ -210,15 +210,15 @@ describe("buildChaseEmail", () => {
   });
 
   it("keeps a TBC loud and still prints the words beside it", () => {
-    // The drawings say `TBC - Yarn Collective Tessarae` all the time: the
+    // The drawings say `TBC - Yarn Loomworks Harbour` all the time: the
     // state is what blocks, the words are what is being checked.
     const { body } = buildChaseEmail({
       ...base,
       groups: [
-        group({ questions: [question({ state: "tbc", currentValue: "Yarn Collective Tessarae" })] }),
+        group({ questions: [question({ state: "tbc", currentValue: "Yarn Loomworks Harbour" })] }),
       ],
     });
-    expect(body).toMatch(/color:#b91c1c;font-weight:bold[^>]*>TBC — our understanding: Yarn Collective Tessarae</);
+    expect(body).toMatch(/color:#b91c1c;font-weight:bold[^>]*>TBC — our understanding: Yarn Loomworks Harbour</);
   });
 
   it("names the BWS field in the question heading, and omits it where there is none", () => {

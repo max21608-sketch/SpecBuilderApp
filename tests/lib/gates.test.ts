@@ -49,7 +49,7 @@ describe("gateStatus — the four states are four different things", () => {
 
   it("TBC BLOCKS — it is an answer, not an absence", () => {
     const s = gateStatus("TG0", [field()], {
-      answers: [{ specFieldJsonId: 1, state: "tbc", value: "TBC – Yarn Collective" }],
+      answers: [{ specFieldJsonId: 1, state: "tbc", value: "TBC – Yarn Loomworks" }],
       slots: [],
       askedFieldIds: asked(1),
     });

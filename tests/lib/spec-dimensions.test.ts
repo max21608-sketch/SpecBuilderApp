@@ -73,7 +73,7 @@ describe("readDimension", () => {
   it("returns null for anything that is not a dimension", () => {
     expect(readDimension("Timber (legs and front rail)", "WD-05 ceruse finish oak")).toBeNull();
     expect(readDimension("Outside back", "UPH-07")).toBeNull();
-    expect(readDimension("Fabric (A configuration)", "CLO003 A (Tibor Blob Amber Fern)")).toBeNull();
+    expect(readDimension("Fabric (A configuration)", "CLO003 A (Meridian Drift Amber)")).toBeNull();
     expect(readDimension(null, "445mm")).toBeNull();
     expect(readDimension("Seat height", "")).toBeNull();
   });

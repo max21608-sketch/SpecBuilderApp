@@ -172,12 +172,12 @@ describe("planAnswerFills", () => {
       attribute({
         attrGroup: "material",
         specFieldId: "33333333-3333-3333-3333-333333333333",
-        value: "TBC – Yarn Collective Tessarae YC04158 - 01",
+        value: "TBC – Yarn Loomworks Harbour LW44102 - 01",
         state: "tbc",
       }),
     ]);
     expect(fills[0]?.state).toBe("tbc");
-    expect(fills[0]?.value).toContain("Yarn Collective");
+    expect(fills[0]?.value).toContain("Yarn Loomworks");
   });
 });
 

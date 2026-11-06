@@ -156,7 +156,7 @@ describe("a finish the client gave no code for", () => {
     // The code is the key wherever one exists, and stays the key. A row the
     // resolver left out of the map gets no control at all.
     resetIds();
-    const rows = [callout("FABRIC", "Yarn Tessarae", "UPH-07")];
+    const rows = [callout("FABRIC", "Yarn Harbour", "UPH-07")];
     renderCard(rows, {});
     expect(screen.queryByPlaceholderText("client's code")).toBeNull();
     expect(screen.queryByText(/Not in the finishes library/)).toBeNull();

@@ -92,11 +92,11 @@ describe("InfillRow", () => {
   it("records a typed value as a confirmed answer, on blur", async () => {
     const user = userEvent.setup();
     const { saveAnswer } = renderRow();
-    await user.type(screen.getByPlaceholderText("Value"), "Tibor Blob Amber Fern");
+    await user.type(screen.getByPlaceholderText("Value"), "Meridian Drift Amber");
     await user.tab();
     expect(saveAnswer).toHaveBeenCalledWith(
       expect.objectContaining({ requirementId: "req-1" }),
-      { value: "Tibor Blob Amber Fern", state: "confirmed", reason: null },
+      { value: "Meridian Drift Amber", state: "confirmed", reason: null },
     );
     expect(await screen.findByText("Recorded.")).toBeInTheDocument();
   });
@@ -145,16 +145,16 @@ describe("InfillRow", () => {
 
   it("shows what was recorded as TBC, and a typed value confirms it", async () => {
     const user = userEvent.setup();
-    const { saveAnswer } = renderRow({ state: "tbc", currentValue: "TBC – Yarn Collective" });
-    expect(screen.getByText("recorded as TBC: TBC – Yarn Collective")).toBeInTheDocument();
+    const { saveAnswer } = renderRow({ state: "tbc", currentValue: "TBC – Yarn Loomworks" });
+    expect(screen.getByText("recorded as TBC: TBC – Yarn Loomworks")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "TBC" })).toBeDisabled();
 
     const box = screen.getByPlaceholderText("Value");
     await user.clear(box);
-    await user.type(box, "Yarn Collective Tessarae YC04158");
+    await user.type(box, "Yarn Loomworks Harbour LW44102");
     await user.tab();
     expect(saveAnswer).toHaveBeenCalledWith(expect.anything(), {
-      value: "Yarn Collective Tessarae YC04158",
+      value: "Yarn Loomworks Harbour LW44102",
       state: "confirmed",
       reason: null,
     });
@@ -231,11 +231,11 @@ describe("InfillRow", () => {
 
   it("shows the sister configurations' values as REFERENCE, with nothing that copies them", () => {
     renderRow({
-      sisters: [{ name: "S-301 A", value: "Tibor Blob Amber Fern" }],
-      finishNote: "Yarn Collective Tessarae YC04158",
+      sisters: [{ name: "S-301 A", value: "Meridian Drift Amber" }],
+      finishNote: "Yarn Loomworks Harbour LW44102",
     });
-    expect(screen.getByText("S-301 A: Tibor Blob Amber Fern")).toBeInTheDocument();
-    expect(screen.getByText("In the library: Yarn Collective Tessarae YC04158")).toBeInTheDocument();
+    expect(screen.getByText("S-301 A: Meridian Drift Amber")).toBeInTheDocument();
+    expect(screen.getByText("In the library: Yarn Loomworks Harbour LW44102")).toBeInTheDocument();
     // A value is never filled in from a sister item: there is no control here
     // that would do it, and the box is still empty.
     expect(screen.getByPlaceholderText("Value")).toHaveValue("");

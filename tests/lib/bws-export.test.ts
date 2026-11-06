@@ -37,7 +37,7 @@ const attribute = (overrides: Partial<ExportAttribute> = {}): ExportAttribute =>
   recordId: "rec-1",
   attrGroup: "material",
   label: "SOFA",
-  value: "Yarn Tessarae YC04158 - 01",
+  value: "Yarn Harbour LW44102 - 01",
   unit: null,
   qualifier: null,
   dimensionSlot: null,
@@ -129,10 +129,10 @@ describe("composeRow", () => {
   });
 
   it("puts a fabric in the COM slot its attribute names", () => {
-    const attributes = [attribute({ specFieldJsonId: 1 }), attribute({ specFieldJsonId: 2, value: "Tibor Blob" })];
+    const attributes = [attribute({ specFieldJsonId: 1 }), attribute({ specFieldJsonId: 2, value: "Meridian Drift" })];
     const row = composeRow(scope({ attributes }), record(), attributes, []);
-    expect(row[indexOfField(1)]).toBe("Yarn Tessarae YC04158 - 01");
-    expect(row[indexOfField(2)]).toBe("Tibor Blob");
+    expect(row[indexOfField(1)]).toBe("Yarn Harbour LW44102 - 01");
+    expect(row[indexOfField(2)]).toBe("Meridian Drift");
   });
 
   it("composes the dimension slots into the single Dimensions field, in millimetres", () => {
@@ -212,7 +212,7 @@ describe("composeRow", () => {
       "sofa feet dark-tinted wood as per approved sample TBC",
     );
 
-    // The shape that produced "... YC04158 - 01 TBC" on the real pack: the
+    // The shape that produced "... LW44102 - 01 TBC" on the real pack: the
     // designer has named a candidate AND said it is not settled. The value is
     // kept exactly as the page wrote it, dash and all, and gains nothing.
     expect(renderAttributeValue({ value: "TBC - Example Collective Fabric AB01234 - 01", unit: null, state: "tbc" })).toBe(
@@ -302,7 +302,7 @@ describe("composeWorkbook", () => {
     expect(workbook.jobs.rows).toHaveLength(2);
     // Sorted by record number, and the empty record still has its own row.
     expect(workbook.jobs.rows[0]?.[indexOfName("Name")]).toBe("Armchair");
-    expect(workbook.jobs.rows[1]?.[indexOfField(1)]).toBe("Yarn Tessarae YC04158 - 01");
+    expect(workbook.jobs.rows[1]?.[indexOfField(1)]).toBe("Yarn Harbour LW44102 - 01");
   });
 
   it("writes the two header rows the BWS export has", () => {
@@ -443,20 +443,20 @@ describe("the qualifier — the return line", () => {
     const row = composeRow(
       scope({}),
       record(),
-      [attribute({ specFieldJsonId: 1, value: "Yarn Tessarae YC04158", qualifier: "Main body & self pipe" })],
+      [attribute({ specFieldJsonId: 1, value: "Yarn Harbour LW44102", qualifier: "Main body & self pipe" })],
       [],
     );
-    expect(row[indexOfField(1)]).toBe("Yarn Tessarae YC04158 - Main body & self pipe");
+    expect(row[indexOfField(1)]).toBe("Yarn Harbour LW44102 - Main body & self pipe");
   });
 
   it("goes on AFTER the TBC marker, so a placement cannot suppress one", () => {
     const row = composeRow(
       scope({}),
       record(),
-      [attribute({ specFieldJsonId: 1, value: "Yarn Tessarae", state: "tbc", qualifier: "Outside back" })],
+      [attribute({ specFieldJsonId: 1, value: "Yarn Harbour", state: "tbc", qualifier: "Outside back" })],
       [],
     );
-    expect(row[indexOfField(1)]).toBe("Yarn Tessarae TBC - Outside back");
+    expect(row[indexOfField(1)]).toBe("Yarn Harbour TBC - Outside back");
   });
 
   it("renders on an ANSWER too, or a placement typed on the record screen vanishes from the file", () => {
@@ -518,7 +518,7 @@ describe("the qualifier — the return line", () => {
       scope({}),
       record(),
       [
-        attribute({ specFieldJsonId: 1, value: "Yarn Tessarae", qualifier: "Main body & self pipe" }),
+        attribute({ specFieldJsonId: 1, value: "Yarn Harbour", qualifier: "Main body & self pipe" }),
         attribute({ id: "attr-2", specFieldJsonId: 4, value: "Oiled oak", qualifier: "Recessed plinth" }),
       ],
       [],
@@ -591,12 +591,12 @@ describe("an internal finish code never reaches the file", () => {
     const attributes = [
       attribute({
         specFieldJsonId: 1,
-        value: "Yarn Tessarae",
-        finish: { ...ours, codeOrigin: "client" as const, code: "CH-01.1", codeNorm: "CH-01.1", description: "Yarn Tessarae" },
+        value: "Yarn Harbour",
+        finish: { ...ours, codeOrigin: "client" as const, code: "CH-01.1", codeNorm: "CH-01.1", description: "Yarn Harbour" },
       }),
     ];
     const row = composeRow(scope({ attributes }), record(), attributes, []);
-    expect(row[indexOfField(1)]).toBe("CH-01.1; Yarn Tessarae TBC");
+    expect(row[indexOfField(1)]).toBe("CH-01.1; Yarn Harbour TBC");
   });
 
   it("falls back to the page's own words when an internal finish has none", () => {

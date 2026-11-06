@@ -40,7 +40,7 @@ describe("guessLevelFromAttributes", () => {
 
   it("finds the metalwork a bill did not mention, and names the page", () => {
     const guess = guessLevelFromAttributes([
-      attribute("SOFA", "Yarn Tessarae YC04158 - 01"),
+      attribute("SOFA", "Yarn Harbour LW44102 - 01"),
       attribute("LEGS", "Antique brass", 4),
     ]);
     expect(guess?.level).toBe("complex");

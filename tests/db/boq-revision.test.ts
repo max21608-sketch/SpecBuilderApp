@@ -163,7 +163,7 @@ describeIfDb("BOQ revision", () => {
     const keeper = before.rows[1];
     await client.query(
       `insert into record_attributes (record_id, attr_group, label, value, state, created_by, updated_by)
-       values ($1, 'material', 'FABRIC', 'Yarn Tessarae YC04158 - 01', 'confirmed', 'qa', 'qa')`,
+       values ($1, 'material', 'FABRIC', 'Yarn Harbour LW44102 - 01', 'confirmed', 'qa', 'qa')`,
       [keeper.id],
     );
 
@@ -197,7 +197,7 @@ describeIfDb("BOQ revision", () => {
       `select value from record_attributes where record_id = $1 and status = 'active'`,
       [keeper.id],
     );
-    expect(kept.rows.map((row) => row.value)).toEqual(["Yarn Tessarae YC04158 - 01"]);
+    expect(kept.rows.map((row) => row.value)).toEqual(["Yarn Harbour LW44102 - 01"]);
 
     // The dropped line's record is RETIRED, not deleted — a client ref maps to
     // a BWS job that may already exist, and deleting loses that mapping.

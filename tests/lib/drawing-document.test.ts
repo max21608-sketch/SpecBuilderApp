@@ -194,9 +194,9 @@ describe("suggestAttributeState", () => {
   });
 
   it("takes a real specification verbatim", () => {
-    expect(suggestAttributeState("Yarn Tessarae YC04158 - 01")).toEqual({
+    expect(suggestAttributeState("Yarn Harbour LW44102 - 01")).toEqual({
       state: "confirmed",
-      value: "Yarn Tessarae YC04158 - 01",
+      value: "Yarn Harbour LW44102 - 01",
       reason: null,
     });
   });
@@ -205,10 +205,10 @@ describe("suggestAttributeState", () => {
 describe("suggestSpecField", () => {
   it("puts the first fabric in COM 1 and the second in COM 2", () => {
     const taken = new Set<string>();
-    const first = suggestSpecField({ attrGroup: "material", labelRaw: "FABRIC", valueRaw: "Yarn Tessarae" }, FIELDS, taken);
+    const first = suggestSpecField({ attrGroup: "material", labelRaw: "FABRIC", valueRaw: "Yarn Harbour" }, FIELDS, taken);
     expect(first).toBe("f-com1");
     taken.add(first!);
-    const second = suggestSpecField({ attrGroup: "material", labelRaw: "FABRIC", valueRaw: "Tibor Blob" }, FIELDS, taken);
+    const second = suggestSpecField({ attrGroup: "material", labelRaw: "FABRIC", valueRaw: "Meridian Drift" }, FIELDS, taken);
     expect(second).toBe("f-com2");
   });
 
@@ -237,7 +237,7 @@ describe("suggestSpecField", () => {
 
 describe("classifyGroup", () => {
   it("separates fabric from finish from hardware", () => {
-    expect(classifyGroup("FABRIC", "Yarn Tessarae")).toBe("material");
+    expect(classifyGroup("FABRIC", "Yarn Harbour")).toBe("material");
     expect(classifyGroup("SOFA FEET", "Dark tinted wood")).toBe("finish");
     expect(classifyGroup("Runners", "Soft close")).toBe("hardware");
     expect(classifyGroup("PIPING", "TBC")).toBe("other");
@@ -248,22 +248,22 @@ describe("classifyGroup", () => {
   // vocabulary a swatch caption actually uses, this row staged as `other`
   // with no BWS field while its timber sibling landed correctly.
   it("reads a cloth named in the value", () => {
-    expect(classifyGroup("SOFA", "Yarn Tessarae YC04158 - 01")).toBe("material");
+    expect(classifyGroup("SOFA", "Yarn Harbour LW44102 - 01")).toBe("material");
     expect(classifyGroup("SEAT", "Bouclé, ivory")).toBe("material");
   });
 
   it("reads the client's own finish code where the words say nothing", () => {
-    expect(classifyGroup("SEAT", "Tessarae 04158", { materialCodeRaw: "UPH-07" })).toBe("material");
+    expect(classifyGroup("SEAT", "Harbour 44102", { materialCodeRaw: "UPH-07" })).toBe("material");
     expect(classifyGroup("BASE", "Tinted, satin", { materialCodeRaw: "WD-02" })).toBe("finish");
     expect(classifyGroup("TRIM", "Antique, brushed", { materialCodeRaw: "MT-01" })).toBe("finish");
     // CH is printed on the real set and nothing says what it stands for.
-    expect(classifyGroup("SEAT", "Tessarae 04158", { materialCodeRaw: "CH-01.2" })).toBe("other");
+    expect(classifyGroup("SEAT", "Harbour 44102", { materialCodeRaw: "CH-01.2" })).toBe("other");
   });
 
   it("reads a caption that names the item itself as its upholstery, and says it guessed", () => {
     const reading = classifyCallout({
       labelRaw: "SOFA",
-      valueRaw: "Tessarae YC04158 - 01",
+      valueRaw: "Harbour LW44102 - 01",
       materialCodeRaw: null,
       itemNameRaw: "Sofa",
     });
@@ -275,7 +275,7 @@ describe("classifyGroup", () => {
   it("refuses that guess where the caption names a PART, or says nothing", () => {
     // A part is about that part. Only the whole piece is about its cloth.
     expect(
-      classifyCallout({ labelRaw: "SOFA BACK", valueRaw: "Tessarae 04158", materialCodeRaw: null, itemNameRaw: "Sofa" })
+      classifyCallout({ labelRaw: "SOFA BACK", valueRaw: "Harbour 44102", materialCodeRaw: null, itemNameRaw: "Sofa" })
         .kind,
     ).toBeNull();
     // One token of nothing is a question, not a fabric.
@@ -286,7 +286,7 @@ describe("classifyGroup", () => {
     expect(
       classifyCallout({
         labelRaw: "SOFA",
-        valueRaw: "TBC – Yarn Collective Tessarae",
+        valueRaw: "TBC – Yarn Loomworks Harbour",
         materialCodeRaw: null,
         itemNameRaw: "Sofa",
       }).kind,
@@ -317,9 +317,9 @@ describe("re-reading a callout on an already-staged run", () => {
             version: 1,
             attrGroup: "other",
             labelRaw: "SOFA",
-            valueRaw: "Yarn Tessarae YC04158 - 01",
+            valueRaw: "Yarn Harbour LW44102 - 01",
             materialCodeRaw: null,
-            value: "Yarn Tessarae YC04158 - 01",
+            value: "Yarn Harbour LW44102 - 01",
             unit: null,
             unitSuggested: false,
             specFieldId: null,
@@ -386,7 +386,7 @@ describe("stageDrawings", () => {
       { labelRaw: "Height", valueRaw: "72" },
     ],
     materials: [
-      { labelRaw: "SOFA", valueRaw: "Yarn Tessarae YC04158 - 01", materialCodeRaw: null },
+      { labelRaw: "SOFA", valueRaw: "Yarn Harbour LW44102 - 01", materialCodeRaw: null },
       { labelRaw: "SOFA FEET", valueRaw: "Dark tinted wood", materialCodeRaw: "WD-01" },
     ],
     notesRaw: ["PIPING TBC"],
@@ -422,8 +422,8 @@ describe("stageDrawings", () => {
     // The case spec_answers could not hold: one page, two FABRIC captions.
     const twoFabrics = rawItem({
       materials: [
-        { labelRaw: "FABRIC", valueRaw: "Seat: Yarn Tessarae", materialCodeRaw: null },
-        { labelRaw: "FABRIC", valueRaw: "Back: Tibor Blob", materialCodeRaw: null },
+        { labelRaw: "FABRIC", valueRaw: "Seat: Yarn Harbour", materialCodeRaw: null },
+        { labelRaw: "FABRIC", valueRaw: "Back: Meridian Drift", materialCodeRaw: null },
       ],
     });
     const staged = stageDrawings([twoFabrics], FIELDS, null, null);
@@ -645,7 +645,7 @@ describe("drawingItemBlockers", () => {
     attributeId: "attr-old",
     attributeVersion: 1,
     label: "FABRIC",
-    value: "Yarn Tessarae YC04158 - 01",
+    value: "Yarn Harbour LW44102 - 01",
     unit: null,
     sourceFilename: "S-100.pdf",
     sourcePage: 1,
@@ -653,7 +653,7 @@ describe("drawingItemBlockers", () => {
   });
 
   it("blocks a BWS field that already has a value on a target record", () => {
-    const item = staged(rawItem({ materials: [{ labelRaw: "FABRIC", valueRaw: "Yarn Tessarae", materialCodeRaw: null }] }));
+    const item = staged(rawItem({ materials: [{ labelRaw: "FABRIC", valueRaw: "Yarn Harbour", materialCodeRaw: null }] }));
     const occupied = { fields: new Map([["rec-1", new Map([["f-com1", occupant()]])]]), dimensions: new Map() };
     const blockers = drawingItemBlockers(item, resolveDrawingTargets("X-100", [record()]), occupied);
     expect(blockers.some((b) => b.code === "slot_taken")).toBe(true);
@@ -662,7 +662,7 @@ describe("drawingItemBlockers", () => {
   it("stops blocking once the reviewer has ticked the row it would replace", () => {
     // A revised drawing for one item. The clash is the point of the card, not
     // a fault in it — but only for the record the reviewer actually ticked.
-    const item = staged(rawItem({ materials: [{ labelRaw: "FABRIC", valueRaw: "Yarn Tessarae", materialCodeRaw: null }] }));
+    const item = staged(rawItem({ materials: [{ labelRaw: "FABRIC", valueRaw: "Yarn Harbour", materialCodeRaw: null }] }));
     const occupied = { fields: new Map([["rec-1", new Map([["f-com1", occupant()]])]]), dimensions: new Map() };
     const acknowledged = {
       ...item,
@@ -678,7 +678,7 @@ describe("drawingItemBlockers", () => {
   it("still blocks when the acknowledgement names a DIFFERENT row than the one in the slot", () => {
     // The occupant changed after the card was drawn. Replacing it now would
     // retire a value the reviewer never saw.
-    const item = staged(rawItem({ materials: [{ labelRaw: "FABRIC", valueRaw: "Yarn Tessarae", materialCodeRaw: null }] }));
+    const item = staged(rawItem({ materials: [{ labelRaw: "FABRIC", valueRaw: "Yarn Harbour", materialCodeRaw: null }] }));
     const occupied = { fields: new Map([["rec-1", new Map([["f-com1", occupant({ attributeId: "attr-newer" })]])]]), dimensions: new Map() };
     const acknowledged = {
       ...item,
@@ -695,7 +695,7 @@ describe("drawingItemBlockers", () => {
     const item = staged(
       rawItem({
         dimensions: [{ labelRaw: "W", valueRaw: "190" }],
-        materials: [{ labelRaw: "SOFA", valueRaw: "Yarn Tessarae", materialCodeRaw: null }],
+        materials: [{ labelRaw: "SOFA", valueRaw: "Yarn Harbour", materialCodeRaw: null }],
       }),
     );
     expect(drawingItemBlockers(item, resolveDrawingTargets("X-100", [record()]), NO_OCCUPANCY)).toEqual([]);
@@ -1134,25 +1134,25 @@ describe("suggestAttributeState on the specification sheets' wording", () => {
 // ============================================================================
 describe("splitTbcMarker", () => {
   it("takes a leading marker off and keeps the fabric", () => {
-    expect(splitTbcMarker("TBC – Yarn Collective Tessarae")).toMatchObject({
+    expect(splitTbcMarker("TBC – Yarn Loomworks Harbour")).toMatchObject({
       tbc: true,
-      value: "Yarn Collective Tessarae",
+      value: "Yarn Loomworks Harbour",
     });
   });
 
   it("consumes only the FIRST separator, because the rest is the reference", () => {
     // The " - 01" belongs to the fabric's own code. A rule that cut at every
-    // separator would hand back "Yarn Collective Tessarae YC04158".
-    expect(splitTbcMarker("TBC - Yarn Collective Tessarae YC04158 - 01")).toMatchObject({
+    // separator would hand back "Yarn Loomworks Harbour LW44102".
+    expect(splitTbcMarker("TBC - Yarn Loomworks Harbour LW44102 - 01")).toMatchObject({
       tbc: true,
-      value: "Yarn Collective Tessarae YC04158 - 01",
+      value: "Yarn Loomworks Harbour LW44102 - 01",
     });
   });
 
   it("takes a trailing marker off, bracketed or separated", () => {
-    expect(splitTbcMarker("Yarn Collective (TBC)")).toMatchObject({ tbc: true, value: "Yarn Collective" });
-    expect(splitTbcMarker("Yarn Collective – TBC")).toMatchObject({ tbc: true, value: "Yarn Collective" });
-    expect(splitTbcMarker("(TBC) Yarn Collective")).toMatchObject({ tbc: true, value: "Yarn Collective" });
+    expect(splitTbcMarker("Yarn Loomworks (TBC)")).toMatchObject({ tbc: true, value: "Yarn Loomworks" });
+    expect(splitTbcMarker("Yarn Loomworks – TBC")).toMatchObject({ tbc: true, value: "Yarn Loomworks" });
+    expect(splitTbcMarker("(TBC) Yarn Loomworks")).toMatchObject({ tbc: true, value: "Yarn Loomworks" });
   });
 
   it("reads the long form, which the token list already carries", () => {
@@ -1167,7 +1167,7 @@ describe("splitTbcMarker", () => {
   });
 
   it("LEAVES A MARKER IN THE MIDDLE ALONE", () => {
-    // "Yarn Collective" reads as a real fabric, is not one, and nothing
+    // "Yarn Loomworks" reads as a real fabric, is not one, and nothing
     // downstream would question it. The value stays whole and the reviewer is
     // asked — which is what `suggestAttributeState` does with it.
     expect(splitTbcMarker("Yarn TBC Collective")).toEqual({
@@ -1186,7 +1186,7 @@ describe("splitTbcMarker", () => {
   });
 
   it("does not read a value's own punctuation as a marker", () => {
-    expect(splitTbcMarker("Yarn Tessarae YC04158 - 01")).toMatchObject({ tbc: false });
+    expect(splitTbcMarker("Yarn Harbour LW44102 - 01")).toMatchObject({ tbc: false });
     expect(splitTbcMarker("Oak, finish to be confirmed")).toMatchObject({ tbc: false });
   });
 
@@ -1197,15 +1197,15 @@ describe("splitTbcMarker", () => {
     // row as a Supplier line whose value is TO BID.
     expect(splitTbcMarker("SUPPLIER: TO BID")).toMatchObject({ tbc: false, value: "SUPPLIER: TO BID" });
     // The mirror image is a marker, because a colon puts the value on the right.
-    expect(splitTbcMarker("TBC: Yarn Collective")).toMatchObject({ tbc: true, value: "Yarn Collective" });
+    expect(splitTbcMarker("TBC: Yarn Loomworks")).toMatchObject({ tbc: true, value: "Yarn Loomworks" });
   });
 });
 
 describe("suggestAttributeState and a marker at the edge of a value", () => {
   it("records the marker as the state and the fabric as the value", () => {
-    const result = suggestAttributeState("TBC – Yarn Collective Tessarae");
+    const result = suggestAttributeState("TBC – Yarn Loomworks Harbour");
     expect(result.state).toBe("tbc");
-    expect(result.value).toBe("Yarn Collective Tessarae");
+    expect(result.value).toBe("Yarn Loomworks Harbour");
     expect(result.reason).toMatch(/marker is recorded as the state/i);
   });
 
@@ -1229,16 +1229,16 @@ describe("suggestAttributeState and a marker at the edge of a value", () => {
 
   it("stages the clean value off a fresh read", () => {
     const doc = stageDrawings(
-      [rawItem({ materials: [{ labelRaw: "SOFA", valueRaw: "TBC – Yarn Collective Tessarae", materialCodeRaw: "UPH-07" }] })],
+      [rawItem({ materials: [{ labelRaw: "SOFA", valueRaw: "TBC – Yarn Loomworks Harbour", materialCodeRaw: "UPH-07" }] })],
       FIELDS,
       "S-100.pdf",
       null,
     );
     const observation = doc.items[0]!.observations[0]!;
-    expect(observation.value).toBe("Yarn Collective Tessarae");
+    expect(observation.value).toBe("Yarn Loomworks Harbour");
     expect(observation.state).toBe("tbc");
     // What the page said is never lost: the card prints it under the box.
-    expect(observation.valueRaw).toBe("TBC – Yarn Collective Tessarae");
+    expect(observation.valueRaw).toBe("TBC – Yarn Loomworks Harbour");
   });
 });
 
@@ -1266,9 +1266,9 @@ describe("taking an edge TBC marker off a pack already staged", () => {
             version: 1,
             attrGroup: "material",
             labelRaw: "SOFA",
-            valueRaw: "TBC – Yarn Collective Tessarae",
+            valueRaw: "TBC – Yarn Loomworks Harbour",
             materialCodeRaw: "UPH-07",
-            value: "TBC – Yarn Collective Tessarae",
+            value: "TBC – Yarn Loomworks Harbour",
             unit: null,
             unitSuggested: false,
             specFieldId: "f-com1",
@@ -1290,21 +1290,21 @@ describe("taking an edge TBC marker off a pack already staged", () => {
   it("splits the marker out and keeps the row's id", () => {
     const observation = first(staged({}));
     expect(observation.id).toBe("obs-1");
-    expect(observation.value).toBe("Yarn Collective Tessarae");
+    expect(observation.value).toBe("Yarn Loomworks Harbour");
     expect(observation.state).toBe("tbc");
-    expect(observation.valueRaw).toBe("TBC – Yarn Collective Tessarae");
+    expect(observation.valueRaw).toBe("TBC – Yarn Loomworks Harbour");
   });
 
   it("leaves the state alone where it was already TBC", () => {
     const observation = first(staged({ state: "tbc" }));
     expect(observation.state).toBe("tbc");
-    expect(observation.value).toBe("Yarn Collective Tessarae");
+    expect(observation.value).toBe("Yarn Loomworks Harbour");
   });
 
   it("never second-guesses a row somebody has edited", () => {
-    expect(first(staged({ version: 2 })).value).toBe("TBC – Yarn Collective Tessarae");
-    expect(first(staged({ reviewStatus: "applied" })).value).toBe("TBC – Yarn Collective Tessarae");
-    expect(first(staged({ reviewStatus: "ignored" })).value).toBe("TBC – Yarn Collective Tessarae");
+    expect(first(staged({ version: 2 })).value).toBe("TBC – Yarn Loomworks Harbour");
+    expect(first(staged({ reviewStatus: "applied" })).value).toBe("TBC – Yarn Loomworks Harbour");
+    expect(first(staged({ reviewStatus: "ignored" })).value).toBe("TBC – Yarn Loomworks Harbour");
   });
 
   it("leaves a dimension's figure alone", () => {
@@ -1325,8 +1325,8 @@ describe("taking an edge TBC marker off a pack already staged", () => {
   });
 
   it("leaves a value with no edge marker exactly as it is", () => {
-    const observation = first(staged({ value: "Yarn Tessarae YC04158 - 01", valueRaw: "Yarn Tessarae YC04158 - 01", state: "confirmed" }));
-    expect(observation.value).toBe("Yarn Tessarae YC04158 - 01");
+    const observation = first(staged({ value: "Yarn Harbour LW44102 - 01", valueRaw: "Yarn Harbour LW44102 - 01", state: "confirmed" }));
+    expect(observation.value).toBe("Yarn Harbour LW44102 - 01");
     expect(observation.state).toBe("confirmed");
   });
 });

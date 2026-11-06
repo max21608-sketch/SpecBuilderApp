@@ -600,7 +600,7 @@ describe("resolveProposals — finishes", () => {
     const proposals = resolveProposals(
       [
         observation({ attributeRaw: "Outside back", valueRaw: "UPH-07" }),
-        observation({ attributeRaw: "Fabric (A configuration)", valueRaw: "CLO003 A (Tibor Blob)" }),
+        observation({ attributeRaw: "Fabric (A configuration)", valueRaw: "CLO003 A (Meridian Drift)" }),
       ],
       regs(),
       ids,

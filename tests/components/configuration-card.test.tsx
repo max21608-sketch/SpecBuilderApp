@@ -314,7 +314,7 @@ describe("applies to, across configurations", () => {
 // one chair.
 // ============================================================================
 describe("a card that is not splitting anything", () => {
-  const pages = () => [page("a", 1, "Tibor Blob Amber Fern", "S-200"), page("b", 2, "Tibor Blob Amber Fern", "S-200")];
+  const pages = () => [page("a", 1, "Meridian Drift Amber", "S-200"), page("b", 2, "Meridian Drift Amber", "S-200")];
 
   /** No variant labels anywhere: what a `one_item` group resolves to. */
   const notSplit = (staged: DrawingItem[]) =>
@@ -414,7 +414,7 @@ describe("a wide observation table has somewhere to scroll", () => {
 describe("a reviewer saying what these pages are", () => {
   const oneItemPages = () => {
     resetIds();
-    return [page("a", 1, "Tibor Blob Amber Fern", "S-200"), page("b", 2, "Tibor Blob Amber Fern", "S-200")];
+    return [page("a", 1, "Meridian Drift Amber", "S-200"), page("b", 2, "Meridian Drift Amber", "S-200")];
   };
   const oneItem = {
     schemaVersion: 2 as const,

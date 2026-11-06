@@ -508,8 +508,8 @@ describeIfDb("the BW standard beside the client's words", () => {
     async () => {
       // `loadRecordAtoms` never SELECTED `qualifier`, so every attribute
       // reached the export, the check sheet and the quote with a null
-      // placement -- "Yarn Tessarae - Main body and self pipe" shipped as
-      // "Yarn Tessarae" while the Specs tab showed both lines.
+      // placement -- "Yarn Harbour - Main body and self pipe" shipped as
+      // "Yarn Harbour" while the Specs tab showed both lines.
       const recordId = await item("__QA Stool", `__QA Q-${Date.now()}`);
       const intakeId = await stage(doc("__QA none", timberCallout()));
       const attributeId = await documentSpec(recordId, intakeId, "__QA oak");
