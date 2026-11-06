@@ -160,6 +160,13 @@ refuses.
 
 Run these in order. Nothing here is automatic.
 
+0. **CI green on the SHA, db tier included.** On GitHub, the commit's checks
+   must show BOTH jobs of the CI workflow passed: `check` (lint, typecheck,
+   the pure and component tiers, the build) and `db-tier` (the whole suite
+   with the database tier required, against a throwaway Postgres). `check`
+   alone is not enough: until 2026-11-06 it was the whole of CI, and every
+   database-tier test skipped behind its green tick (audit H1). A SHA whose
+   `db-tier` is red, missing or still running is not promoted.
 1. **Back up the pilot database.**
    `node --env-file=.env.pilot.local db/backup.mjs --yes-pilot`
    Read the `Target: DATABASE_ENVIRONMENT=pilot (<host>)` line it prints before
