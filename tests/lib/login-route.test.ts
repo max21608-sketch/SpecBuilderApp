@@ -59,3 +59,25 @@ describe("POST /api/auth/login", () => {
     expect((await signIn(email, `198.51.100.${address}`)).status).toBe(429);
   });
 });
+
+describe("POST /api/auth/login when the database cannot be reached", () => {
+  it("on pilot, says so with a reference and never the driver's message", async () => {
+    const saved = process.env.APP_ENV;
+    process.env.APP_ENV = "pilot";
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    state.throws = Object.assign(new Error("connect ECONNREFUSED ep-secret-host.neon.tech:5432"), {
+      name: "NeonDbError",
+    });
+    try {
+      const response = await signIn(`down${address}@example.test`, `192.0.2.${address}`);
+      expect(response.status).toBe(503);
+      const { error } = (await response.json()) as { error: string };
+      expect(error).toMatch(/could not reach the database.*Reference [0-9a-f]{8}/);
+      expect(error).not.toContain("ep-secret-host");
+    } finally {
+      spy.mockRestore();
+      if (saved === undefined) delete process.env.APP_ENV;
+      else process.env.APP_ENV = saved;
+    }
+  });
+});

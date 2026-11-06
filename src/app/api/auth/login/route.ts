@@ -9,11 +9,11 @@
 // answered a deliberately wrong password with a bodyless 500.
 //
 // So: the pair is checked here too, and anything else that goes wrong reaching
-// the database is reported as a sentence rather than as an empty 500. The
-// detail is appended on non-production builds only. A driver failure's message
-// can name a host; it does not carry the credential, and the alternative is the
-// blank page that sent somebody to look at a database string while the database
-// was fine.
+// the database is reported as a sentence rather than as an empty 500, with a
+// reference the log holds the cause under. The driver's own text is appended
+// ONLY on a developer's deployment (audit A12): it used to be appended on
+// everything but production, and pilot holds real data while a driver message
+// can name a host.
 //
 // NOTHING HERE CHANGES WHAT A WRONG PASSWORD ANSWERS. A 401 with "incorrect
 // email or password" is still the only thing a failed sign-in says, and the
@@ -30,7 +30,8 @@ import { json } from "@/lib/db";
 import { makeSessionToken } from "@/lib/auth";
 import { verifyCredentials } from "@/lib/auth-node";
 import { setSessionCookie } from "@/lib/session";
-import { currentAppEnvIsProduction, environmentProblemMessage } from "@/lib/env";
+import { environmentProblemMessage } from "@/lib/env";
+import { explainFailure } from "@/lib/error-detail";
 import { clientAddress, loginThrottle } from "@/lib/login-throttle";
 
 const Body = z.object({
@@ -40,15 +41,15 @@ const Body = z.object({
 
 /** A failure reaching the database, in words, without pretending to know which. */
 function unreachable(cause: unknown): Response {
-  const detail = cause instanceof Error ? cause.message : String(cause);
   const sentence =
     "Signing in could not reach the database. This is the deployment, not your password — " +
     "check DATABASE_URL and DATABASE_ENVIRONMENT on this project.";
+  // Every cause here is the database's, never a sentence this app wrote.
   return json(
     {
       ok: false,
       code: "database_unreachable",
-      error: currentAppEnvIsProduction() ? sentence : `${sentence} (${detail})`,
+      error: explainFailure(sentence, cause, "login", { ownMessages: false }),
     },
     503,
   );

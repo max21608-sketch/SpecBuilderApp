@@ -99,6 +99,7 @@ import {
   type PdfBillSource,
 } from "@/lib/pdf-bill";
 import { requireWriter } from "@/lib/route-guards";
+import { explainFailure } from "@/lib/error-detail";
 
 const XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -514,8 +515,16 @@ async function registerPdfBoq(input: Registered, actor: string, store: PictureSt
   try {
     await store(workbookPathname, workbook.bytes, XLSX_CONTENT_TYPE);
   } catch (cause) {
-    const detail = cause instanceof Error ? cause.message : String(cause);
-    return json({ ok: false, error: `The bill was read, but its spreadsheet could not be stored: ${detail}` }, 502);
+    // The store's own text is for the log, not the screen (audit A12).
+    return json(
+      {
+        ok: false,
+        error: explainFailure("The bill was read, but its spreadsheet could not be stored.", cause, "pdf-bill-store", {
+          ownMessages: false,
+        }),
+      },
+      502,
+    );
   }
 
   const pdfAttachment = await sql`
@@ -739,7 +748,10 @@ async function parseBoqInto(
       201,
     );
   } catch (cause) {
-    const message = cause instanceof Error ? cause.message : String(cause);
+    // A sentence the reader wrote ("That file is not a spreadsheet…") is the
+    // answer and passes through; a driver's or a library's text does not reach
+    // the screen or `intake_runs.error` (audit A12), only the log.
+    const message = explainFailure("This bill could not be read.", cause, "bill-parse");
     await fail(runId, actor, message);
     return json({ ok: false, error: message, importId: runId }, 500);
   }
