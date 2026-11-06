@@ -42,7 +42,7 @@
 // read the same rule, and a client component can import it.
 // ============================================================================
 import { endsOnSegment, expandZoneList, normaliseRef } from "@/lib/record-refs";
-import { TBC_TOKENS, containsPhrase } from "@/lib/spec-vocab";
+import { DEFERRED_TO_SOMEBODY_PHRASES, TBC_TOKENS, containsPhrase } from "@/lib/spec-vocab";
 
 /** What a row of a bill IS. Order is the review's select order. */
 export const BOQ_ROW_KINDS = ["item", "finish_for", "section", "subtotal", "blank"] as const;
@@ -712,7 +712,9 @@ function foldTokens(value: string): string[] {
  * (`parentName`, the item line's first line — matched word by word, and "Arm
  * Chair" against "Armchair" as one word), then position words and the option
  * number. What is left is a placeholder when it
- * is nothing but TBC tokens (`TBC_TOKENS`, the one list) and the filler above.
+ * is nothing but TBC tokens (`TBC_TOKENS`, the one list), phrases leaving the
+ * choice to somebody else (`DEFERRED_TO_SOMEBODY_PHRASES`: "by others",
+ * "client to select"; audit 2026-11-06, C11) and the filler above.
  *
  * "Collection & Pattern Ref: <a collection> … Pattern Repeat: TBC" is NOT a
  * placeholder: it names a collection, and a TBC on one field does not undo
@@ -814,7 +816,11 @@ export function fabricLineIsPlaceholder(text: string | null | undefined, parentN
   //    as much as "Fabric @ Armchair …"). Only at the start: the same word
   //    later in the line may be the fabric's own name.
   const parent = new Set(foldTokens(parentName ?? ""));
-  const phrases = TBC_TOKENS.map((token) => token.split(" ")).sort((a, b) => b.length - a.length);
+  // A TBC phrase, or somebody else choosing it (audit 2026-11-06, C11): both
+  // say no fabric has been named, and "by client" said nothing either.
+  const phrases = [...TBC_TOKENS, ...DEFERRED_TO_SOMEBODY_PHRASES]
+    .map((token) => token.split(" "))
+    .sort((a, b) => b.length - a.length);
   const phraseAt = (at: number) => phrases.find((words) => words.every((word, k) => tokens[at + k] === word));
   let start = 0;
   while (start < tokens.length) {

@@ -63,6 +63,7 @@ import {
   decideBillFinishSlot,
   describeBillFinishSlot,
   type BillFinishKind,
+  type BillFinishPlacement,
 } from "@/lib/bill-finish-kind";
 import {
   effectiveRowImage,
@@ -415,57 +416,123 @@ export type FabricLinePlan = {
    * and the sentence saying why. Absent where it goes on its own item alone.
    */
   forRows?: { rows: number[]; sentence: string };
+  /**
+   * WHY THE CONFIRM WILL REFUSE, on the first line of the kind on an item
+   * whose held bill finish the revision no longer lists — the confirm's own
+   * sentence (`planBillFinishWrites`). Absent where nothing refuses.
+   */
+  refusal?: string;
 };
 
-/**
- * WHAT THE CONFIRM WILL DO WITH EVERY FABRIC LINE, walked in the confirm's own
- * order: sheet by sheet, each sheet's item lines (whose description cells file
- * their own codes) and then its fabric lines; a sheet with no item line is
- * skipped whole, as the confirm skips it.
- *
- * `descriptionCodes(sheetIndex, lineIndex)` is the coded finishes an item
- * line's description cell will file (`descriptionFilesAFinish` over its plan),
- * or none where a revision holds it back. `heldFabric(recordId)` is the bill
- * finishes OF THAT KIND a carried record already holds: a carried line holding
- * the same words files nothing, as at confirm. `heldSlots(sheetIndex,
- * lineIndex)` is the BWS slots (json ids) the item line's record will hold
- * before its finish lines are written — what a carried record holds from any
- * document, and what its description cell is planned to write — so each
- * finish line's slot is decided against what the confirm's own read will
- * find (`decideBillFinishSlot`).
- */
-export function planBillFabrics(input: {
+// ---- THE ONE PLAN (audit 2026-11-06, item 1.5, C5) --------------------------
+//
+// Every finish line's write — the items it lands on, the slot on each, the
+// filing, and whether the revision refuses — is decided ONCE, here, and both
+// the review's sentence (`planBillFabrics`) and the confirm (`writeFabricLine`
+// in confirm-boq.ts, which executes it and decides nothing) read it. That is
+// the `proposalBlockers` rule: two copies of a decision drift.
+//
+// They had. The confirm re-read what a carried record held from the bill for
+// EVERY finish line, rows it had written a moment before in the same confirm
+// included, so the second fabric under one carried item found the first as
+// "held", saw different words and refused the whole bill (`fabric_changed`)
+// — while the review, walking the bill on its own, said "→ COM 2". So the
+// planner takes what each record held BEFORE this confirm (`heldFabric`) and
+// counts the slots it has itself handed out as it walks.
+//
+// THE REFUSAL, re-stated: a finish a carried record held from the bill BEFORE
+// this confirm, of a kind the revision gives that item at least one line of,
+// that none of those lines states any more. Replacing or dropping a held
+// finish is a decision the review has no control for; the record's Specs tab
+// does. A NEW line of a kind the item already holds is not that case: it takes
+// the next free slot. And an item the revision gives NO line of a kind is not
+// read as dropping its held one: a held fabric may have come from the item's
+// own description cell, which a revision does not write again, and refusing
+// every revision of such a bill would leave nobody able to move on.
+
+/** What one finish line will write, decided once. */
+export type BillFinishWrite = {
+  sheetIndex: number;
+  /** The line's staged index and row. */
+  index: number;
+  lineNo: number;
+  kind: BillFinishKind;
+  /** The value, state and qualifier (`fabricLineWrite`). */
+  written: { value: string | null; state: "tbc" | "confirmed"; qualifier?: string };
+  /** The code it is filed under (`fabricMaterialCode`). */
+  materialCode: string | null;
+  /**
+   * Per item row it goes on (`finishLineTargets`, in sheet order; a lone
+   * `null` row where it names none): `held` where a carried record already
+   * holds these words from the bill, so nothing is written there; otherwise
+   * the slot it takes.
+   */
+  onRows: { row: number | null; held: boolean; placement: BillFinishPlacement | null }[];
+  /** The rows and the sentence where it goes on more than one item. */
+  targets: { rows: number[]; sentence: string | null };
+  /** The filing against the library as it will stand at this line; null where nothing is written. */
+  filing: FabricFiling | null;
+  /**
+   * The finish it links: a library id, or a PLANNED one (`planned:…`) for a
+   * finish an earlier line or description cell creates in this confirm, or
+   * this line itself where it creates one. Null where it links none.
+   */
+  finishKey: string | null;
+};
+
+/** A revision a held bill finish refuses (see the note above). */
+export type BillFinishRefusal = {
+  sheetIndex: number;
+  /** The item line's row. */
+  row: number;
+  kind: BillFinishKind;
+  /** The value the record holds that the revision no longer states. */
+  held: string;
+  /** The first finish line of that kind on that item: where the review shows it. */
+  lineIndex: number;
+  sentence: string;
+};
+
+export type BillFinishPlan = {
+  /** By `sheetIndex:lineIndex`. */
+  lines: Map<string, BillFinishWrite>;
+  refusals: BillFinishRefusal[];
+  /** The finishes this confirm creates, by planned id (`planned:…`). */
+  planned: Map<string, Planned>;
+  /** The in-house series a minted code is numbered in (`BW-AMB-`). */
+  series: string;
+};
+
+type PlanInput = {
   sheets: readonly PlanSheet[];
-  rowImages: BoqRowImages | null | undefined;
   library: readonly Finish[];
-  heldSwatches: ReadonlySet<string>;
   prefix: string | null;
   descriptionCodes: (sheetIndex: number, lineIndex: number) => readonly { code: string; words: string | null }[];
   heldFabric: (recordId: string, kind: BillFinishKind) => readonly string[];
   heldSlots: (sheetIndex: number, lineIndex: number) => readonly number[];
-}): Map<string, FabricLinePlan> {
+};
+
+/**
+ * THE ONE PLAN for every finish line of a bill, walked in the confirm's own
+ * order: sheet by sheet, each sheet's item lines (whose description cells file
+ * their own codes) and then its finish lines; a sheet with no item line is
+ * skipped whole, as the confirm skips it.
+ *
+ * `descriptionCodes(sheetIndex, lineIndex)` is the coded finishes an item
+ * line's description cell will file, or none where a revision holds it back.
+ * `heldFabric(recordId, kind)` is the bill finishes OF THAT KIND a carried
+ * record held BEFORE this confirm. `heldSlots(sheetIndex, lineIndex)` is the
+ * BWS slots (json ids) the item line's record will hold before its finish
+ * lines are written: what a carried record holds from any document, and what
+ * its description cell is planned to write (`billFinishPlanInputs` builds
+ * both, for both callers).
+ */
+export function planBillFinishWrites(input: PlanInput): BillFinishPlan {
   const library: Finish[] = [...input.library];
   const planned = new Map<string, Planned>();
   const series = internalFinishSeries(input.prefix);
-  const groups = new Map<string, SwatchCandidate[]>();
-  /** Per line: what it files (null where a carried record already holds it), and under which finish. */
-  const filings = new Map<
-    string,
-    {
-      filing: FabricFiling | null;
-      candidate: SwatchCandidate;
-      key: string | null;
-      chosen: ChosenPicture;
-      goesTo: string;
-      kind: BillFinishKind;
-      tbc?: boolean;
-      writes?: { value: string; qualifier: string | null };
-      byCodeHeading?: string;
-      forRows?: { rows: number[]; sentence: string };
-    }
-  >();
-  /** The slots each item holds as its finish lines are walked, by the item's row on the sheet. */
-  const slotsByItem = new Map<number, Set<number>>();
+  const lines = new Map<string, BillFinishWrite>();
+  const refusals: BillFinishRefusal[] = [];
   const plan = (finish: Finish, rowNo: number, minted: boolean) => {
     library.push(finish);
     planned.set(finish.id, { finish, rowNo, minted });
@@ -485,112 +552,210 @@ export function planBillFabrics(input: {
       }
     }
 
-    for (const line of items) {
-      slotsByItem.set(line.lineNo, new Set(input.heldSlots(sheetIndex, line.index)));
-    }
+    /** The slots each item holds as its finish lines are walked, by the item's row. */
+    const slotsByItem = new Map<number, Set<number>>();
+    for (const line of items) slotsByItem.set(line.lineNo, new Set(input.heldSlots(sheetIndex, line.index)));
+    /** What the revision states, per carried item row and kind, and the first line stating it. */
+    const statedByItem = new Map<number, Map<BillFinishKind, { values: Set<string>; firstLine: number }>>();
 
     for (const line of live.filter((entry) => entry.rowKind === "finish_for")) {
-      const key = `${sheetIndex}:${line.index}`;
       const parent = line.finishFor ? sheet.lines.find((entry) => entry.lineNo === line.finishFor?.row) : undefined;
-      // EVERY ITEM IT GOES ON, by the confirm's own decision: its own, and any
-      // other line of the phase carrying the code it names with no finish of its own.
       const targets = finishLineTargets(sheet.lines, line);
-      // What the confirm will write, decided by the confirm's own function.
       const written = fabricLineWrite(line, parent ? billItemName(parent) : null);
       const says = written.value ?? "";
       const { kind } = billFinishLineKind(line);
-      const candidate: SwatchCandidate = {
-        sheetName: sheet.sheetName,
-        rowNo: line.lineNo,
-        // THE PICTURE THE CONFIRM WILL FILE: a person's crop or "no picture"
-        // where they chose one, the bill's own otherwise.
-        image: effectiveRowImage({ rowImages: input.rowImages }, sheet.sheetName, line),
-      };
-      // THE SLOT ON EACH ITEM, decided as the confirm decides it: against what
-      // that item holds, then each finish line above this one on the same item.
-      // A carried item already holding these words from the bill is skipped.
-      const onRows: { row: number | null; goesTo: string }[] = [];
+
+      const onRows: BillFinishWrite["onRows"] = [];
       for (const row of targets.rows.length > 0 ? targets.rows : [null]) {
         const item = row === null ? undefined : sheet.lines.find((entry) => entry.lineNo === row);
-        if (item?.replaces && input.heldFabric(item.replaces.recordId, kind).includes(says)) continue;
+        if (row !== null && item?.replaces) {
+          const byKind = statedByItem.get(row) ?? new Map();
+          const stated = byKind.get(kind) ?? { values: new Set<string>(), firstLine: line.index };
+          stated.values.add(says);
+          byKind.set(kind, stated);
+          statedByItem.set(row, byKind);
+          if (input.heldFabric(item.replaces.recordId, kind).includes(says)) {
+            onRows.push({ row, held: true, placement: null });
+            continue;
+          }
+        }
         const taken = (row !== null && slotsByItem.get(row)) || new Set<number>();
         const placement = decideBillFinishSlot(kind, taken);
         if (placement.jsonId !== null) taken.add(placement.jsonId);
-        onRows.push({ row, goesTo: describeBillFinishSlot(placement) });
+        onRows.push({ row, held: false, placement });
       }
-      if (onRows.length === 0) {
-        filings.set(key, {
-          filing: null,
-          candidate,
-          key: null,
-          chosen: chosenPicture(line.picture),
-          goesTo: "→ nothing written",
-          kind,
-        });
-        continue;
-      }
-      const byScheduleCode = filedByScheduleCode(line);
-      const filing = decideFabricFiling({
-        materialCode: fabricMaterialCode(line),
-        says,
-        words: line.itemDescription,
-        parentName: parent ? billItemName(parent) : null,
-        library,
-        byScheduleCode,
-      });
+
+      const writes = onRows.some((entry) => !entry.held);
+      let filing: FabricFiling | null = null;
       let finishKey: string | null = null;
-      if (filing.outcome === "matched" || filing.outcome === "same_words") finishKey = filing.finish.id;
-      else if (filing.outcome === "new") {
-        finishKey = `planned:${sheetIndex}:${line.lineNo}`;
-        plan(pendingFinish(finishKey, filing.code, "client", filing.describe ? says : null), line.lineNo, false);
-      } else if (filing.outcome === "mint") {
-        finishKey = `planned:${sheetIndex}:${line.lineNo}`;
-        plan(pendingFinish(finishKey, `${series}…`, "internal", says), line.lineNo, true);
+      if (writes) {
+        filing = decideFabricFiling({
+          materialCode: fabricMaterialCode(line),
+          says,
+          words: line.itemDescription,
+          parentName: parent ? billItemName(parent) : null,
+          library,
+          byScheduleCode: filedByScheduleCode(line),
+        });
+        if (filing.outcome === "matched" || filing.outcome === "same_words") finishKey = filing.finish.id;
+        else if (filing.outcome === "new") {
+          finishKey = `planned:${sheetIndex}:${line.lineNo}`;
+          plan(pendingFinish(finishKey, filing.code, "client", filing.describe ? says : null), line.lineNo, false);
+        } else if (filing.outcome === "mint") {
+          finishKey = `planned:${sheetIndex}:${line.lineNo}`;
+          plan(pendingFinish(finishKey, `${series}…`, "internal", says), line.lineNo, true);
+        }
       }
-      if (finishKey) groups.set(finishKey, [...(groups.get(finishKey) ?? []), candidate]);
-      filings.set(key, {
-        filing,
-        candidate,
-        key: finishKey,
-        chosen: chosenPicture(line.picture),
-        goesTo: describeOnRows(onRows, targets.rows.length > 1),
-        ...(targets.sentence ? { forRows: { rows: targets.rows, sentence: targets.sentence } } : {}),
+      lines.set(`${sheetIndex}:${line.index}`, {
+        sheetIndex,
+        index: line.index,
+        lineNo: line.lineNo,
         kind,
-        tbc: written.state === "tbc",
-        ...(byScheduleCode && written.value && written.value !== billFinishLineWords(line)
-          ? { writes: { value: written.value, qualifier: written.qualifier ?? null } }
-          : {}),
-        ...(byScheduleCode ? { byCodeHeading: sheet.columns?.finishCode?.heading?.trim() || "finish code" } : {}),
+        written,
+        materialCode: fabricMaterialCode(line),
+        onRows,
+        targets: { rows: targets.rows, sentence: targets.sentence ?? null },
+        filing,
+        finishKey,
       });
     }
+
+    // THE REFUSAL, per carried item and per kind the revision gives it a line
+    // of: a finish it held from the bill that no line of that kind states now.
+    for (const [row, byKind] of statedByItem) {
+      const item = sheet.lines.find((entry) => entry.lineNo === row);
+      if (!item?.replaces) continue;
+      for (const [kind, stated] of byKind) {
+        for (const held of input.heldFabric(item.replaces.recordId, kind)) {
+          if (stated.values.has(held)) continue;
+          const noun = billFinishNoun(kind);
+          refusals.push({
+            sheetIndex,
+            row,
+            kind,
+            held,
+            lineIndex: stated.firstLine,
+            sentence:
+              `Row ${row}'s record holds the ${noun} “${held}” from the bill, and this revision no longer lists it. ` +
+              `Changing or dropping a ${noun} the record holds is not done by a revision: retire it on the record's ` +
+              "Specs tab first, then confirm the revision.",
+          });
+        }
+      }
+    }
+  }
+  return { lines, refusals, planned, series };
+}
+
+/**
+ * The two per-line inputs the planner reads, built ONE way for both callers
+ * (the review GET and the confirm) from what each already holds: the
+ * description plans per sheet, what each carried record holds now
+ * (`loadHeldAttributes`), and the register's field id → json id.
+ */
+export function billFinishPlanInputs(input: {
+  sheets: readonly { lines: readonly { index: number; rowKind?: string | null; replaces?: { recordId: string } | null }[] }[];
+  /** Per sheet: each item line's description plan, and why a revision holds it back (null where it does not). */
+  descriptions: readonly ReadonlyMap<number, { attributes: readonly { materialCode: string | null; attrGroup: string; finishWords: string | null; specFieldId: string | null }[]; held: boolean }>[];
+  /** The BWS field ids each carried record holds now, from any document. */
+  carriedFieldIds: (recordId: string) => readonly string[];
+  jsonIdOfField: ReadonlyMap<string, number>;
+}): Pick<PlanInput, "descriptionCodes" | "heldSlots"> {
+  const description = (sheetIndex: number, lineIndex: number) => {
+    const plan = input.descriptions[sheetIndex]?.get(lineIndex);
+    return plan && !plan.held ? plan : null;
+  };
+  return {
+    descriptionCodes: (sheetIndex, lineIndex) =>
+      (description(sheetIndex, lineIndex)?.attributes ?? []).filter(descriptionFilesAFinish).map((attribute) => ({
+        code: attribute.materialCode as string,
+        words: attribute.finishWords,
+      })),
+    heldSlots: (sheetIndex, lineIndex) => {
+      const line = input.sheets[sheetIndex]?.lines.find((entry) => entry.index === lineIndex);
+      const carried = line?.replaces && line.rowKind !== "finish_for" ? input.carriedFieldIds(line.replaces.recordId) : [];
+      const written = (description(sheetIndex, lineIndex)?.attributes ?? []).map((attribute) => attribute.specFieldId);
+      return [...carried, ...written].flatMap((fieldId) => {
+        const jsonId = fieldId ? input.jsonIdOfField.get(fieldId) : undefined;
+        return jsonId === undefined ? [] : [jsonId];
+      });
+    },
+  };
+}
+
+/**
+ * WHAT THE CONFIRM WILL DO WITH EVERY FABRIC LINE, in the review's words: the
+ * ONE plan (`planBillFinishWrites`), described, with the swatch each code
+ * takes (`planFinishSwatches`) beside it.
+ */
+export function planBillFabrics(
+  input: PlanInput & { rowImages: BoqRowImages | null | undefined; heldSwatches: ReadonlySet<string> },
+): Map<string, FabricLinePlan> {
+  const { lines, refusals, planned, series } = planBillFinishWrites(input);
+  const refusalAt = new Map<string, string>();
+  for (const refusal of refusals) {
+    const key = `${refusal.sheetIndex}:${refusal.lineIndex}`;
+    refusalAt.set(key, refusalAt.has(key) ? `${refusalAt.get(key)} ${refusal.sentence}` : refusal.sentence);
+  }
+
+  const groups = new Map<string, SwatchCandidate[]>();
+  const candidates = new Map<string, { candidate: SwatchCandidate; chosen: ChosenPicture }>();
+  for (const [key, write] of lines) {
+    const sheet = input.sheets[write.sheetIndex];
+    const line = sheet?.lines.find((entry) => entry.index === write.index);
+    if (!sheet || !line) continue;
+    const candidate: SwatchCandidate = {
+      sheetName: sheet.sheetName,
+      rowNo: line.lineNo,
+      // THE PICTURE THE CONFIRM WILL FILE: a person's crop or "no picture"
+      // where they chose one, the bill's own otherwise.
+      image: effectiveRowImage({ rowImages: input.rowImages }, sheet.sheetName, line),
+    };
+    candidates.set(key, { candidate, chosen: chosenPicture(line.picture) });
+    if (write.finishKey) groups.set(write.finishKey, [...(groups.get(write.finishKey) ?? []), candidate]);
   }
 
   const swatches = planFinishSwatches(groups, input.heldSwatches);
   const out = new Map<string, FabricLinePlan>();
-  for (const [key, { filing, candidate, key: finishKey, chosen, goesTo, kind, tbc, writes, byCodeHeading, forRows }] of filings) {
-    if (filing === null) {
+  for (const [key, write] of lines) {
+    const sheet = input.sheets[write.sheetIndex];
+    const line = sheet?.lines.find((entry) => entry.index === write.index);
+    const picture = candidates.get(key);
+    if (!sheet || !line || !picture) continue;
+    const refusal = refusalAt.get(key);
+    const writing = write.onRows.filter((entry) => !entry.held);
+    if (write.filing === null) {
       out.set(key, {
-        goesTo,
+        goesTo: "→ nothing written",
         filing: "already on the record from the bill — nothing filed",
         swatch: null,
         askForShortCode: false,
+        ...(refusal ? { refusal } : {}),
       });
       continue;
     }
-    const filed = describeFiling(filing, planned, series, candidate.rowNo, kind);
+    const byScheduleCode = filedByScheduleCode(line);
+    const byCodeHeading = byScheduleCode ? sheet.columns?.finishCode?.heading?.trim() || "finish code" : undefined;
+    const filed = describeFiling(write.filing, planned, series, line.lineNo, write.kind);
     out.set(key, {
-      goesTo,
+      goesTo: describeOnRows(
+        writing.map((entry) => ({ row: entry.row, goesTo: describeBillFinishSlot(entry.placement as BillFinishPlacement) })),
+        write.targets.rows.length > 1,
+      ),
       // A schedule-coded line says which column it was filed by, and that the
       // schedule — not the bill's copy of it — describes the code.
       filing:
-        byCodeHeading && (filing.outcome === "new" || filing.outcome === "matched")
-          ? `${filed}, by its ${byCodeHeading}${filing.outcome === "new" ? " — described when the finishes schedule is read" : ""}`
+        byCodeHeading && (write.filing.outcome === "new" || write.filing.outcome === "matched")
+          ? `${filed}, by its ${byCodeHeading}${write.filing.outcome === "new" ? " — described when the finishes schedule is read" : ""}`
           : filed,
-      swatch: finishKey ? describeSwatch(swatches.get(finishKey), candidate, chosen) : null,
-      askForShortCode: filing.outcome === "mint" && series === INTERNAL_FINISH_PREFIX,
-      tbc,
-      ...(writes ? { writes } : {}),
-      ...(forRows ? { forRows } : {}),
+      swatch: write.finishKey ? describeSwatch(swatches.get(write.finishKey), picture.candidate, picture.chosen) : null,
+      askForShortCode: write.filing.outcome === "mint" && series === INTERNAL_FINISH_PREFIX,
+      tbc: write.written.state === "tbc",
+      ...(byScheduleCode && write.written.value && write.written.value !== billFinishLineWords(line)
+        ? { writes: { value: write.written.value, qualifier: write.written.qualifier ?? null } }
+        : {}),
+      ...(write.targets.sentence ? { forRows: { rows: write.targets.rows, sentence: write.targets.sentence } } : {}),
+      ...(refusal ? { refusal } : {}),
     });
   }
   return out;

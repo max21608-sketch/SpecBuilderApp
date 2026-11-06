@@ -36,25 +36,24 @@ import {
   sheetsNeedingColumns,
   type StagedBoqSheet,
 } from "@/lib/boq-import";
-import { effectiveArea } from "@/lib/boq-reconcile";
+import { effectiveArea, type LinePairing } from "@/lib/boq-reconcile";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
-import { finishLineTargets, rowKindProblems, type RowKindFields } from "@/lib/boq-row-kinds";
+import { rowKindProblems, type RowKindFields } from "@/lib/boq-row-kinds";
 import {
   BILL_FINISH_SLOT_IDS,
   billFinishNoun,
-  decideBillFinishSlot,
+  describeBillFinishSlot,
+  type BillFinishPlacement,
 } from "@/lib/bill-finish-kind";
 import { normaliseFinishCode, resolveFinishCodeInWalk, type Finish, type FinishCodeOrigin } from "@/lib/finishes";
 import { createFinish, mintInternalFinishCode } from "@/lib/finish-edit";
 import {
-  billFinishLineKind,
-  decideFabricFiling,
+  billFinishPlanInputs,
   descriptionFilesAFinish,
-  fabricLineWrite,
-  fabricMaterialCode,
-  filedByScheduleCode,
+  planBillFinishWrites,
   planFinishSwatches,
+  type BillFinishWrite,
   swatchDifferNotice,
   type FabricFiling,
   type SwatchCandidate,
@@ -114,8 +113,11 @@ type StagedLine = {
   levelStatus?: string;
   levelReason?: string | null;
   ignored: boolean;
-  /** The record this line continues, at the version the reviewer was shown. */
-  replaces?: { recordId: string; recordVersion: number } | null;
+  /**
+   * The record this line continues, at the version the reviewer was shown;
+   * `restore` where it is one an earlier revision retired (`LinePairing`).
+   */
+  replaces?: LinePairing | null;
 } & RowKindFields;
 
 /**
@@ -316,6 +318,26 @@ export async function confirmBoqImport(
     .map((sheet) => (sheet as StagedBoqSheet).replacesRunId ?? null)
     .filter((id): id is string => id !== null);
 
+  // TWO SHEETS NEVER REVISE ONE PHASE (audit 2026-11-06, C2). Each sheet's
+  // retire step takes every record on the phase that SHEET did not carry, so
+  // the second sheet retired the first sheet's lines — new records included —
+  // and the bill confirmed with only the last tab live; the retired count was
+  // the only sign. The review's control refuses it too (the sheet PATCH), and
+  // this is re-checked here because a refusal on a screen is not a gate.
+  const sheetsByTarget = new Map<string, string[]>();
+  for (const sheet of sheets as StagedBoqSheet[]) {
+    if (!sheet.replacesRunId) continue;
+    sheetsByTarget.set(sheet.replacesRunId, [...(sheetsByTarget.get(sheet.replacesRunId) ?? []), sheet.sheetName]);
+  }
+  const twice = [...sheetsByTarget.values()].find((names) => names.length > 1);
+  if (twice) {
+    throw new DomainConflictError(
+      "phase_revised_twice",
+      `${twice.map((name) => `“${name}”`).join(" and ")} are both set to revise the same phase. A phase is revised ` +
+        "by one tab: make the others new phases, or drop them.",
+    );
+  }
+
   // Every run a sheet claims to revise must still be this project's, and
   // active. Re-checked rather than trusted: the reviewer chose it minutes or
   // days ago, and a retired run is not something to write a revision into.
@@ -412,7 +434,65 @@ export async function confirmBoqImport(
     else if (line.replaces) mockupDropped.push(recordId);
   };
 
-  for (const sheet of sheets as StagedBoqSheet[]) {
+  // ---- WHAT EVERY FINISH LINE WILL WRITE, decided ONCE, before anything is
+  // written (audit 2026-11-06, item 1.5, C5) ----------------------------------
+  // The review's sentence under each finish line reads this same plan, built
+  // from the same inputs by the same function (`billFinishPlanInputs`), so the
+  // arrow on the row is the write. Everything it reads is read here, under
+  // the lock and before this confirm writes a row: what each carried record
+  // held from the bill BEFORE, which a re-read per line used to confuse with
+  // the rows this confirm had just written.
+  const allSheets = parsed.sheets as StagedBoqSheet[];
+  const descriptionPlans = allSheets.map((sheet) =>
+    sheet.ignored
+      ? new Map<number, BillDescriptionPlan>()
+      : planSheetDescriptions(sheet.lines as StagedLine[], descriptionFields, sheetColumnHeadings(sheet)),
+  );
+  const carriedIds = allSheets.flatMap((sheet) =>
+    (sheet.lines as StagedLine[]).flatMap((line) =>
+      line.replaces && line.rowKind !== "finish_for" ? [line.replaces.recordId] : [],
+    ),
+  );
+  // What each record this revision carries already holds, read under the
+  // lock, so the refusal is decided against what is there now.
+  const held = await loadHeldAttributes(txn, carriedIds);
+  const heldFinishes = await loadHeldBillFinishes(txn, carriedIds);
+  const noHeld = { fromBill: false, slots: [], fieldIds: [] };
+  /** Per sheet: each item line's description, and whether a revision holds it back. */
+  const descriptionDecisions = allSheets.map((sheet, sheetIndex) => {
+    const decided = new Map<number, BillDescriptionPlan & { held: boolean }>();
+    for (const [index, plan] of descriptionPlans[sheetIndex] ?? []) {
+      const line = (sheet.lines as StagedLine[]).find((entry) => entry.index === index);
+      const holding = line?.replaces ? (held.get(line.replaces.recordId) ?? noHeld) : null;
+      decided.set(index, { ...plan, held: holding ? revisionDescriptionRefusal(plan, holding) !== null : false });
+    }
+    return decided;
+  });
+  const finishPlan = planBillFinishWrites({
+    sheets: allSheets as unknown as Parameters<typeof planBillFinishWrites>[0]["sheets"],
+    library,
+    prefix: null,
+    heldFabric: (recordId, kind) =>
+      (heldFinishes.get(recordId) ?? []).filter((entry) => entry.kind === kind).map((entry) => entry.value),
+    ...billFinishPlanInputs({
+      sheets: allSheets as unknown as Parameters<typeof billFinishPlanInputs>[0]["sheets"],
+      descriptions: descriptionDecisions,
+      carriedFieldIds: (recordId) => held.get(recordId)?.fieldIds ?? [],
+      jsonIdOfField: new Map(descriptionFields.map((field) => [field.id, field.jsonId] as const)),
+    }),
+  });
+  if (finishPlan.refusals.length > 0) {
+    throw new DomainConflictError(
+      "fabric_changed",
+      finishPlan.refusals.map((refusal) => refusal.sentence).join(" "),
+      { diff: finishPlan.refusals.map(({ row, kind, held: value }) => ({ row, kind, held: value })) },
+    );
+  }
+  /** Planned finish ids (`planned:…`) → the library row this confirm created for each. */
+  const createdFinishIds = new Map<string, string>();
+
+  for (const [sheetIndex, sheet] of allSheets.entries()) {
+    if (sheet.ignored) continue;
     const live = (sheet.lines as StagedLine[]).filter((line) => !line.ignored);
     // A FABRIC LINE IS NOT A RECORD. It is written below, onto its item.
     const lines = live.filter((line) => line.rowKind !== "finish_for");
@@ -420,13 +500,7 @@ export async function confirmBoqImport(
     if (lines.length === 0) continue;
     /** The record each item line became or continues, by its row on the sheet. */
     const recordByRow = new Map<number, { recordId: string; carried: boolean }>();
-    const plans = planSheetDescriptions(sheet.lines as StagedLine[], descriptionFields, sheetColumnHeadings(sheet));
-    // What each record this revision carries already holds, read under the
-    // lock, so the refusal is decided against what is there now.
-    const held = await loadHeldAttributes(
-      txn,
-      lines.flatMap((line) => (line.replaces && plans.has(line.index) ? [line.replaces.recordId] : [])),
-    );
+    const plans = descriptionDecisions[sheetIndex] ?? new Map<number, BillDescriptionPlan & { held: boolean }>();
     const writeDescription = async (recordId: string, plan: BillDescriptionPlan) => {
       descriptionSpecs += await writeDescriptionAttributes(txn, { recordId, plan, runId, projectId, actor, library });
       recomposeIds.add(recordId);
@@ -495,9 +569,33 @@ export async function confirmBoqImport(
             `BOQ line ${line.lineNo} is paired to an existing record, but this sheet is not marked as revising a run. Reload the review.`,
           );
         }
+        // A RESTORE (audit 2026-11-06, C14): the reviewer chose to bring back
+        // a record an earlier revision retired, because its code is on the
+        // bill again. Written exactly as a pairing, keeping everything that
+        // hangs off the record, from the retired state at the version shown.
+        // When it was retired, the configurations retired with it at the same
+        // moment come back with it (`restoreRun`'s rule): restoring the line
+        // alone would make it an item again and ship it bare.
+        const restoring = target.restore === true;
+        if (restoring) {
+          // Compared in SQL, never through a JS Date: a timestamp round-tripped
+          // through one loses its microseconds and would match nothing.
+          const back = await txn`
+            update spec_records c
+            set status = 'active', retired_at = null, retired_by = null, updated_by = ${actor}
+            from spec_records p
+            where p.id = ${target.recordId} and p.status = 'retired' and p.version = ${target.recordVersion}
+              and c.parent_id = p.id and c.status = 'retired' and c.retired_at = p.retired_at
+            returning c.id
+          `;
+          for (const row of back) recordIds.push(String(row.id));
+        }
         const changed = await txn`
           update spec_records
-          set item_description = ${billItemName(line)},
+          set status = 'active',
+              retired_at = null,
+              retired_by = null,
+              item_description = ${billItemName(line)},
               product_reference = ${line.productReference},
               qty = ${line.qty},
               designer = ${line.designer},
@@ -533,14 +631,19 @@ export async function confirmBoqImport(
           where id = ${target.recordId}
             and project_id = ${projectId}
             and run_id = ${replacesRunId}
-            and status = 'active'
+            and status = ${restoring ? "retired" : "active"}
+            -- A configuration is never a pairing: it carries no bill code and
+            -- follows its line (audit 2026-11-06, C1).
+            and parent_id is null
             and version = ${target.recordVersion}
           returning id
         `;
         if (!changed[0]) {
           throw new DomainConflictError(
             "record_changed",
-            `The record paired with BOQ line ${line.lineNo} has changed, moved phase, or been retired since you reviewed this revision. Nothing was written — reload and check the pairing.`,
+            restoring
+              ? `The retired record BOQ line ${line.lineNo} brings back has changed, moved phase, or been brought back since you reviewed this revision. Nothing was written — reload and check the line.`
+              : `The record paired with BOQ line ${line.lineNo} has changed, moved phase, or been retired since you reviewed this revision. Nothing was written — reload and check the pairing.`,
           );
         }
         carriedForward.add(target.recordId);
@@ -560,11 +663,9 @@ export async function confirmBoqImport(
         // review said which, in the same words, from the same function.
         const plan = plans.get(line.index);
         if (plan) {
-          const refusal = revisionDescriptionRefusal(
-            plan,
-            held.get(target.recordId) ?? { fromBill: false, slots: [], fieldIds: [] },
-          );
-          if (refusal) descriptionsHeldBack += 1;
+          // Decided above, by `revisionDescriptionRefusal`, with the plan the
+          // finish lines' slots were counted against.
+          if (plan.held) descriptionsHeldBack += 1;
           else await writeDescription(target.recordId, plan);
         }
 
@@ -658,23 +759,25 @@ export async function confirmBoqImport(
     for (const [order, line] of fabricLines.entries()) {
       // EVERY ITEM IT IS WRITTEN TO — its own, and any other line of this
       // phase carrying the code it names with no finish line of its own
-      // (`finishLineTargets`, the decision the review's arrow reads).
-      const targets = finishLineTargets(sheet.lines as StagedLine[], line).rows.map((row) => recordByRow.get(row));
-      if (targets.length === 0 || targets.some((target) => !target)) {
+      // (`finishLineTargets`, read by the plan, the decision the review's
+      // arrow reads).
+      const write = finishPlan.lines.get(`${sheetIndex}:${line.index}`);
+      if (!write || write.onRows.length === 0 || write.onRows.some((entry) => entry.row === null || !recordByRow.get(entry.row))) {
         throw new DomainConflictError(
           "fabric_without_item",
           `Row ${line.lineNo}'s fabric belongs to a row that is not being imported. Reload the review.`,
         );
       }
-      const parentLine = (sheet.lines as StagedLine[]).find((entry) => entry.lineNo === line.finishFor?.row);
       const written = await writeFabricLine(txn, {
-        targets: targets as { recordId: string; carried: boolean }[],
+        write,
+        recordOf: (row) => recordByRow.get(row)?.recordId ?? null,
         line,
-        parentName: parentLine ? billItemName(parentLine) : null,
         runId,
         projectId,
         actor,
         library,
+        planned: finishPlan.planned,
+        createdFinishIds,
         finishSlotFields,
         sortOrder: order,
       });
@@ -695,18 +798,41 @@ export async function confirmBoqImport(
     // a BWS job, and that job may already exist — deleting the record loses
     // the mapping for work that is already in the factory. It leaves the tabs
     // and the export; it does not leave the history.
+    //
+    // A CONFIGURATION FOLLOWS ITS LINE (audit 2026-11-06, C1). It carries no
+    // bill code, so no revised line ever pairs with it, and this step used to
+    // retire every one on the phase: S-301 paired, its five TYPEs retired,
+    // and the bare line shipped in their place. Held TWO ways, so a later
+    // change to one leaves the other standing: the live configurations of
+    // every line this sheet keeps are carried forward with it, AND the sweep
+    // reads bill lines only. A line that IS retired takes its configurations
+    // with it, in this change, at the same moment — which is what lets a
+    // restore bring them back together.
     if (replacesRunId) {
+      const following = await txn`
+        select id from spec_records
+        where parent_id = any(${[...carriedForward]}::uuid[]) and status = 'active'
+      `;
+      for (const row of following) carriedForward.add(String(row.id));
       const gone = await txn`
         update spec_records
         set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
         where run_id = ${replacesRunId}
           and project_id = ${projectId}
           and status = 'active'
+          and parent_id is null
           and not (id = any(${[...carriedForward]}::uuid[]))
         returning id
       `;
-      for (const row of gone) recordIds.push(String(row.id));
-      retired += gone.length;
+      const goneIds = gone.map((row) => String(row.id));
+      const goneWith = await txn`
+        update spec_records
+        set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
+        where parent_id = any(${goneIds}::uuid[]) and status = 'active'
+        returning id
+      `;
+      for (const id of [...goneIds, ...goneWith.map((row) => String(row.id))]) recordIds.push(id);
+      retired += gone.length + goneWith.length;
     }
   }
 
@@ -918,10 +1044,15 @@ async function giveBillPicture(
  * the same words on a later line join the same code.
  *
  * A REVISION writes nothing where the record already holds that exact finish
- * OF THIS KIND from a bill, and REFUSES — with a sentence — where it holds a
- * different one of this kind from a bill: replacing a fabric is a decision
- * the review has no control for yet, and a revision that quietly kept or
- * quietly replaced one would be the wrong answer either way.
+ * OF THIS KIND from a bill. A new finish of a kind it holds takes the next
+ * free slot; the confirm REFUSES — before anything is written — only where a
+ * finish it held from the bill BEFORE this confirm is no longer stated by the
+ * revision's lines of that kind for the item (replacing a fabric is a decision
+ * the review has no control for). All of that is DECIDED by
+ * `planBillFinishWrites`, which the review's arrow also reads; this function
+ * executes the plan and decides nothing (audit 2026-11-06, C5: it used to
+ * re-read what the record held per line, its own rows included, and refused
+ * the second fabric of a kind the review had shown as "→ COM 2").
  *
  * ONE LINE, SEVERAL ITEMS (2026-10-15): a line naming a code that other lines
  * of the phase carry with no finish of their own is written to each of them
@@ -936,86 +1067,78 @@ async function giveBillPicture(
 async function writeFabricLine(
   txn: TxnSql,
   input: {
-    /** Every item the line is written to, in sheet order. */
-    targets: readonly { recordId: string; carried: boolean }[];
+    /** The line's write, as the ONE plan decided it (`planBillFinishWrites`). */
+    write: BillFinishWrite;
+    /** The record an item row became or continues in this confirm. */
+    recordOf: (row: number) => string | null;
     line: StagedLine;
-    /** The item line's name — what the bill's "Fabric @ …" lead repeats. */
-    parentName: string | null;
     runId: string;
     projectId: string;
     actor: string;
     library: Finish[];
+    /** The finishes the plan expects this confirm to create, by planned id. */
+    planned: ReadonlyMap<string, { finish: Finish }>;
+    /** Planned id → the library row created for it, filled as the walk goes. */
+    createdFinishIds: Map<string, string>;
     /** Every slot a finish line can fill: json id → field id. */
     finishSlotFields: ReadonlyMap<number, string>;
     sortOrder: number;
   },
 ): Promise<{ written: string[]; finishId: string | null; minted: boolean }> {
-  const { line, runId, projectId, actor, library } = input;
-  // THE ONE DECISION the review predicts: a placeholder is TBC, and a line
-  // with no words has no value — never its code cell (2026-10-13).
-  const written = fabricLineWrite(line, input.parentName);
-  const value = written.value ?? "";
-  const materialCode = fabricMaterialCode(line);
-  const { kind } = billFinishLineKind(line);
+  const { write, line, projectId, actor, library } = input;
+  const writing = write.onRows.filter((entry) => !entry.held);
+  if (writing.length === 0 || write.filing === null) return { written: [], finishId: null, minted: false };
+
+  const finishId = await fileFinish(txn, {
+    projectId,
+    filing: write.filing,
+    finishKey: write.finishKey,
+    says: write.written.value ?? "",
+    library,
+    planned: input.planned,
+    created: input.createdFinishIds,
+    actor,
+  });
 
   const writeTo: string[] = [];
-  for (const target of input.targets) {
-    if (target.carried) {
-      const held = ((await loadHeldBillFinishes(txn, [target.recordId])).get(target.recordId) ?? [])
-        .filter((entry) => entry.kind === kind)
-        .map((entry) => entry.value);
-      if (held.includes(value)) continue;
-      if (held.length > 0) {
-        const noun = billFinishNoun(kind);
+  for (const entry of writing) {
+    const recordId = entry.row === null ? null : input.recordOf(entry.row);
+    if (!recordId) {
+      throw new DomainConflictError(
+        "fabric_without_item",
+        `Row ${line.lineNo}'s fabric belongs to a row that is not being imported. Reload the review.`,
+      );
+    }
+    const placement = entry.placement as BillFinishPlacement;
+    const fieldId = placement.jsonId === null ? null : (input.finishSlotFields.get(placement.jsonId) ?? null);
+    // THE PLAN IS CHECKED, NEVER RE-DECIDED. Where the slot it chose is held
+    // on the record after all, the plan was built from something that moved:
+    // a sentence, not the unique index's 500, and nothing is written.
+    if (fieldId) {
+      const occupied = await txn`
+        select 1 from record_attributes
+        where record_id = ${recordId} and spec_field_id = ${fieldId} and status = 'active'
+      `;
+      if (occupied[0]) {
         throw new DomainConflictError(
-          "fabric_changed",
-          `Row ${line.lineNo}'s ${noun} is not the one this item's record already holds from the bill. A revision that ` +
-            `changes a ${noun} line is not supported yet — correct the ${noun} on the record's Specs tab, then confirm ` +
-            "the revision with the line as the record now reads.",
+          "finish_plan_stale",
+          `Row ${line.lineNo}'s ${billFinishNoun(write.kind)} was to go in ${describeBillFinishSlot(placement).replace(/^→ /, "")} ` +
+            `on row ${entry.row}, which already holds a value. Nothing was written — reload the review.`,
         );
       }
     }
-    writeTo.push(target.recordId);
-  }
-  if (writeTo.length === 0) return { written: [], finishId: null, minted: false };
-
-  const filing = decideFabricFiling({
-    materialCode,
-    says: value,
-    words: line.itemDescription,
-    parentName: input.parentName,
-    library,
-    byScheduleCode: filedByScheduleCode(line),
-  });
-  const finishId = await fileFinish(txn, { projectId, filing, says: value, library, actor });
-
-  const jsonIdOf = new Map([...input.finishSlotFields].map(([jsonId, fieldId]) => [fieldId, jsonId] as const));
-  for (const recordId of writeTo) {
-    // What THIS record holds NOW, from any document and from the finish lines
-    // above this one — read under the lock, as json ids, for the pure decision.
-    const occupied = await txn`
-      select spec_field_id from record_attributes
-      where record_id = ${recordId} and status = 'active'
-        and spec_field_id = any(${[...input.finishSlotFields.values()]}::uuid[])
-    `;
-    const taken = new Set(
-      occupied.flatMap((row) => {
-        const jsonId = jsonIdOf.get(String(row.spec_field_id));
-        return jsonId === undefined ? [] : [jsonId];
-      }),
-    );
-    const placement = decideBillFinishSlot(kind, taken);
-    const fieldId = placement.jsonId === null ? null : (input.finishSlotFields.get(placement.jsonId) ?? null);
     await txn`
       insert into record_attributes
         (record_id, attr_group, dimension_slot, label, value, qualifier, unit, material_code, finish_id, spec_field_id,
          state, source_run_id, source_page, sort_order, created_by, updated_by)
       values
-        (${recordId}, ${placement.attrGroup}, null, ${placement.label}, ${written.value}, ${written.qualifier ?? null}, null,
-         ${materialCode}, ${finishId}, ${fieldId}, ${written.state}, ${runId}, null, ${input.sortOrder}, ${actor}, ${actor})
+        (${recordId}, ${placement.attrGroup}, null, ${placement.label}, ${write.written.value},
+         ${write.written.qualifier ?? null}, null, ${write.materialCode}, ${finishId}, ${fieldId}, ${write.written.state},
+         ${input.runId}, null, ${input.sortOrder}, ${actor}, ${actor})
     `;
+    writeTo.push(recordId);
   }
-  return { written: writeTo, finishId, minted: filing.outcome === "mint" };
+  return { written: writeTo, finishId, minted: write.filing.outcome === "mint" };
 }
 
 /**
@@ -1026,15 +1149,25 @@ async function writeFabricLine(
  */
 async function fileFinish(
   txn: TxnSql,
-  input: { projectId: string; filing: FabricFiling; says: string | null; library: Finish[]; actor: string },
+  input: {
+    projectId: string;
+    filing: FabricFiling;
+    /** The plan's id for the finish: a library id, or `planned:…`. */
+    finishKey: string | null;
+    says: string | null;
+    library: Finish[];
+    planned: ReadonlyMap<string, { finish: Finish }>;
+    created: Map<string, string>;
+    actor: string;
+  },
 ): Promise<string | null> {
-  const { projectId, filing, says, library, actor } = input;
+  const { projectId, filing, finishKey, says, library, actor } = input;
   switch (filing.outcome) {
     case "matched":
     case "same_words":
-      return filing.finish.id;
-    case "new":
-      return createAndRemember(txn, {
+      return realFinishId(finishKey, input);
+    case "new": {
+      const finishId = await createAndRemember(txn, {
         projectId,
         code: filing.code,
         origin: "client",
@@ -1042,16 +1175,50 @@ async function fileFinish(
         library,
         actor,
       });
+      if (finishKey) input.created.set(finishKey, finishId);
+      return finishId;
+    }
     case "mint": {
       // Under the project row lock, which this confirm already holds; the
       // short code is read under it too (`mintInternalFinishCode`).
       const code = await mintInternalFinishCode(txn, projectId);
-      return createAndRemember(txn, { projectId, code, origin: "internal", says, library, actor });
+      const finishId = await createAndRemember(txn, { projectId, code, origin: "internal", says, library, actor });
+      if (finishKey) input.created.set(finishKey, finishId);
+      return finishId;
     }
     case "conflict":
     case "placeholder":
       return null;
   }
+}
+
+/**
+ * The library row a plan's finish id names. A real id is itself. A planned
+ * one is the row this confirm created for it: a finish line's own creation is
+ * remembered by its planned id; a description cell's (`writeDescriptionAttributes`
+ * files those through `fileFinishCode`) is the row now carrying its code. One
+ * that resolves to nothing means the plan and the walk parted — refused, never
+ * linked to a guess.
+ */
+function realFinishId(
+  finishKey: string | null,
+  input: { library: Finish[]; planned: ReadonlyMap<string, { finish: Finish }>; created: Map<string, string> },
+): string {
+  if (!finishKey) throw new Error("a matched filing with no finish");
+  if (!finishKey.startsWith("planned:")) return finishKey;
+  const made = input.created.get(finishKey);
+  if (made) return made;
+  const expected = input.planned.get(finishKey)?.finish.codeNorm;
+  const row = expected
+    ? input.library.find((finish) => finish.codeNorm === expected && !finish.id.startsWith("planned:"))
+    : undefined;
+  if (!row) {
+    throw new DomainConflictError(
+      "finish_plan_stale",
+      "A finish this bill was to create was not created. Nothing was written — reload the review.",
+    );
+  }
+  return row.id;
 }
 
 async function createAndRemember(

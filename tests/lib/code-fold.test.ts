@@ -149,7 +149,10 @@ describe("every matcher reaches the same record", () => {
       // AND NOTHING IS RETIRED. This is the consequence that made the drift
       // worth finding: a record read as no longer listed is retired at confirm,
       // and it carries 14 specs and a picture.
-      expect(result.missing).toEqual([]);
+      // (A suggestion stays listed as offered to its line until accepted —
+      // `suggestedFor` — because the confirm writes only a stored pairing.)
+      expect(result.missing.filter((record) => record.suggestedFor === undefined)).toEqual([]);
+      expect(result.counts.missing).toBe(0);
       expect(result.counts.new).toBe(0);
     }
   });
