@@ -44,7 +44,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   const rows = await sql`
     select cs.id, cs.reason, cs.created_at, a.filename as evidence_filename,
-           (select count(*)::int from record_snapshots s where s.change_set_id = cs.id) as records_changed
+           -- Records, not versions: an open change takes one version per
+           -- transaction since 0052, so one item edited twice is two rows.
+           (select count(distinct s.record_id)::int from record_snapshots s where s.change_set_id = cs.id) as records_changed
     from change_sets cs
     left join attachments a on a.id = cs.evidence_attachment_id
     where cs.project_id = ${id} and cs.actor = ${user.email} and cs.closed_at is null

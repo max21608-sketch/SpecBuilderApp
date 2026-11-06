@@ -300,8 +300,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
 
       // EVERY RECORD THIS TOUCHED, ONCE. `snapshotRecords` takes the lock in
-      // sorted order and `on conflict (record_id, change_set_id) do nothing`
-      // means a record answered twice in one press still gets one version.
+      // sorted order and versions each record once per transaction (0052), so
+      // a record answered twice in one press still gets one version.
       await snapshotRecords(
         txn,
         filed.map((row) => row.recordId),

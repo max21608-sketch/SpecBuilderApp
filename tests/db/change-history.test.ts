@@ -11,14 +11,24 @@ import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { editAnswer } from "@/lib/answer-edit";
-import type { TxnSql } from "@/lib/db-transaction";
+import { withTransaction, type TxnSql } from "@/lib/db-transaction";
+import { openChangeSet } from "@/lib/change-sets";
+import { createAttribute } from "@/lib/manual-capture";
+import { snapshotRecords } from "@/lib/record-snapshot";
+import { takeBaseline } from "@/lib/baselines";
+import { diffSnapshots, parseAtoms } from "@/lib/snapshot-diff";
+import { loadProjectHistory } from "@/lib/change-history";
+import type { SqlLike } from "@/lib/record-atoms";
 
 // The history route is behind a session like every other read. Nothing else in
 // this file imports it.
+// `sessionEmail` lets one test be the actor whose open change the changes
+// route reports.
+let sessionEmail = "__qa@example.test";
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
     id: "00000000-0000-0000-0000-000000000001",
-    email: "__qa@example.test",
+    email: sessionEmail,
     name: "QA User",
     role: "admin",
   }),
@@ -146,25 +156,173 @@ describeIfDb("0012 change sets and versions", () => {
     expect(rows.rows.map((row) => row.snapshot_no)).toEqual([1, 2, 3]);
   });
 
-  it("refuses a second version of one record under the same change", async () => {
+  it("lets one change hold two versions of a record, and still refuses a repeated number", async () => {
+    // 0052 dropped `record_snapshots_record_change_key`: an OPEN change spans
+    // many transactions, and each of them is a version (audit B1). What the
+    // database still refuses is two versions with one NUMBER.
     const record = await client.query(
       `insert into spec_records (project_id, run_id, record_no, category_id, item_description, created_by, updated_by)
-       values ($1, $2, 9004, $3, '__QA One per change', 'qa', 'qa') returning id`,
+       values ($1, $2, 9004, $3, '__QA Two in one change', 'qa', 'qa') returning id`,
       [projectId, runId, categoryId],
     );
-    const changeSetId = await openChange("drawing_confirm");
-    await client.query(
-      `insert into record_snapshots (record_id, change_set_id, snapshot_no, atoms, cells)
-       values ($1, $2, 1, '{}'::jsonb, '[]'::jsonb)`,
-      [record.rows[0].id, changeSetId],
-    );
+    const changeSetId = await openChange("manual_edit");
+    for (const no of [1, 2]) {
+      await client.query(
+        `insert into record_snapshots (record_id, change_set_id, snapshot_no, atoms, cells)
+         values ($1, $2, $3, '{}'::jsonb, '[]'::jsonb)`,
+        [record.rows[0].id, changeSetId, no],
+      );
+    }
     await expect(
       client.query(
         `insert into record_snapshots (record_id, change_set_id, snapshot_no, atoms, cells)
          values ($1, $2, 2, '{}'::jsonb, '[]'::jsonb)`,
         [record.rows[0].id, changeSetId],
       ),
-    ).rejects.toThrow(/record_snapshots_record_change_key/);
+    ).rejects.toThrow(/record_snapshots_record_no_key/);
+  });
+
+  // ---- B1: one version per TRANSACTION while a change is open ---------------
+  //
+  // Max, 2026-11-06. The snapshot insert was `on conflict (record_id,
+  // change_set_id) do nothing`, written for ONE transaction touching a record
+  // twice. An open change spans many, so the first edit to a record took the
+  // version and every later edit in the same change took none: the version
+  // held W, D surfaced in the NEXT change's diff under that change's reason,
+  // and a baseline taken in between froze a state the record never had.
+
+  async function openPersonChange(actor: string): Promise<string> {
+    return withTransaction((txn) =>
+      openChangeSet(txn, { projectId, kind: "manual_edit", actor, reason: "__QA a client's email", open: true }),
+    );
+  }
+
+  async function newRecord(recordNo: number, description: string): Promise<string> {
+    const row = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, status, created_by, updated_by)
+       values ($1, $2, $3, $4, $5, 'active', 'qa', 'qa') returning id`,
+      [projectId, runId, recordNo, categoryId, description],
+    );
+    return row.rows[0].id;
+  }
+
+  function dimension(recordId: string, slot: "W" | "D", value: string, actor: string) {
+    return {
+      recordId,
+      attrGroup: "dimension",
+      label: slot === "W" ? "Width" : "Depth",
+      value,
+      unit: "mm",
+      dimensionSlot: slot,
+      state: "confirmed" as const,
+      actor,
+    };
+  }
+
+  async function versionsOf(recordId: string) {
+    const rows = await client.query(
+      `select snapshot_no, change_set_id, atoms from record_snapshots where record_id = $1 order by snapshot_no`,
+      [recordId],
+    );
+    return rows.rows as { snapshot_no: number; change_set_id: string; atoms: unknown }[];
+  }
+
+  /** The test's own client as the tagged-sql shape the loaders take. */
+  function asPool(): SqlLike {
+    return async (strings, ...values) => {
+      let text = "";
+      for (let i = 0; i < strings.length; i += 1) {
+        text += strings[i] ?? "";
+        if (i < values.length) text += `$${i + 1}`;
+      }
+      return (await client.query(text, values)).rows;
+    };
+  }
+
+  it("B1: two transactions inside one open change take two versions, the second holding both edits", async () => {
+    const actor = "__qa-open-change@example.test";
+    const changeSetId = await openPersonChange(actor);
+    const recordId = await newRecord(9020, "__QA Edited twice in one change");
+
+    const w = await withTransaction((txn) => createAttribute(txn, dimension(recordId, "W", "900", actor)));
+    const d = await withTransaction((txn) => createAttribute(txn, dimension(recordId, "D", "600", actor)));
+    expect(w.changeSetId).toBe(changeSetId);
+    expect(d.changeSetId).toBe(changeSetId);
+
+    const versions = await versionsOf(recordId);
+    expect(versions.map((v) => v.snapshot_no)).toEqual([1, 2]);
+    expect(versions.every((v) => v.change_set_id === changeSetId)).toBe(true);
+
+    const first = parseAtoms(versions[0]!.atoms);
+    const second = parseAtoms(versions[1]!.atoms);
+    expect(first.attributes.map((a) => a.dimensionSlot)).toEqual(["W"]);
+    expect(second.attributes.map((a) => a.dimensionSlot).sort()).toEqual(["D", "W"]);
+
+    // The diff between them is the second edit and nothing else.
+    const diff = diffSnapshots(first, second);
+    expect(diff.attributes).toHaveLength(1);
+    expect(diff.attributes[0]).toMatchObject({ change: "added", label: "Depth" });
+
+    // The trail names the record ONCE under the change, at its newest version,
+    // and counts it once. Two rows here read as "2 items fixed at this point"
+    // for one item edited twice.
+    const trail = await loadProjectHistory(asPool(), projectId, { limit: 500 });
+    const change = trail.find((entry) => entry.id === changeSetId);
+    expect(change?.records.filter((r) => r.id === recordId)).toEqual([expect.objectContaining({ snapshotNo: 2 })]);
+    expect(change?.recordsChanged).toBe(1);
+
+    const { GET } = await import("@/app/api/projects/[id]/changes/route");
+    sessionEmail = actor;
+    try {
+      const response = await GET(new Request("http://localhost/test"), { params: Promise.resolve({ id: projectId }) });
+      const body = (await response.json()) as { open: { id: string; recordsChanged: number } | null };
+      expect(body.open?.id).toBe(changeSetId);
+      expect(body.open?.recordsChanged).toBe(1);
+    } finally {
+      sessionEmail = "__qa@example.test";
+    }
+  });
+
+  it("B1: one transaction that writes a spec and promotes its answers is still ONE version (0012)", async () => {
+    const actor = "__qa-one-txn@example.test";
+    const changeSetId = await openPersonChange(actor);
+    const recordId = await newRecord(9021, "__QA One act");
+
+    await withTransaction(async (txn) => {
+      // createAttribute writes the attribute, fills the checklist answers it
+      // answers, and versions the record. A second call to snapshotRecords in
+      // the SAME transaction is what a confirm that touches a record twice
+      // does, and it must not number a second version.
+      await createAttribute(txn, dimension(recordId, "W", "900", actor));
+      const again = await snapshotRecords(txn, [recordId], changeSetId);
+      expect(again.size).toBe(0);
+    });
+
+    const versions = await versionsOf(recordId);
+    expect(versions.map((v) => v.snapshot_no)).toEqual([1]);
+  });
+
+  it("B1: a baseline taken between two edits of one open change freezes the first, and the record moves on", async () => {
+    const actor = "__qa-baseline-between@example.test";
+    await openPersonChange(actor);
+    const recordId = await newRecord(9022, "__QA Baselined mid-change");
+
+    await withTransaction((txn) => createAttribute(txn, dimension(recordId, "W", "900", actor)));
+    const baseline = await withTransaction((txn) =>
+      takeBaseline(txn, { projectId, label: "__QA mid-change", reason: "issued", actor: "__qa-baseliner" }),
+    );
+    await withTransaction((txn) => createAttribute(txn, dimension(recordId, "D", "600", actor)));
+
+    const member = await client.query(
+      `select s.snapshot_no from baseline_members m join record_snapshots s on s.id = m.snapshot_id
+        where m.change_set_id = $1 and m.record_id = $2`,
+      [baseline.changeSetId, recordId],
+    );
+    expect(member.rows[0]?.snapshot_no).toBe(1);
+    const versions = await versionsOf(recordId);
+    // Before 0052 there was no v2: the record's newest version went on
+    // claiming W alone while it held W and D.
+    expect(versions.map((v) => v.snapshot_no)).toEqual([1, 2]);
   });
 
   it("holds versions append-only", async () => {
