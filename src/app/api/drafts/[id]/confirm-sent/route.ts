@@ -55,7 +55,6 @@ const REASON_TEXT: Record<StaleReason, string> = {
   answerRemoved: "the answer row was removed",
   answerChanged: "the answer changed after the email was written",
   answerSettled: "this has since been settled",
-  recordChanged: "the record changed after the email was written",
   recordRetired: "the record was retired",
   contextChanged: "the question or the record's details changed after the email was written",
   questionGone: "this question no longer exists on the record",

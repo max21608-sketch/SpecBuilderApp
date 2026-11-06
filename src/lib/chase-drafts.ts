@@ -63,8 +63,10 @@ export type OutstandingQuestion = {
   /** The levels at which this question must be answered before a quote. */
   tgqLevels: string[];
   /**
-   * Whether this question holds up a quote — null when the record has no
-   * level, which is a blocker rather than a default (see tgq.ts).
+   * Whether this question holds up a quote. Null only where the category is
+   * on the 0019 placeholder AND the record has no level, which is a blocker
+   * rather than a default (see tgq.ts). A matrix category is tiered with no
+   * level at all.
    */
   tier: QuestionTier | null;
   requirementId: string;
@@ -224,7 +226,6 @@ export type StaleReason =
   | "answerRemoved"
   | "answerChanged"
   | "answerSettled"
-  | "recordChanged"
   | "recordRetired"
   | "contextChanged"
   | "questionGone";
@@ -245,7 +246,22 @@ export function coverageStaleReasons(
   const reasons: StaleReason[] = [];
 
   if (live.recordStatus === "retired") reasons.push("recordRetired");
-  if (live.recordVersion !== coverage.recordVersion) reasons.push("recordChanged");
+  // THE RECORD'S VERSION IS NOT COMPARED, and that is decided, not forgotten
+  // (audit F10, 2026-11-06). `bump_version` fires on EVERY spec_records
+  // update: an internal note, the quote description, the dimension note, a
+  // level, a category. Comparing it made editing an internal note drop every
+  // question on the record out of Waiting and refuse an unsent draft at
+  // confirm-sent ("the record changed"), with nothing the email printed having
+  // moved. That is the chased_at trap in reverse: a write unrelated to the
+  // question deciding whether the question was asked. 0039 had to switch the
+  // trigger off for one statement for the same reason.
+  //
+  // What the email PRINTS about the record (its label, refs, description,
+  // area, category) is in the context snapshot and compared below; a category
+  // that no longer asks the question makes it `questionGone` through
+  // `loadQuestionsByKey`'s category join. `record_version` is still WRITTEN on
+  // every coverage row (it is not null, and it is history), and read by
+  // nothing that decides.
 
   // An answer row appearing, vanishing, or moving all mean the same thing:
   // what the email said about this question is no longer what the app holds.
@@ -335,7 +351,8 @@ export type CoveredQuestion = {
 /**
  * A live question as a coverage row.
  *
- * Throws on a level-less record rather than inventing a tier. `groupByContact`
+ * Throws on an untiered question (a placeholder category with no level) rather
+ * than inventing a tier. `groupByContact`
  * has already blocked those, and the generate route validates again, so
  * reaching here without a tier is a bug rather than a user error.
  */
@@ -449,9 +466,11 @@ export type ContactGroup = {
  * So a contact whose `role` is `internal` gets a group of their own holding
  * EVERY outstanding question on the project. Two things about it:
  *
- *   * A LEVEL IS STILL REQUIRED. No level, no tier, and the email could not
- *     say which half of it blocks the quote — which is the whole point of the
- *     message. Blocked with the reason, exactly as for a designer.
+ *   * A TIER IS STILL REQUIRED. No tier, and the email could not say which
+ *     half of it blocks the quote, which is the whole point of the message.
+ *     Blocked with the reason, exactly as for a designer. On Matthew's matrix
+ *     a question is tiered without a level; only a placeholder category's
+ *     question lacks one (audit F1).
  *
  *   * `blocked` IS UNCHANGED, and that is deliberate. It describes the
  *     DESIGNER routing — "there is nobody to ask about this line" — and it is
@@ -496,9 +515,9 @@ export function groupByContact(
 
   for (const question of questions) {
     // A colleague can be asked about a line with no designer, so this runs
-    // before the designer routing and is not affected by its refusals. The
-    // level is the one thing it still needs, for the reason above.
-    if (question.level !== null) {
+    // before the designer routing and is not affected by its refusals. A TIER
+    // is the one thing it still needs, for the reason above.
+    if (question.tier !== null) {
       for (const colleague of colleagues) {
         const group = groups.get(colleague.id);
         if (group) group.questions.push(question);
@@ -514,10 +533,23 @@ export function groupByContact(
       continue;
     }
 
-    // A record with no level has no tier, so the email could not say which
-    // half of it blocks the quote. That is the whole point of the message, so
-    // the record is blocked with the reason rather than chased without it.
-    if (question.level === null) {
+    // A question with no TIER cannot be placed in either half of the email,
+    // which is the whole point of the message, so the record is blocked with
+    // the reason rather than chased without it.
+    //
+    // THE TEST IS THE TIER, NEVER THE LEVEL (audit F1, 2026-11-06). Matthew's
+    // matrix has no level column, so where it covers a category
+    // `questionTierOrNull` tiers the question without one; only the 0019
+    // placeholder categories need a level. This read `level === null` and
+    // blocked every seating record nobody had set a level on, while the
+    // generate route (which asks `tier === null`) would have taken it, so the
+    // only way to chase a sofa was to decide something the gate model does
+    // not read. The screen and the write boundary ask one question.
+    //
+    // The reason's WORDS are unchanged because the chase screen keys on them
+    // (`isContactBlocker`); what changed is that a matrix record never carries
+    // it.
+    if (question.tier === null) {
       block(question, "no level on the record");
       continue;
     }
