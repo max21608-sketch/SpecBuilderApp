@@ -48,6 +48,13 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
         });
   }
 
+  // THE TOKEN, NOT THE ROW: this runs on the edge and cannot reach the
+  // database. `verifySessionToken` checks the signature, the expiry, the
+  // issuer and that the token is for THIS deployment kind (aud = APP_ENV), so
+  // a staging token is refused here on pilot. Whether the user is still
+  // active, still on the token's version and still holds the token's role is
+  // asked by `getSessionUser` in the handler, which reads the row (audit A4):
+  // a demoted editor passes this line and is refused by `requireWriter`.
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   const user = token ? await verifySessionToken(token) : null;
 

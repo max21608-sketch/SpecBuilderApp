@@ -47,12 +47,17 @@ describe("verifyCredentials", () => {
 
   it("still signs in the right password", async () => {
     const stored = await hashPassword("right");
-    users.rows = [{ id: "u", email: "a@example.test", name: "A", role: "editor", password_hash: stored, active: true }];
+    users.rows = [
+      { id: "u", email: "a@example.test", name: "A", role: "editor", password_hash: stored, active: true, token_version: 3 },
+    ];
+    // The token version comes with it: the session it starts lasts until that
+    // version moves (0053).
     expect(await verifyCredentials("a@example.test", "right")).toEqual({
       id: "u",
       email: "a@example.test",
       name: "A",
       role: "editor",
+      tokenVersion: 3,
     });
   });
 });
