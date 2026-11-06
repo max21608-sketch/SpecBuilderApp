@@ -83,8 +83,10 @@ describe("resolveDrawingTargets — a code read off the end of a bill code", () 
   });
 
   it("never reads an ending when ANOTHER code the document gave the item matches exactly", () => {
+    // The exact match IS the resolution (audit D6): this asserted an empty
+    // one until 2026-11-06, which is the defect, pinned.
     const resolution = resolveDrawingTargets("ZQ-08", [...BILL, record("MUR.8 BED")], { codes: ["ZQ-08", "MUR.8 BED"] });
-    expect(resolution.runs).toEqual([]);
+    expect(resolution.suggested).toEqual(["rec-MUR.8 BED"]);
     expect(resolution.matchedBy).toBeUndefined();
   });
 

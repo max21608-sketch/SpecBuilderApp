@@ -90,7 +90,7 @@ export type ItemResolution = {
      * end of a bill code (`FUR-08` → `PL-FUR-08`). The sentence is the server's
      * (`resolveDrawingTargets`), so the card says what the confirm will do.
      */
-    matchedBy?: { kind: "code_end"; code: string | null; message: string };
+    matchedBy?: { kind: "code_end" | "several_codes"; code: string | null; message: string };
     /** The page marks the item as mock-up (0043): resolved among mock-up records only. The server's sentence. */
     mockup?: { evidence: string | null; message: string };
   };

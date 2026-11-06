@@ -621,7 +621,12 @@ export type DrawingResolution = {
  * is suggested.
  */
 export type CodeEndMatch = {
-  kind: "code_end";
+  /**
+   * `code_end`: the page code is the END of the bill code(s). `several_codes`:
+   * two of the item's own codes matched DIFFERENT bill lines exactly, and
+   * `code` is always null (`resolveByLaterCodes`).
+   */
+  kind: "code_end" | "several_codes";
   /** What the page printed. */
   pageCode: string;
   /** Every bill code the page code ends, in the bill's own spelling. */
@@ -677,7 +682,8 @@ export function resolveDrawingTargets(
   const codes = [itemCodeRaw, ...(context.codes ?? [])].filter(
     (code): code is string => typeof code === "string" && code.trim() !== "",
   );
-  if (codes.some((code) => findRecordsByRef(code, byBoqCode).length > 0)) return groupByRun([], records);
+  const exactByLaterCode = resolveByLaterCodes(codes, byBoqCode, records);
+  if (exactByLaterCode) return exactByLaterCode;
   const pageCode = codes[0];
   if (!pageCode) return groupByRun([], records);
 
@@ -742,6 +748,61 @@ export function resolveDrawingTargets(
       message: `The page names ${printed}, which is the end of ${candidateCodes.length} bill codes (${candidateCodes.join(", ")}), and ${
         drawingNumber ? `the drawing number ${drawingNumber} does not name one of them` : "the document carries no drawing number"
       }. Choose which record this drawing is.`,
+    },
+  };
+}
+
+/**
+ * A LATER CODE THAT MATCHES EXACTLY IS THE ANSWER (audit D6, 2026-11-06).
+ *
+ * A version 4 read lists the title block's code first and the drawing
+ * number's full code after it: `FUR-08`, then `PL-FUR-08`. This step used to
+ * test "does any of the item's codes match exactly" and then return an EMPTY
+ * resolution, so the item ended with no targets and the card said nothing
+ * carries its code, about a line the bill plainly lists. The match it had just
+ * found is the resolution.
+ *
+ * Several later codes naming the SAME records are one answer (a bill line
+ * carrying two spellings of its code). Codes naming DIFFERENT records are
+ * offered and NONE is chosen, never the first: the order of a code group is
+ * the model's, and the first code winning would let it pick between two bill
+ * lines silently. The page is one item, so each phase is one choice
+ * (`oneLinePerPhase`), the code-end rule's shape.
+ *
+ * Returns null when no code matches exactly, so the caller reads endings.
+ */
+function resolveByLaterCodes(
+  codes: readonly string[],
+  byBoqCode: RecordEntry[],
+  records: RecordEntry[],
+): DrawingResolution | null {
+  const matching: { code: string; ids: string }[] = [];
+  const union = new Map<string, RecordEntry>();
+  for (const code of codes) {
+    const found = findRecordsByRef(code, byBoqCode);
+    if (found.length === 0) continue;
+    matching.push({ code: code.trim(), ids: found.map((record) => record.id).sort().join("|") });
+    for (const record of found) union.set(record.id, record);
+  }
+  if (matching.length === 0) return null;
+  const grouped = groupByRun([...union.values()], records);
+  if (new Set(matching.map((entry) => entry.ids)).size === 1) return grouped;
+
+  const named = [...new Set(matching.map((entry) => entry.code))];
+  return {
+    runs: grouped.runs.map((run) =>
+      run.status === "matched"
+        ? { runId: run.runId, runName: run.runName, status: "ambiguous" as const, candidates: [run.record] }
+        : run,
+    ),
+    suggested: [],
+    matchedBy: {
+      kind: "several_codes",
+      pageCode: named.join(" and "),
+      candidates: named,
+      code: null,
+      drawingNumber: null,
+      message: `The drawing names ${named.join(" and ")}, and they are different bill lines. Choose which record this drawing is.`,
     },
   };
 }
@@ -939,13 +1000,15 @@ export function targetRecordIds(item: DrawingItem, resolution: DrawingResolution
  *
  * True only where the page code is the END of several different bill codes and
  * the document did not say which (`matchedBy.code === null`): the page names
- * ONE code, so a phase holding a GR- and a PL- candidate gets one of them.
+ * ONE code, so a phase holding a GR- and a PL- candidate gets one of them. The
+ * same holds where two of the item's own codes matched different lines
+ * (`several_codes`): the drawing is one item, whichever line it is.
  * Two lines carrying the SAME code may both be what the drawing is for — see
  * the header. One function, read by the blocker and by the picker, so the
  * screen cannot offer a choice the confirm refuses.
  */
-export function oneLinePerPhase(resolution: { matchedBy?: { kind: "code_end"; code: string | null } }): boolean {
-  return resolution.matchedBy?.kind === "code_end" && resolution.matchedBy.code === null;
+export function oneLinePerPhase(resolution: { matchedBy?: { kind: CodeEndMatch["kind"]; code: string | null } }): boolean {
+  return resolution.matchedBy !== undefined && resolution.matchedBy.code === null;
 }
 
 /**
@@ -2031,7 +2094,9 @@ export function drawingItemBlockers(
       // would not say what the choice is between.
       message: oneChoice
         ? picked > 1
-          ? `${run.runName}: the page names one code, ${resolution.matchedBy!.pageCode}, and ${picked} lines are ticked. Tick only the one this drawing is.`
+          ? resolution.matchedBy!.kind === "several_codes"
+            ? `${run.runName}: this drawing is one item, and ${picked} lines are ticked. Tick only the one this drawing is.`
+            : `${run.runName}: the page names one code, ${resolution.matchedBy!.pageCode}, and ${picked} lines are ticked. Tick only the one this drawing is.`
           : `${run.runName}: ${resolution.matchedBy!.message}`
         : `${run.runName} has ${run.candidates.length} lines with this code. Tick the line or lines this drawing is for.`,
     });
