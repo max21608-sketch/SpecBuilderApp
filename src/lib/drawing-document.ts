@@ -2764,6 +2764,26 @@ function isMergeableNote(observation: DrawingObservation): boolean {
 }
 
 /**
+ * WHICH RECORDS A NOTE LANDS ON is part of what makes two notes one block
+ * (audit D5, 2026-11-06). A version 4 unlabelled statement is staged as a
+ * plain `Note` with its OWN `configurations`, and a block keeps its FIRST
+ * row's fields: keyed on page and heading alone, a "Type 3" note merged under
+ * a shared one was written to every configuration, and a shared one under a
+ * "Type 3" one to Type 3 alone. The reviewer's answer is in the key too, with
+ * absent (the model's reading stands) kept apart from `[]` (shared), or a
+ * read-time merge would undo a decision a person took on the row. Names fold
+ * and sort, so `Type 1 · Type 5` and `type 5 · Type 1` are one set. Empty on
+ * every row carrying neither, so earlier runs key exactly as they did.
+ */
+function noteConfigurationKey(observation: DrawingObservation): string {
+  const model = foldedNames(observation.configurations).sort();
+  const byReviewer = Array.isArray(observation.configurationsByReviewer)
+    ? `r:${foldedNames(observation.configurationsByReviewer).sort().join("·")}|`
+    : "";
+  return (model.length > 0 ? `c:${model.join("·")}|` : "") + byReviewer;
+}
+
+/**
  * The lines a sheet prints under one heading, as ONE row.
  *
  * Fifteen REMARKS rows are fifteen states to choose and fifteen Ignores, and
@@ -2798,7 +2818,7 @@ export function mergeNoteBlocks(observations: DrawingObservation[]): DrawingObse
     // citing the first page for lines printed on the second. Absent on every
     // earlier run, where the key is exactly what it was.
     const onPage = typeof observation.page === "number" ? `@${observation.page}|` : "";
-    const key = onPage + (prefix ? `p:${prefix.toLowerCase()}` : "plain");
+    const key = onPage + noteConfigurationKey(observation) + (prefix ? `p:${prefix.toLowerCase()}` : "plain");
     if (!members.has(key)) {
       members.set(key, []);
       prefixes.set(key, prefix);
