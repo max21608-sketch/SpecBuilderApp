@@ -21,7 +21,7 @@
 // The project numbers come from `qaNumber()`, and the project inboxes, the
 // contact, the mailbox and every Message-ID carry the same per-process suffix.
 // They used to be literals (`__QA P90211`, one inbox, one mailbox) swept by a
-// `beforeAll` — so two runs at once either died on
+// `beforeAll`, so two runs at once either died on
 // `projects_bws_project_number_key` or, worse, the second run's sweep deleted
 // the first run's fixtures mid-test. A literal ROUTING key fails more quietly
 // than a literal project number: a crashed run's project still holding the
@@ -590,7 +590,7 @@ describeIfDb("a confidently routed email assigns itself", () => {
   // Unassign is the only remedy the auto-assign gate promises, and it was a
   // dead end: the replay key was the message alone, so assigning the message
   // to the RIGHT project found the wrong project's run, linked it, answered
-  // 200, and never set the project — the message read "unassigned" while
+  // 200, and never set the project: the message read "unassigned" while
   // pointing at a run on the project it had just been taken off.
   it("puts a message taken off one project onto another, as a new read on that project", async () => {
     const elsewhere = await client.query(

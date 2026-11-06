@@ -606,7 +606,7 @@ function InboxView() {
                               Not a spec
                             </Button>
                           </div>
-                          {/* THE SPEND POINT, said before the click — and since A1
+                          {/* THE SPEND POINT, said before the click, and since A1
                               it depends on the project chosen. */}
                           <span className="mt-1 block text-[11px] text-neutral-500">{cost.sentence}</span>
                         </Td>

@@ -66,7 +66,7 @@
 // until a message could be taken OFF a project: `unassignMessage` keeps the
 // run (it is what the model was paid to produce), so assigning the message to
 // the right project found the wrong project's run by its key, linked it,
-// answered 200 — and never set the project. The message read "unassigned"
+// answered 200, and never set the project. The message read "unassigned"
 // while pointing at a run on the project it had just been taken off, and
 // Unassign is the only remedy the auto-assign gate promises.
 //
@@ -101,7 +101,7 @@ export type AssignResult = {
 };
 
 /**
- * `email:<message>:<project>` — one run per message PER PROJECT, whatever
+ * `email:<message>:<project>`: one run per message PER PROJECT, whatever
  * retries happen. A message moved to another project is a new read there.
  */
 export function emailRegistrationKey(messageId: string, projectId: string): string {

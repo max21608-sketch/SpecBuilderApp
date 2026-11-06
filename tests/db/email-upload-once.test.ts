@@ -1,4 +1,4 @@
-// Database tier — an email UPLOADED, through the real registration route.
+// Database tier: an email UPLOADED, through the real registration route.
 //
 // Two things the auto-assign suite cannot reach, because it enters through the
 // Graph ingestion function:

@@ -340,13 +340,13 @@ export function describeRouting(outcome: RoutingOutcome): string {
 //               uploaded `.eml` has no reported recipients, which is right:
 //               an upload is a person's assignment anyway.
 //
-// Everything else that names a project inbox still NAMES it — the held row
-// says which project, like a subject reference — and is held for a person.
+// Everything else that names a project inbox still NAMES it (the held row
+// says which project, like a subject reference) and is held for a person.
 // WHAT THIS DOES NOT PROVE, and the activation checklist in
 // `docs/integration.md` measures on the first real messages: that Exchange
 // stamps those two headers on the shapes this organisation's rules produce.
-// If it does not, the failure is in the safe direction — the mail is held and
-// costs a click — and the per-project daily cap on automatic reads
+// If it does not, the failure is in the safe direction (the mail is held and
+// costs a click), and the per-project daily cap on automatic reads
 // (`auto-read-cap.ts`) bounds the other direction.
 // ============================================================================
 
@@ -355,7 +355,7 @@ export const AUTO_ASSIGN_SIGNALS: readonly RoutingSignal[] = ["forwarded_from_in
 
 export type AutoAssignDecision =
   | { assign: true; projectId: string; signal: RoutingSignal }
-  /** Held, and which of the four reasons — a screen says a different sentence for each. */
+  /** Held, and which of the four reasons: a screen says a different sentence for each. */
   | { assign: false; reason: "signal_too_weak" | "unstamped_evidence" | "ambiguous" | "nothing_named_a_project" };
 
 /** The actor an automatic assignment is recorded under, in the trail and on the row. */

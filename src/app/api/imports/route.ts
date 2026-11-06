@@ -229,8 +229,8 @@ async function registerEmail(input: Registered, actor: string): Promise<Response
   }
 
   try {
-    // THE SAME EMAIL TWICE IS ONE MESSAGE (audit B8). Uploaded again — or
-    // already arrived through the mailbox — it is OFFERED rather than recorded
+    // THE SAME EMAIL TWICE IS ONE MESSAGE (audit B8). Uploaded again, or
+    // already arrived through the mailbox, it is OFFERED rather than recorded
     // and read a second time. 200, not 201: nothing was created, and the
     // sentence says where the one that exists is.
     const known = await recordMessageUnlessKnown({
