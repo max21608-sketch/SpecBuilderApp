@@ -85,7 +85,7 @@ import BillPicturePanelRow, { type PictureChoice } from "@/components/imports/Bi
 import type { FabricLinePlan } from "@/lib/bill-fabric-filing";
 // Pure: the area a record will carry (a Sub-Area composed in), the same
 // function the confirm writes it with, so the table shows what will be written.
-import { effectiveArea } from "@/lib/boq-reconcile";
+import { configurationRange, effectiveArea, type LinePairing } from "@/lib/boq-reconcile";
 import {
   BOQ_ROLE_LABELS,
   BOQ_MAPPING_SOURCE_LABELS,
@@ -602,21 +602,37 @@ type ProjectRun = {
   id: string; name: string; status: string; boq_revision: string | null; boq_date: string | null;
   record_count: number;
 };
+type ReconciledRecord = {
+  id: string; version: number; label: string; itemDescription: string; qty: number | null;
+  /** Its live configurations' short labels (`12.1`), which follow it. */
+  configurations?: string[];
+};
 type Reconciliation = {
   lines: {
     index: number; lineNo: number; code: string | null;
-    status: "paired" | "new" | "ambiguous";
+    status: "paired" | "new" | "ambiguous" | "restore";
     suggestedRecordId: string | null;
     candidates: string[];
+    /** Retired lines of the phase carrying this line's code, offered back. */
+    restoreCandidates?: string[];
     deltas: { field: string; label: string; was: string | null; now: string | null }[];
   }[];
   missing: {
     recordId: string; label: string; itemDescription: string; codes: string[];
     attributeCount: number; hasImage: boolean; settledAnswers: number;
+    configurations?: string[];
   }[];
-  counts: { paired: number; changed: number; new: number; ambiguous: number; missing: number };
-  records: { id: string; version: number; label: string; itemDescription: string; qty: number | null }[];
+  counts: { paired: number; changed: number; new: number; ambiguous: number; missing: number; restored?: number };
+  records: ReconciledRecord[];
+  /** The phase's lines an earlier revision retired (audit 2026-11-06, C14). */
+  retired?: ReconciledRecord[];
 };
+
+/** "and its 5 configurations (12.1–12.5)" — what a line takes with it. */
+function configurationsClause(labels: readonly string[] | undefined): string {
+  if (!labels || labels.length === 0) return "";
+  return ` and its ${labels.length === 1 ? "configuration" : `${labels.length} configurations`} (${configurationRange(labels)})`;
+}
 type Import = {
   id: string; status: string; version: number; error: string | null; source_kind: string;
   document_kind: string | null; project_id: string;
@@ -849,7 +865,7 @@ export default function ReviewImportPage() {
       categoryId?: string | null;
       level?: string | null;
       ignored?: boolean;
-      replaces?: { recordId: string; recordVersion: number } | null;
+      replaces?: LinePairing | null;
     },
   ) {
     setError(null);
@@ -2096,6 +2112,7 @@ export default function ReviewImportPage() {
                 >
                   · {reconciliation.counts.paired - reconciliation.counts.changed} unchanged ·{" "}
                   {reconciliation.counts.new} new · {reconciliation.counts.missing} no longer listed
+                  {(reconciliation.counts.restored ?? 0) > 0 && <> · {reconciliation.counts.restored} brought back</>}
                   {reconciliation.counts.ambiguous > 0 && (
                     <> · <b>{reconciliation.counts.ambiguous} to pair by hand</b></>
                   )}
@@ -2111,6 +2128,11 @@ export default function ReviewImportPage() {
                           <li key={missing.recordId}>
                             <span className="font-mono">{missing.label}</span> {missing.itemDescription}
                             {missing.codes.length > 0 && <span> · {missing.codes.join(", ")}</span>}
+                            {/* A configuration follows its line (C1): retired
+                                with it here, in the same change. */}
+                            {(missing.configurations?.length ?? 0) > 0 && (
+                              <span>{configurationsClause(missing.configurations)}</span>
+                            )}
                             {/* Named, not counted. A record with 14 specs and a
                                 picture is somebody's afternoon, and pairing it
                                 is usually what was meant. */}
@@ -2619,6 +2641,43 @@ export default function ReviewImportPage() {
                                 {(() => {
                                   const pairing = pairingFor(line.index);
                                   if (!pairing || line.ignored) return <span className="text-neutral-400">—</span>;
+                                  const retiredById = new Map((reconciliation.retired ?? []).map((row) => [row.id, row]));
+                                  // A LINE AN EARLIER REVISION RETIRED, BROUGHT BACK (C14).
+                                  // Only ever the reviewer's choice; one press undoes it.
+                                  if (pairing.status === "restore") {
+                                    const back = retiredById.get(pairing.suggestedRecordId ?? "");
+                                    return (
+                                      <div className="text-xs">
+                                        <p>
+                                          Brings back <span className="font-mono">{back?.label ?? "a retired record"}</span>
+                                          {configurationsClause(back?.configurations)}, with its specs and picture.
+                                        </p>
+                                        {pairing.deltas.length > 0 && (
+                                          <ul className="mt-0.5 text-neutral-600">
+                                            {pairing.deltas.map((delta) => (
+                                              <li key={delta.field}>
+                                                {delta.label}:{" "}
+                                                <span className="text-neutral-400 line-through">{delta.was ?? "—"}</span>{" "}
+                                                → <span className="text-neutral-900">{delta.now ?? "—"}</span>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        )}
+                                        <Button
+                                          size="sm"
+                                          variant="quiet"
+                                          className="mt-1"
+                                          disabled={run.status !== "parsed" || busy}
+                                          onClick={() => void setLine(sheetIndex, line.index, { replaces: null })}
+                                        >
+                                          Make it a new item instead
+                                        </Button>
+                                      </div>
+                                    );
+                                  }
+                                  const pairedRecord = reconciliation.records.find(
+                                    (row) => row.id === (line.replaces?.recordId ?? pairing.suggestedRecordId),
+                                  );
                                   return (
                                     <div>
                                       <select
@@ -2674,6 +2733,34 @@ export default function ReviewImportPage() {
                                       {pairing.status === "paired" && pairing.deltas.length === 0 && (
                                         <p className="mt-0.5 text-xs text-neutral-500">unchanged</p>
                                       )}
+                                      {/* ITS CONFIGURATIONS FOLLOW IT (C1): carried with it, never
+                                          a line of their own to pair. */}
+                                      {pairing.status === "paired" && (pairedRecord?.configurations?.length ?? 0) > 0 && (
+                                        <p className="mt-0.5 text-xs text-neutral-600">
+                                          {configurationRange(pairedRecord?.configurations ?? [])} follow it
+                                        </p>
+                                      )}
+                                      {/* A RETIRED LINE WITH THIS CODE, OFFERED BACK (C14) —
+                                          never chosen for the reviewer, however many. */}
+                                      {pairing.status === "new" &&
+                                        (pairing.restoreCandidates ?? []).map((candidateId) => {
+                                          const candidate = retiredById.get(candidateId);
+                                          if (!candidate) return null;
+                                          return (
+                                            <SuggestButton
+                                              key={candidateId}
+                                              className="mt-1"
+                                              value={`Bring back ${candidate.label}`}
+                                              evidence={`retired by an earlier revision, same code${configurationsClause(candidate.configurations)}`}
+                                              disabled={run.status !== "parsed" || busy}
+                                              onAccept={() =>
+                                                void setLine(sheetIndex, line.index, {
+                                                  replaces: { recordId: candidate.id, recordVersion: candidate.version, restore: true },
+                                                })
+                                              }
+                                            />
+                                          );
+                                        })}
                                     </div>
                                   );
                                 })()}

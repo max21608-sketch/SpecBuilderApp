@@ -289,8 +289,12 @@ export type StagedBoqLine = BoqLine & {
    */
   picture?: BillPictureOverride | null;
   pictureVersion?: number;
-  /** The record this line continues, at the version the reviewer was shown. */
-  replaces?: { recordId: string; recordVersion: number } | null;
+  /**
+   * The record this line continues, at the version the reviewer was shown.
+   * `restore` marks one an earlier revision retired, brought back by this line
+   * (`LinePairing` in boq-reconcile.ts; audit 2026-11-06, C14).
+   */
+  replaces?: { recordId: string; recordVersion: number; restore?: boolean } | null;
 };
 
 /**

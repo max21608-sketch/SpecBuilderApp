@@ -1061,10 +1061,16 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     for (const [sheetIndex, sheet] of parsed.sheets.entries()) {
       const replacesRunId = sheet.replacesRunId ?? null;
       if (!replacesRunId) continue;
+      // THE PHASE'S BILL LINES, live and retired (audit 2026-11-06, 1.2). A
+      // configuration is never a candidate: it carries no bill code, so no
+      // revised line can pair with it, and listed here every one read as "no
+      // longer listed" and the confirm retired it. It follows its line, and is
+      // named beside it instead. A line an earlier revision RETIRED is loaded
+      // so a line carrying its code again can be offered it back (C14).
       const recordRows = await sql`
-        select r.id, r.version, r.record_no, r.item_description, r.product_reference, r.qty,
+        select r.id, r.version, r.record_no, r.status, r.item_description, r.product_reference, r.qty,
                r.designer, r.area, r.boq_category, p.bws_project_number, r.variant_ordinal,
-               (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
+               null::int as parent_record_no,
                coalesce((select array_agg(x.ref_value order by x.ref_value)
                            from spec_record_refs x
                           where x.record_id = r.id and x.ref_system = 'boq_code'), '{}') as codes,
@@ -1073,13 +1079,21 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
                         where at.entity_type = 'spec_records' and at.entity_id = r.id and at.kind = 'item_image'
                           and at.superseded_at is null) as has_image,
                (select count(*)::int from spec_answers a
-                 where a.record_id = r.id and a.revision_no = 0 and a.state <> 'missing') as settled_answers
+                 where a.record_id = r.id and a.revision_no = 0 and a.state <> 'missing') as settled_answers,
+               -- Live configurations, by their number under the line; for a
+               -- retired line, the ones retired with it at the same moment,
+               -- which are what a restore brings back.
+               coalesce((select array_agg(c.variant_ordinal order by c.variant_ordinal)
+                           from spec_records c
+                          where c.parent_id = r.id
+                            and (case when r.status = 'active' then c.status = 'active'
+                                      else c.status = 'retired' and c.retired_at = r.retired_at end)), '{}') as configuration_ordinals
         from spec_records r
         join projects p on p.id = r.project_id
-        where r.run_id = ${replacesRunId} and r.status = 'active'
+        where r.run_id = ${replacesRunId} and r.status in ('active', 'retired') and r.parent_id is null
         order by r.record_no
       `;
-      const existing: ExistingRecord[] = recordRows.map((row) => ({
+      const toExisting = (row: Record<string, unknown>): ExistingRecord => ({
         id: String(row.id),
         version: Number(row.version),
         recordNo: Number(row.record_no),
@@ -1094,7 +1108,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         attributeCount: Number(row.attribute_count),
         hasImage: Boolean(row.has_image),
         settledAnswers: Number(row.settled_answers),
-      }));
+        configurations: ((row.configuration_ordinals as unknown[] | null) ?? []).map(
+          (ordinal) => `${Number(row.record_no)}.${Number(ordinal)}`,
+        ),
+      });
+      const existing = recordRows.filter((row) => row.status === "active").map(toExisting);
+      const retired = recordRows.filter((row) => row.status === "retired").map(toExisting);
       // A FABRIC LINE IS NOT A RECORD, so it is never paired with one: it is
       // written onto its item at confirm, and listing it here would offer it a
       // record to continue and count it as a new line.
@@ -1114,7 +1133,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         ignored: line.ignored,
         replaces: line.replaces ?? null,
       }));
-      reconciliation[sheetIndex] = { ...reconcileSheet(lines, existing), records: existing };
+      reconciliation[sheetIndex] = { ...reconcileSheet(lines, existing, retired), records: existing, retired };
     }
   }
 
@@ -1343,6 +1362,31 @@ async function patchBoqLine(
       patch.replacesRunId = body.replacesRunId;
       clearPairings = true;
     }
+    // ONE TAB REVISES A PHASE (audit 2026-11-06, C2): a second sheet set to
+    // revise it would retire the first one's lines at confirm. Refused here,
+    // naming the tab that already does, and re-checked by the confirm. The
+    // update below also carries the same condition, so two presses racing on
+    // two tabs cannot both land.
+    const revising = typeof body.replacesRunId === "string" ? body.replacesRunId : null;
+    if (revising) {
+      const others = await sql`
+        select s.sheet->>'sheetName' as name
+        from intake_runs i,
+             jsonb_array_elements(i.parsed->'sheets') with ordinality as s(sheet, n)
+        where i.id = ${id} and s.n - 1 <> ${sheetIndex}
+          and s.sheet->>'replacesRunId' = ${revising}
+          and coalesce((s.sheet->>'ignored')::boolean, false) = false
+      `;
+      if (others[0]) {
+        return json(
+          {
+            ok: false,
+            error: `“${String(others[0].name)}” already revises that phase. A phase is revised by one tab: make this one a new phase, or drop one of them.`,
+          },
+          409,
+        );
+      }
+    }
     if (Object.keys(patch).length === 0) return json({ ok: false, error: "Nothing to change." }, 400);
 
     const rows = await sql`
@@ -1356,6 +1400,15 @@ async function patchBoqLine(
       where id = ${id}
         and status = 'parsed'
         and parsed->'sheets'->(${sheetIndex}::int) is not null
+        and (
+          ${revising}::text is null
+          or not exists (
+            select 1 from jsonb_array_elements(parsed->'sheets') with ordinality as s(sheet, n)
+            where s.n - 1 <> ${sheetIndex}
+              and s.sheet->>'replacesRunId' = ${revising}
+              and coalesce((s.sheet->>'ignored')::boolean, false) = false
+          )
+        )
       returning version
     `;
     if (rows[0] && clearPairings) {
@@ -1404,11 +1457,20 @@ async function patchBoqLine(
     if (body.replaces === null) {
       patch.replaces = null;
     } else {
-      const replaces = body.replaces as { recordId?: unknown; recordVersion?: unknown };
+      const replaces = body.replaces as { recordId?: unknown; recordVersion?: unknown; restore?: unknown };
       if (typeof replaces?.recordId !== "string" || typeof replaces?.recordVersion !== "number") {
         return json({ ok: false, error: "A pairing names a record and the version you were shown." }, 400);
       }
-      patch.replaces = { recordId: replaces.recordId, recordVersion: replaces.recordVersion };
+      if (replaces.restore !== undefined && typeof replaces.restore !== "boolean") {
+        return json({ ok: false, error: "restore is true or absent." }, 400);
+      }
+      // `restore`: bringing back a record an earlier revision retired (C14).
+      // The confirm re-checks it is still retired, at this version.
+      patch.replaces = {
+        recordId: replaces.recordId,
+        recordVersion: replaces.recordVersion,
+        ...(replaces.restore === true ? { restore: true } : {}),
+      };
     }
   }
   if (Object.keys(patch).length === 0) return json({ ok: false, error: "Nothing to change." }, 400);

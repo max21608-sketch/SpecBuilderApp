@@ -1,6 +1,13 @@
 // Matching a revised bill against the run it revises. Pure, so no database.
 import { describe, it, expect } from "vitest";
-import { reconcileSheet, lineDeltas, effectiveArea, type ExistingRecord, type RevisedLine } from "@/lib/boq-reconcile";
+import {
+  reconcileSheet,
+  lineDeltas,
+  effectiveArea,
+  configurationRange,
+  type ExistingRecord,
+  type RevisedLine,
+} from "@/lib/boq-reconcile";
 
 const record = (over: Partial<ExistingRecord> = {}): ExistingRecord => ({
   id: "rec-1",
@@ -113,6 +120,70 @@ describe("reconcileSheet", () => {
       [record({ attributeCount: 14, hasImage: true, settledAnswers: 3 })],
     );
     expect(result.missing[0]).toMatchObject({ attributeCount: 14, hasImage: true, settledAnswers: 3 });
+  });
+});
+
+// ---- audit 2026-11-06, 1.2: a configuration follows its line (C1), and a
+// retired record whose code comes back is offered, never paired (C14).
+describe("reconcileSheet — configurations and retired records", () => {
+  it("names the configurations a line that will be retired takes with it", () => {
+    const result = reconcileSheet(
+      [line({ code: "S-999" })],
+      [record({ configurations: ["14.1", "14.2"] })],
+    );
+    expect(result.missing[0]!.configurations).toEqual(["14.1", "14.2"]);
+  });
+
+  it("offers a retired record whose code comes back as a restore, and pairs nothing", () => {
+    const retired = record({ id: "rec-old", recordNo: 9, label: "P17726-009", codes: ["S-300"] });
+    const result = reconcileSheet([line({ code: "S-300" })], [record()], [retired]);
+    const only = result.lines[0]!;
+    // Never auto-paired: the line stays new until a person chooses.
+    expect(only.status).toBe("new");
+    expect(only.suggestedRecordId).toBeNull();
+    expect(only.restoreCandidates).toEqual(["rec-old"]);
+    expect(result.counts).toMatchObject({ new: 1, restored: 0 });
+  });
+
+  it("offers both, and pairs neither, when two retired records carry the code (SX11A)", () => {
+    const result = reconcileSheet(
+      [line({ code: "S-300" })],
+      [],
+      [record({ id: "rec-a", codes: ["S-300"] }), record({ id: "rec-b", codes: ["S.300"] })],
+    );
+    expect(result.lines[0]!.status).toBe("new");
+    expect(result.lines[0]!.restoreCandidates).toEqual(["rec-a", "rec-b"]);
+  });
+
+  it("offers no restore where a live record already carries the code", () => {
+    const result = reconcileSheet([line()], [record()], [record({ id: "rec-old" })]);
+    expect(result.lines[0]!.status).toBe("paired");
+    expect(result.lines[0]!.restoreCandidates).toEqual([]);
+  });
+
+  it("reads a reviewer's restore as a restore, with its deltas against the retired record", () => {
+    const retired = record({ id: "rec-old", qty: 2, codes: ["S-300"] });
+    const result = reconcileSheet(
+      [line({ code: "S-300", qty: 5, replaces: { recordId: "rec-old", recordVersion: 3, restore: true } })],
+      [],
+      [retired],
+    );
+    expect(result.lines[0]!.status).toBe("restore");
+    expect(result.lines[0]!.suggestedRecordId).toBe("rec-old");
+    expect(result.lines[0]!.deltas).toEqual([{ field: "qty", label: "Quantity", was: "2", now: "5" }]);
+    expect(result.counts).toMatchObject({ restored: 1, new: 0, paired: 0 });
+  });
+});
+
+describe("configurationRange", () => {
+  it("writes a run of consecutive configurations as a range", () => {
+    expect(configurationRange(["12.1", "12.2", "12.3", "12.4", "12.5"])).toBe("12.1–12.5");
+  });
+  it("lists them where there is a gap, or only two", () => {
+    expect(configurationRange(["12.1", "12.3"])).toBe("12.1 and 12.3");
+    expect(configurationRange(["12.1", "12.2"])).toBe("12.1 and 12.2");
+    expect(configurationRange(["12.1", "12.3", "12.4"])).toBe("12.1, 12.3 and 12.4");
+    expect(configurationRange(["12.1"])).toBe("12.1");
   });
 });
 

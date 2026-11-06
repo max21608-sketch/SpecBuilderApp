@@ -52,6 +52,23 @@
 // The looser fold collides more often. That is the safe direction and it is
 // the fold's own argument: a collision it creates produces AMBIGUITY — both
 // sides offered as candidates, nothing chosen — never a wrong pick.
+//
+// ---- A CONFIGURATION IS NEVER A CANDIDATE, AND A RETIRED LINE IS OFFERED --
+//
+// (audit 2026-11-06, 1.2.) A configuration (`parent_id` set, `S-301 TYPE 2`)
+// carries no bill code of its own (0024), so no line can ever pair with it.
+// Listed here, every one read as "no longer listed", and the confirm retired
+// all five of S-301's: the bare bill line went back into the export in their
+// place and a BWS import then wiped the five jobs. So the loader passes bill
+// lines only, and each carries the SHORT LABELS of its live configurations,
+// which follow it either way: carried when it is paired, retired when it is.
+//
+// A record an earlier revision RETIRED, whose code a later revision prints
+// again, used to become a new record beside it, while the old one kept its
+// drawings and specs out of sight. It is offered as `restoreCandidates`, and
+// only offered: the reviewer's choice is stored on the line as `replaces`
+// with `restore: true` (the same staged shape as a pairing), and two retired
+// records on one code are both offered and neither chosen — SX11A again.
 import { normaliseRef } from "@/lib/record-refs";
 import { composeBoqArea } from "@/lib/boq-roles";
 
@@ -71,7 +88,19 @@ export type ExistingRecord = {
   attributeCount: number;
   hasImage: boolean;
   settledAnswers: number;
+  /**
+   * The short labels of the record's LIVE configurations (`12.1`), in order.
+   * They follow it: carried with it, or retired with it. Absent reads as none.
+   */
+  configurations?: string[];
 };
+
+/**
+ * The record a line continues, at the version the reviewer was shown.
+ * `restore` marks a record an earlier revision retired, brought back by this
+ * line; without it the record must be live.
+ */
+export type LinePairing = { recordId: string; recordVersion: number; restore?: boolean };
 
 export type RevisedLine = {
   index: number;
@@ -86,7 +115,7 @@ export type RevisedLine = {
   subArea?: string | null;
   boqCategory: string | null;
   ignored: boolean;
-  replaces: { recordId: string; recordVersion: number } | null;
+  replaces: LinePairing | null;
 };
 
 export type FieldDelta = { field: string; label: string; was: string | null; now: string | null };
@@ -100,10 +129,17 @@ export type LineReconciliation = {
    * `new` — nothing to continue.
    * `ambiguous` — the code matches more than one record, or more than one
    *   line carries it. Candidates offered; nothing chosen.
+   * `restore` — the reviewer chose to bring back a record an earlier revision
+   *   retired. Only ever the reviewer's choice.
    */
-  status: "paired" | "new" | "ambiguous";
+  status: "paired" | "new" | "ambiguous" | "restore";
   suggestedRecordId: string | null;
   candidates: string[];
+  /**
+   * On a `new` line: the RETIRED records of this phase carrying its code,
+   * offered to bring back. Never chosen here, however many there are.
+   */
+  restoreCandidates: string[];
   deltas: FieldDelta[];
 };
 
@@ -116,13 +152,31 @@ export type MissingRecord = {
   attributeCount: number;
   hasImage: boolean;
   settledAnswers: number;
+  /** The configurations retired with it, by short label. */
+  configurations: string[];
 };
 
 export type SheetReconciliation = {
   lines: LineReconciliation[];
   missing: MissingRecord[];
-  counts: { paired: number; changed: number; new: number; ambiguous: number; missing: number };
+  counts: { paired: number; changed: number; new: number; ambiguous: number; missing: number; restored: number };
 };
+
+/**
+ * A line's configurations in a few characters: `12.1–12.5` for a run of
+ * three or more consecutive ones under one line, otherwise a list
+ * (`12.1 and 12.3`). The labels are `recordShortLabel`'s, in order.
+ */
+export function configurationRange(labels: readonly string[]): string {
+  if (labels.length <= 1) return labels[0] ?? "";
+  const parts = labels.map((label) => /^(\d+)\.(\d+)$/.exec(label));
+  const consecutive =
+    labels.length >= 3 &&
+    parts.every((part) => part !== null && part[1] === parts[0]?.[1]) &&
+    parts.every((part, i) => i === 0 || Number(part?.[2]) === Number(parts[i - 1]?.[2]) + 1);
+  if (consecutive) return `${labels[0]}–${labels[labels.length - 1]}`;
+  return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+}
 
 function show(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -173,19 +227,29 @@ export function lineDeltas(line: RevisedLine, record: ExistingRecord): FieldDelt
  * line they have paired by hand is `paired` even where the code is ambiguous,
  * which is the whole point of offering candidates.
  */
-export function reconcileSheet(lines: RevisedLine[], records: ExistingRecord[]): SheetReconciliation {
+export function reconcileSheet(
+  lines: RevisedLine[],
+  records: ExistingRecord[],
+  /** The phase's bill lines an earlier revision retired: offered back, never chosen. */
+  retired: ExistingRecord[] = [],
+): SheetReconciliation {
   const live = lines.filter((line) => !line.ignored);
 
   // Codes on each side, folded the way every other matcher in the app folds
   // one — see the note on the import above.
-  const recordsByCode = new Map<string, ExistingRecord[]>();
-  for (const record of records) {
-    for (const code of record.codes) {
-      const key = normaliseRef(code);
-      if (!key) continue;
-      recordsByCode.set(key, [...(recordsByCode.get(key) ?? []), record]);
+  const byCode = (list: ExistingRecord[]) => {
+    const map = new Map<string, ExistingRecord[]>();
+    for (const record of list) {
+      for (const key of new Set(record.codes.map(normaliseRef))) {
+        if (!key) continue;
+        map.set(key, [...(map.get(key) ?? []), record]);
+      }
     }
-  }
+    return map;
+  };
+  const recordsByCode = byCode(records);
+  const retiredByCode = byCode(retired);
+  const retiredById = new Map(retired.map((record) => [record.id, record]));
   const lineCountByCode = new Map<string, number>();
   for (const line of live) {
     const key = line.code ? normaliseRef(line.code) : "";
@@ -198,6 +262,21 @@ export function reconcileSheet(lines: RevisedLine[], records: ExistingRecord[]):
   const out: LineReconciliation[] = [];
 
   for (const line of live) {
+    // The reviewer's own decision to bring a retired record back.
+    if (line.replaces?.restore) {
+      const record = retiredById.get(line.replaces.recordId);
+      out.push({
+        index: line.index,
+        lineNo: line.lineNo,
+        code: line.code,
+        status: "restore",
+        suggestedRecordId: line.replaces.recordId,
+        candidates: [],
+        restoreCandidates: [],
+        deltas: record ? lineDeltas(line, record) : [],
+      });
+      continue;
+    }
     // The reviewer's own decision, first and unconditionally.
     if (line.replaces) {
       const record = byId.get(line.replaces.recordId);
@@ -209,6 +288,7 @@ export function reconcileSheet(lines: RevisedLine[], records: ExistingRecord[]):
         status: "paired",
         suggestedRecordId: line.replaces.recordId,
         candidates: [],
+        restoreCandidates: [],
         deltas: record ? lineDeltas(line, record) : [],
       });
       continue;
@@ -228,6 +308,7 @@ export function reconcileSheet(lines: RevisedLine[], records: ExistingRecord[]):
         status: "paired",
         suggestedRecordId: record.id,
         candidates: [],
+        restoreCandidates: [],
         deltas: lineDeltas(line, record),
       });
       continue;
@@ -242,6 +323,7 @@ export function reconcileSheet(lines: RevisedLine[], records: ExistingRecord[]):
         status: "ambiguous",
         suggestedRecordId: null,
         candidates: matches.map((record) => record.id),
+        restoreCandidates: [],
         deltas: [],
       });
       continue;
@@ -254,6 +336,7 @@ export function reconcileSheet(lines: RevisedLine[], records: ExistingRecord[]):
       status: "new",
       suggestedRecordId: null,
       candidates: [],
+      restoreCandidates: key ? (retiredByCode.get(key) ?? []).map((record) => record.id) : [],
       deltas: [],
     });
   }
@@ -268,6 +351,7 @@ export function reconcileSheet(lines: RevisedLine[], records: ExistingRecord[]):
       attributeCount: record.attributeCount,
       hasImage: record.hasImage,
       settledAnswers: record.settledAnswers,
+      configurations: record.configurations ?? [],
     }));
 
   return {
@@ -279,6 +363,7 @@ export function reconcileSheet(lines: RevisedLine[], records: ExistingRecord[]):
       new: out.filter((line) => line.status === "new").length,
       ambiguous: out.filter((line) => line.status === "ambiguous").length,
       missing: missing.length,
+      restored: out.filter((line) => line.status === "restore").length,
     },
   };
 }

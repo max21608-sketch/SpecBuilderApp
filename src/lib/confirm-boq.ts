@@ -36,7 +36,7 @@ import {
   sheetsNeedingColumns,
   type StagedBoqSheet,
 } from "@/lib/boq-import";
-import { effectiveArea } from "@/lib/boq-reconcile";
+import { effectiveArea, type LinePairing } from "@/lib/boq-reconcile";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { finishLineTargets, rowKindProblems, type RowKindFields } from "@/lib/boq-row-kinds";
@@ -114,8 +114,11 @@ type StagedLine = {
   levelStatus?: string;
   levelReason?: string | null;
   ignored: boolean;
-  /** The record this line continues, at the version the reviewer was shown. */
-  replaces?: { recordId: string; recordVersion: number } | null;
+  /**
+   * The record this line continues, at the version the reviewer was shown;
+   * `restore` where it is one an earlier revision retired (`LinePairing`).
+   */
+  replaces?: LinePairing | null;
 } & RowKindFields;
 
 /**
@@ -316,6 +319,26 @@ export async function confirmBoqImport(
     .map((sheet) => (sheet as StagedBoqSheet).replacesRunId ?? null)
     .filter((id): id is string => id !== null);
 
+  // TWO SHEETS NEVER REVISE ONE PHASE (audit 2026-11-06, C2). Each sheet's
+  // retire step takes every record on the phase that SHEET did not carry, so
+  // the second sheet retired the first sheet's lines — new records included —
+  // and the bill confirmed with only the last tab live; the retired count was
+  // the only sign. The review's control refuses it too (the sheet PATCH), and
+  // this is re-checked here because a refusal on a screen is not a gate.
+  const sheetsByTarget = new Map<string, string[]>();
+  for (const sheet of sheets as StagedBoqSheet[]) {
+    if (!sheet.replacesRunId) continue;
+    sheetsByTarget.set(sheet.replacesRunId, [...(sheetsByTarget.get(sheet.replacesRunId) ?? []), sheet.sheetName]);
+  }
+  const twice = [...sheetsByTarget.values()].find((names) => names.length > 1);
+  if (twice) {
+    throw new DomainConflictError(
+      "phase_revised_twice",
+      `${twice.map((name) => `“${name}”`).join(" and ")} are both set to revise the same phase. A phase is revised ` +
+        "by one tab: make the others new phases, or drop them.",
+    );
+  }
+
   // Every run a sheet claims to revise must still be this project's, and
   // active. Re-checked rather than trusted: the reviewer chose it minutes or
   // days ago, and a retired run is not something to write a revision into.
@@ -495,9 +518,33 @@ export async function confirmBoqImport(
             `BOQ line ${line.lineNo} is paired to an existing record, but this sheet is not marked as revising a run. Reload the review.`,
           );
         }
+        // A RESTORE (audit 2026-11-06, C14): the reviewer chose to bring back
+        // a record an earlier revision retired, because its code is on the
+        // bill again. Written exactly as a pairing, keeping everything that
+        // hangs off the record, from the retired state at the version shown.
+        // When it was retired, the configurations retired with it at the same
+        // moment come back with it (`restoreRun`'s rule): restoring the line
+        // alone would make it an item again and ship it bare.
+        const restoring = target.restore === true;
+        if (restoring) {
+          // Compared in SQL, never through a JS Date: a timestamp round-tripped
+          // through one loses its microseconds and would match nothing.
+          const back = await txn`
+            update spec_records c
+            set status = 'active', retired_at = null, retired_by = null, updated_by = ${actor}
+            from spec_records p
+            where p.id = ${target.recordId} and p.status = 'retired' and p.version = ${target.recordVersion}
+              and c.parent_id = p.id and c.status = 'retired' and c.retired_at = p.retired_at
+            returning c.id
+          `;
+          for (const row of back) recordIds.push(String(row.id));
+        }
         const changed = await txn`
           update spec_records
-          set item_description = ${billItemName(line)},
+          set status = 'active',
+              retired_at = null,
+              retired_by = null,
+              item_description = ${billItemName(line)},
               product_reference = ${line.productReference},
               qty = ${line.qty},
               designer = ${line.designer},
@@ -533,14 +580,19 @@ export async function confirmBoqImport(
           where id = ${target.recordId}
             and project_id = ${projectId}
             and run_id = ${replacesRunId}
-            and status = 'active'
+            and status = ${restoring ? "retired" : "active"}
+            -- A configuration is never a pairing: it carries no bill code and
+            -- follows its line (audit 2026-11-06, C1).
+            and parent_id is null
             and version = ${target.recordVersion}
           returning id
         `;
         if (!changed[0]) {
           throw new DomainConflictError(
             "record_changed",
-            `The record paired with BOQ line ${line.lineNo} has changed, moved phase, or been retired since you reviewed this revision. Nothing was written — reload and check the pairing.`,
+            restoring
+              ? `The retired record BOQ line ${line.lineNo} brings back has changed, moved phase, or been brought back since you reviewed this revision. Nothing was written — reload and check the line.`
+              : `The record paired with BOQ line ${line.lineNo} has changed, moved phase, or been retired since you reviewed this revision. Nothing was written — reload and check the pairing.`,
           );
         }
         carriedForward.add(target.recordId);
@@ -695,18 +747,41 @@ export async function confirmBoqImport(
     // a BWS job, and that job may already exist — deleting the record loses
     // the mapping for work that is already in the factory. It leaves the tabs
     // and the export; it does not leave the history.
+    //
+    // A CONFIGURATION FOLLOWS ITS LINE (audit 2026-11-06, C1). It carries no
+    // bill code, so no revised line ever pairs with it, and this step used to
+    // retire every one on the phase: S-301 paired, its five TYPEs retired,
+    // and the bare line shipped in their place. Held TWO ways, so a later
+    // change to one leaves the other standing: the live configurations of
+    // every line this sheet keeps are carried forward with it, AND the sweep
+    // reads bill lines only. A line that IS retired takes its configurations
+    // with it, in this change, at the same moment — which is what lets a
+    // restore bring them back together.
     if (replacesRunId) {
+      const following = await txn`
+        select id from spec_records
+        where parent_id = any(${[...carriedForward]}::uuid[]) and status = 'active'
+      `;
+      for (const row of following) carriedForward.add(String(row.id));
       const gone = await txn`
         update spec_records
         set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
         where run_id = ${replacesRunId}
           and project_id = ${projectId}
           and status = 'active'
+          and parent_id is null
           and not (id = any(${[...carriedForward]}::uuid[]))
         returning id
       `;
-      for (const row of gone) recordIds.push(String(row.id));
-      retired += gone.length;
+      const goneIds = gone.map((row) => String(row.id));
+      const goneWith = await txn`
+        update spec_records
+        set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
+        where parent_id = any(${goneIds}::uuid[]) and status = 'active'
+        returning id
+      `;
+      for (const id of [...goneIds, ...goneWith.map((row) => String(row.id))]) recordIds.push(id);
+      retired += gone.length + goneWith.length;
     }
   }
 
