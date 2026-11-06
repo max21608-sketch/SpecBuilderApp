@@ -16,9 +16,9 @@
 //      of the four figures the item needs were never taken.
 //   2. `editAnswer` writes `source_kind = 'manual'`, and `planAnswerFills`'
 //      composed-dimensions branch reaches an answer only while it is `missing`
-//      or `document`-written — so the cell was locked for good. A later
-//      drawing could hold four real slots and the record would go on showing
-//      the two somebody typed.
+//      or composed by it (`document`-written then, `attribute` since 0050),
+//      so the cell was locked for good. A later drawing could hold four real
+//      slots and the record would go on showing the two somebody typed.
 //
 // The screen's half is held in `tests/components/record-checklist.test.tsx`.
 // These are the facts a component test cannot see: what the slot path writes,
@@ -185,13 +185,14 @@ describeIfDb("a dimension recorded from the checklist", () => {
     expect((await record(recordId, "W", "840")).status).toBe(201);
     expect((await record(recordId, "D", "790")).status).toBe(201);
 
-    // THE DISCRIMINATOR. `document` with a NULL source is what a hand-typed
-    // attribute writes, and it is precisely what keeps the composed cell in
-    // reach of `applyAnswerFills`. A typed ANSWER would have been `manual`,
-    // which is out of reach for good.
+    // THE DISCRIMINATOR. `attribute` (0050) is what a composed cell carries,
+    // whoever's attributes it was composed from, and it is precisely what keeps
+    // the cell in reach of `applyAnswerFills`; the NULL source says a person
+    // typed the slots. A typed ANSWER would have been `manual`, which is out of
+    // reach for good.
     const before = await dimensionsAnswer(recordId);
     expect(before?.value).toBe("W840 x D790mm");
-    expect(before?.sourceKind).toBe("document");
+    expect(before?.sourceKind).toBe("attribute");
     expect(before?.sourceId).toBeNull();
 
     // A drawing confirm, as far as the cell is concerned: a further slot off a

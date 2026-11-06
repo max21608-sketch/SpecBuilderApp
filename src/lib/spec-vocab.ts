@@ -74,8 +74,17 @@ export function answerStateTone(state: unknown): "good" | "warn" | "plain" {
 export const REQUIREMENT_KINDS = ["spec_field", "readiness"] as const;
 export type RequirementKind = (typeof REQUIREMENT_KINDS)[number];
 
-/** Where an answer came from. `source_id` points at the row, per kind. */
-export const ANSWER_SOURCES = ["manual", "document", "email"] as const;
+/**
+ * Where an answer came from. `source_id` points at the row, per kind.
+ *
+ * Three of these are a PERSON'S answer and one is not. `manual` is typed,
+ * `email` is confirmed off a message, `document` is confirmed by a reviewer
+ * off a specification document straight onto a question. `attribute` (0050)
+ * is the checklist's copy of the record's attributes, composed by
+ * `promote-answers.ts`; it is the only kind a recompose may overwrite or put
+ * back to `missing`, and nothing else writes it.
+ */
+export const ANSWER_SOURCES = ["manual", "document", "email", "attribute"] as const;
 export type AnswerSource = (typeof ANSWER_SOURCES)[number];
 
 /**

@@ -74,6 +74,30 @@ describe("planAnswerFills", () => {
     expect(fills[0]?.state).toBe("tbc");
   });
 
+  it("carries a TBC slot with no figure into the answer, as the BWS cell does (audit F6)", () => {
+    // The file composes every slotted row, so a width recorded TBC with no
+    // figure ships as "W TBC x D790 x H720mm". The answer dropped the empty
+    // slot before composing and judged `allConfirmed` over what was left, so
+    // the checklist read a CONFIRMED "D790 x H720mm": a gate satisfied over a
+    // width the client has not decided, beside a file that says so.
+    const fills = planAnswerFills([
+      dim("W", null as unknown as string, { state: "tbc" }),
+      dim("D", "790", { sortOrder: 2 }),
+      dim("H", "720", { sortOrder: 3 }),
+    ]);
+    expect(fills).toHaveLength(1);
+    expect(fills[0]?.value).toBe("W TBC x D790 x H720mm");
+    expect(fills[0]?.state).toBe("tbc");
+  });
+
+  it("answers a record whose only slot is a TBC with no figure, as TBC", () => {
+    // "W TBC" is an answer (somebody asked; the client has not decided), and
+    // it is what the file ships. Missing would say nobody looked.
+    const fills = planAnswerFills([dim("W", "", { state: "tbc" })]);
+    expect(fills[0]?.value).toBe("W TBC");
+    expect(fills[0]?.state).toBe("tbc");
+  });
+
   // ---- the record's own dimension note (0034) ------------------------------
 
   it("composes the record's dimension note into the checklist answer", () => {
@@ -181,6 +205,10 @@ describe("planAnswerRetractions", () => {
     // Retiring the width off a record that still has a depth is a
     // recomposition, which is planAnswerFills' job.
     expect(planAnswerRetractions([dimension("D", "790")])).toEqual([]);
+  });
+
+  it("keeps the cell while a TBC slot with no figure stands, since the fill composes it", () => {
+    expect(planAnswerRetractions([{ ...dimension("W", null), state: "tbc" }])).toEqual([]);
   });
 
   it("treats a slot with no value as nothing to compose from", () => {

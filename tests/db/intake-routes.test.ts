@@ -274,8 +274,9 @@ describeIfDb("intake routes", () => {
       expect(answer.value).toBe("W1900 x D790 x H720mm");
       expect(answer.state).toBe("confirmed");
       expect(answer.confirmed_by).toBe("__qa@example.test");
-      // Provenance, so the answer can be traced back to the page.
-      expect(answer.source_kind).toBe("document");
+      // Provenance, so the answer can be traced back to the page: composed
+      // from the attributes (0050), the drawing's run as its source.
+      expect(answer.source_kind).toBe("attribute");
       expect(answer.source_id).toBe(runId);
       expect(String(answer.value_raw)).toContain("W 1900");
     }

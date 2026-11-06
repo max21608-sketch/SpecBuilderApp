@@ -31,6 +31,9 @@ import { fieldDisplayName } from "@/lib/spec-field-label";
 import { findOpenChangeSet, openChangeSet, publishChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { recomposeAnswers } from "@/lib/attribute-retire";
+import { resolveFinishCode } from "@/lib/finishes";
+import { loadFinishLibrary } from "@/lib/bill-fabric-load";
+import { wordsBeside } from "@/lib/bill-description";
 import { guessLevelFromBill } from "@/lib/level-guess";
 import { normaliseRef } from "@/lib/boq-import";
 import {
@@ -357,17 +360,34 @@ export async function createAttribute(txn: TxnSql, input: CreateAttributeInput):
       reason: `${label}${value ? `: ${value}` : ""}`.slice(0, 200),
     }));
 
+  // A CODE THE LIBRARY HOLDS LINKS TO IT (audit E3), by the drawings
+  // confirm's `resolveFinishCode` and its CONFLICT rule: where the library has
+  // committed to other words, nothing is linked. A code the library has never
+  // seen is not filed from here; the finishes page is where a code is added.
+  // Without the link, editing the code's description "on N items" never
+  // reached a spec somebody typed, and BW's finish for it never shipped on it.
+  const materialCode = input.materialCode?.trim() || null;
+  let finishId: string | null = null;
+  if (materialCode && !isDimension) {
+    const resolution = resolveFinishCode(
+      materialCode,
+      wordsBeside(value ?? "", materialCode),
+      await loadFinishLibrary(txn, String(record.project_id)),
+    );
+    if (resolution.status === "matched") finishId = resolution.finish.id;
+  }
+
   const order = await txn`
     select coalesce(max(sort_order), 0) as last from record_attributes where record_id = ${input.recordId}
   `;
   const inserted = await txn`
     insert into record_attributes
-      (record_id, attr_group, label, value, qualifier, unit, dimension_slot, material_code, spec_field_id,
+      (record_id, attr_group, label, value, qualifier, unit, dimension_slot, material_code, finish_id, spec_field_id,
        state, source_run_id, source_page, sort_order, status, created_by, updated_by)
     values
       (${input.recordId}, ${input.attrGroup}, ${label}, ${value}, ${input.qualifier?.trim() || null},
        ${unit}, ${slot},
-       ${input.materialCode?.trim() || null}, ${input.specFieldId ?? null}, ${input.state},
+       ${materialCode}, ${finishId}, ${input.specFieldId ?? null}, ${input.state},
        null, null, ${Number(order[0]?.last ?? 0) + 1}, 'active', ${input.actor}, ${input.actor})
     returning id
   `;

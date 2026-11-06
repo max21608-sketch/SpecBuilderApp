@@ -150,12 +150,12 @@ export async function editAnswer(
         state        = ${state},
         confirmed_by = ${state === "confirmed" ? actor : null},
         confirmed_at = ${state === "confirmed" ? new Date().toISOString() : null},
-        -- THE EDIT TAKES OWNERSHIP. An answer filled from a drawing carries
-        -- source_kind 'document' and the run that wrote it, and that pair is
-        -- exactly what tells promote-answers.ts it may recompose the row as
-        -- later slots arrive. The moment a person edits it, it stops being
-        -- that row: marking it 'manual' is what stops the next confirmed
-        -- drawing overwriting what they typed.
+        -- THE EDIT TAKES OWNERSHIP. An answer composed from the record's
+        -- specs carries source_kind 'attribute' (0050), and that is exactly
+        -- what tells promote-answers.ts it may recompose the row as later
+        -- specs arrive. The moment a person edits it, it stops being that
+        -- row: marking it 'manual' is what stops the next confirmed document
+        -- overwriting what they typed.
         source_kind  = 'manual',
         source_id    = null,
         updated_by   = ${actor}
