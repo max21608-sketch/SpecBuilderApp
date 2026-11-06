@@ -57,7 +57,7 @@ const REASON_TEXT: Record<StaleReason, string> = {
   answerSettled: "this has since been settled",
   recordRetired: "the record was retired",
   contextChanged: "the question or the record's details changed after the email was written",
-  questionGone: "this question no longer exists on the record",
+  questionGone: "this question is no longer asked of this record on this project",
 };
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
