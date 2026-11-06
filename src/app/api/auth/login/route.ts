@@ -18,12 +18,20 @@
 // NOTHING HERE CHANGES WHAT A WRONG PASSWORD ANSWERS. A 401 with "incorrect
 // email or password" is still the only thing a failed sign-in says, and the
 // 503s below are reachable only when the deployment itself cannot serve.
+//
+// TEN WRONG PASSWORDS LOCK THE EMAIL, OR THE ADDRESS, FOR A MINUTE (audit
+// A11): a 429 with the wait in words and in Retry-After, checked BEFORE the
+// password, so a locked account answers the same whether the guess was right.
+// `login-throttle.ts` says plainly what an in-memory count does and does not
+// stop. And `verifyCredentials` runs scrypt for every request, so the time a
+// refusal takes no longer says whether the account exists.
 import { z } from "zod";
 import { json } from "@/lib/db";
 import { makeSessionToken } from "@/lib/auth";
 import { verifyCredentials } from "@/lib/auth-node";
 import { setSessionCookie } from "@/lib/session";
 import { currentAppEnvIsProduction, environmentProblemMessage } from "@/lib/env";
+import { clientAddress, loginThrottle } from "@/lib/login-throttle";
 
 const Body = z.object({
   email: z.string().email(),
@@ -59,13 +67,32 @@ export async function POST(req: Request): Promise<Response> {
   const misconfigured = environmentProblemMessage();
   if (misconfigured) return json({ ok: false, code: "environment_misconfigured", error: misconfigured }, 503);
 
+  const keys = { email: parsed.data.email, ip: clientAddress(req) };
+  const verdict = loginThrottle.check(keys);
+  if (verdict.locked) {
+    const response = json(
+      {
+        ok: false,
+        code: "too_many_attempts",
+        error: `Too many sign-in attempts. Wait ${verdict.retryAfterSeconds} seconds and try again.`,
+      },
+      429,
+    );
+    response.headers.set("retry-after", String(verdict.retryAfterSeconds));
+    return response;
+  }
+
   let user: Awaited<ReturnType<typeof verifyCredentials>>;
   try {
     user = await verifyCredentials(parsed.data.email, parsed.data.password);
   } catch (cause) {
     return unreachable(cause);
   }
-  if (!user) return json({ ok: false, error: "incorrect email or password" }, 401);
+  if (!user) {
+    loginThrottle.fail(keys);
+    return json({ ok: false, error: "incorrect email or password" }, 401);
+  }
+  loginThrottle.succeed(keys);
 
   const token = await makeSessionToken(user);
   await setSessionCookie(token);
