@@ -17,8 +17,11 @@
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { streamTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
+import { pictureServing } from "@/lib/picture-types";
 import { assertBoqDocument } from "@/lib/boq-import";
 import { effectiveRowImage, rowImageFor } from "@/lib/bill-row-image";
+import { contentDisposition } from "@/lib/content-disposition";
+import { requireUuid } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +29,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
   const url = new URL(request.url);
   const sheetIndex = Number(url.searchParams.get("sheet"));
   const row = Number(url.searchParams.get("row"));
@@ -58,9 +63,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   try {
     const source = await streamTrustedBlob(image.pathname, String(run.project_id));
+    // Inline only for a picture type (`picture-types.ts`, audit A2).
+    const served = pictureServing(image.contentType || source.contentType || "");
     const headers = new Headers({
-      "content-type": image.contentType || source.contentType || "image/png",
-      "content-disposition": "inline",
+      "content-type": served.contentType,
+      "content-disposition": contentDisposition(served.inline ? "inline" : "attachment"),
       // Private and per-user: a picture out of an NDA-covered client document.
       "cache-control": "private, max-age=3600",
       "x-content-type-options": "nosniff",

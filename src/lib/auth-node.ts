@@ -16,12 +16,19 @@ export async function hashPassword(password: string): Promise<string> {
   return `scrypt$${salt.toString("hex")}$${hash.toString("hex")}`;
 }
 
+// A hash no password matches, in the stored format. Checked against whenever
+// there is no real hash to check, so EVERY sign-in costs one scrypt (audit
+// A11): returning early for an unknown or inactive email made a wrong password
+// on a real account measurably slower, and timing named the accounts.
+const NO_ACCOUNT_HASH = `scrypt$${"00".repeat(16)}$${"00".repeat(KEYLEN)}`;
+
 async function verifyScrypt(password: string, stored: string): Promise<boolean> {
   const [scheme, saltHex, hashHex] = stored.split("$");
-  if (scheme !== "scrypt" || !saltHex || !hashHex) return false;
-  const expected = Buffer.from(hashHex, "hex");
-  const got = await scrypt(password, Buffer.from(saltHex, "hex"), KEYLEN);
-  return expected.length === got.length && timingSafeEqual(expected, got);
+  const readable = scheme === "scrypt" && Boolean(saltHex) && Boolean(hashHex);
+  const [, salt, hash] = (readable ? stored : NO_ACCOUNT_HASH).split("$");
+  const expected = Buffer.from(hash!, "hex");
+  const got = await scrypt(password, Buffer.from(salt!, "hex"), KEYLEN);
+  return readable && expected.length === got.length && timingSafeEqual(expected, got);
 }
 
 type UserRow = {
@@ -39,7 +46,9 @@ export async function verifyCredentials(email: string, password: string): Promis
     from users where lower(email) = lower(${email})
   `) as UserRow[];
   const user = rows[0];
-  if (!user || !user.active) return null;
-  if (!(await verifyScrypt(password, user.password_hash))) return null;
+  // The scrypt runs FIRST, whoever the email belongs to, and the account is
+  // judged after it: the time a refusal takes must not depend on the account.
+  const matches = await verifyScrypt(password, user?.active ? user.password_hash : NO_ACCOUNT_HASH);
+  if (!user || !user.active || !matches) return null;
   return { id: user.id, email: user.email, name: user.name, role: user.role };
 }

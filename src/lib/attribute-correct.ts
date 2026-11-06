@@ -46,7 +46,7 @@
 // 'retired'`) allows.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { changeSetForEdit, type UploadedEvidence } from "@/lib/change-sets";
+import { changeSetForEdit, type VerifiedEvidence } from "@/lib/change-sets";
 import { isFinishCodeOrigin, isFinishKind, resolveFinishCode, type Finish } from "@/lib/finishes";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { recomposeAnswers } from "@/lib/attribute-retire";
@@ -88,7 +88,7 @@ export type CorrectAttributeInput = {
   dimensionSlot?: DimensionSlot | null;
   state: AttributeState;
   reason: string;
-  evidence?: UploadedEvidence | null;
+  evidence?: VerifiedEvidence | null;
   actor: string;
   /**
    * An ALREADY OPEN change to attach this write to, instead of opening one —

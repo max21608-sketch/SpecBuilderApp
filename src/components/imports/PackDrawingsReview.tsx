@@ -321,18 +321,21 @@ export default function PackDrawingsReview({
    * same drawing quoted by three phases is one decision, not three entries in
    * the trail.
    *
+   * EACH RECORD CARRIES THE VERSION THE CARD SHOWED (audit A16): a level
+   * somebody set in between is refused, and the reload below shows it.
+   *
    * RELOAD FIRST, REPORT AFTER: this screen clears its banner on a successful
    * load, so setting the error and then reloading showed a refusal for a few
    * milliseconds and then nothing at all.
    */
-  async function setLevel(projectId: string, recordIds: string[], level: ItemLevel) {
+  async function setLevel(projectId: string, records: { id: string; version?: number }[], level: ItemLevel) {
     setBusy("level");
     setError(null);
     try {
       const res = await apiFetch(`/api/projects/${projectId}/levels/accept`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ recordIds, level }),
+        body: JSON.stringify({ records, level }),
       });
       await reloadThen(res.ok ? null : res.error);
     } finally {
@@ -973,7 +976,7 @@ export default function PackDrawingsReview({
               onImage={rememberImage}
               onSwatch={rememberSwatch}
               onReview={review}
-              onSetLevel={(recordIds, level) => setLevel(projectId, recordIds, level)}
+              onSetLevel={(records, level) => setLevel(projectId, records, level)}
             />
           ) : (
             <ConfigurationCard
@@ -993,7 +996,7 @@ export default function PackDrawingsReview({
               onReviewMany={reviewMany}
               onImage={rememberImage}
               onSwatch={rememberSwatch}
-              onSetLevel={(recordIds, level) => setLevel(projectId, recordIds, level)}
+              onSetLevel={(records, level) => setLevel(projectId, records, level)}
             />
           )}
         </div>

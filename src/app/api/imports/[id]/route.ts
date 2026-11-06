@@ -45,6 +45,7 @@ import {
 import { assertBoqDocument } from "@/lib/boq-import";
 import { billPicturePrefix, rowImageFor, type BillPictureCrop, type BillPictureOverride } from "@/lib/bill-row-image";
 import { assertProjectScopedPathname, headTrustedBlob } from "@/lib/blob-source";
+import { isPictureContentType } from "@/lib/picture-types";
 import { fabricParentOptions, isBoqRowKind, kindChoicePatch } from "@/lib/boq-row-kinds";
 import { billSpecsRequestId } from "@/lib/bill-specifications";
 import { furnitureReadRequestId } from "@/lib/tracker-furniture";
@@ -101,6 +102,7 @@ import { assertStagedFinishSchedule, isStagedFinishSchedule, reviewFinishSchedul
 import { loadScheduleLibrary, setFinishScheduleEntryKind } from "@/lib/confirm-finish-schedule";
 import { isFinishKind } from "@/lib/finishes";
 import { documentClosedSentence, reviewedWord } from "@/lib/intake-status";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -890,6 +892,8 @@ async function patchFinishScheduleEntry(id: string, raw: unknown, actor: string)
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
   const rows = await sql`
     select r.id, r.project_id, r.status, r.parsed, r.error, r.version, r.confirmed_at,
            r.source_kind, r.document_kind, r.model, r.model_metadata,
@@ -2133,7 +2137,6 @@ const PictureCrop = z
     height: z.number().int().positive().max(20_000).nullable().optional(),
   })
   .strict();
-const PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/gif"]);
 
 async function patchLinePicture(
   id: string,
@@ -2178,7 +2181,7 @@ async function patchLinePicture(
     }
     const stored = await headTrustedBlob(pathname, projectId).catch(() => null);
     if (!stored) return json({ ok: false, error: "That crop never reached the store. Crop it again." }, 400);
-    if (!PICTURE_TYPES.has(stored.contentType)) return json({ ok: false, error: "That file is not a picture." }, 400);
+    if (!isPictureContentType(stored.contentType)) return json({ ok: false, error: "That file is not a picture." }, 400);
     crop = {
       pathname,
       contentType: stored.contentType,
@@ -2237,7 +2240,11 @@ async function patchLinePicture(
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

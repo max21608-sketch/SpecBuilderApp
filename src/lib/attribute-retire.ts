@@ -31,7 +31,7 @@
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { isFinishCodeOrigin, isFinishKind } from "@/lib/finishes";
 import { finishStandardFromRow, standardFromRow } from "@/lib/bw-standard";
-import { changeSetForEdit, type UploadedEvidence } from "@/lib/change-sets";
+import { changeSetForEdit, type VerifiedEvidence } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { lockRecordOfAttribute } from "@/lib/record-lock";
 import {
@@ -257,7 +257,7 @@ export async function retireAttribute(
     attributeId: string;
     expectedVersion: number;
     reason: string;
-    evidence?: UploadedEvidence | null;
+    evidence?: VerifiedEvidence | null;
     actor: string;
     /**
      * An ALREADY OPEN change to attach this write to, instead of opening one —

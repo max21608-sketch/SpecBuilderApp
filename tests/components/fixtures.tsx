@@ -12,9 +12,10 @@ export const specFields: SpecField[] = [
   { id: "field-timber", json_id: 7, name: "Main timber finish", field_category: "Timber" },
 ];
 
-export const records: RecordChoice[] = [
-  { id: "rec-main", label: "AP364c-011", itemDescription: "Armchair", runName: "MAIN RUN" },
-  { id: "rec-ve", label: "AP364c-025", itemDescription: "Armchair", runName: "MAIN RUN - VE" },
+/** Each with the record version the server sends, which a level click carries back (audit A16). */
+export const records: (RecordChoice & { version: number })[] = [
+  { id: "rec-main", label: "AP364c-011", itemDescription: "Armchair", runName: "MAIN RUN", version: 3 },
+  { id: "rec-ve", label: "AP364c-025", itemDescription: "Armchair", runName: "MAIN RUN - VE", version: 7 },
 ];
 
 let counter = 0;

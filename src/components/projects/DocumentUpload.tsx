@@ -15,7 +15,7 @@ import { upload } from "@vercel/blob/client";
 import { apiFetch } from "@/lib/api-fetch";
 import { INTAKE_UPLOAD_ACCEPT } from "@/lib/intake-source-types";
 import { DOCUMENT_KINDS, DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
-import { projectUploadPrefix } from "@/lib/upload-paths";
+import { pathnameSafeName, projectUploadPrefix } from "@/lib/upload-paths";
 import { checkUpload } from "@/lib/upload-check";
 
 type ImportType = "boq" | "spec_document";
@@ -64,7 +64,7 @@ export default function DocumentUpload({ projectId, onUploaded }: { projectId: s
         //
         // The pathname is namespaced to the project, which is what the upload
         // token signs and what registration re-checks.
-        const blob = await upload(`${projectUploadPrefix(projectId)}${file.name}`, file, {
+        const blob = await upload(`${projectUploadPrefix(projectId)}${pathnameSafeName(file.name)}`, file, {
           access: "private",
           handleUploadUrl: "/api/uploads/token",
           clientPayload: projectId,

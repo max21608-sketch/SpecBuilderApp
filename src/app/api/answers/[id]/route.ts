@@ -14,6 +14,8 @@ import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction"
 import { editAnswer } from "@/lib/answer-edit";
 import { z } from "zod";
 import { isAnswerState, type AnswerState } from "@/lib/spec-vocab";
+import { verifyEvidence } from "@/lib/change-sets";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 const Evidence = z
   .object({
@@ -28,7 +30,11 @@ const Evidence = z
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let body: {
     value?: unknown;
@@ -72,7 +78,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (!parsedEvidence.success) {
     return json({ ok: false, error: "That attachment is not valid." }, 400);
   }
-  const evidence = parsedEvidence.data;
+  // The store is asked about it HERE, before the transaction (audit A15).
+  const evidence = await verifyEvidence(parsedEvidence.data);
 
   // The database refuses `confirmed` without a value and an actor, and refuses
   // a value on `na`. Saying so here gives the reviewer a sentence rather than a

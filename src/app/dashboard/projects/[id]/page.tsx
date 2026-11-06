@@ -144,6 +144,8 @@ type Pack = {
 type SpecRun = {
   id: string;
   name: string;
+  /** Sent back when the phase is retired, so a phase changed since this load is refused (audit A16). */
+  version: number;
   source_sheet: string | null;
   boq_revision: string | null;
   boq_date: string | null;
@@ -386,14 +388,15 @@ function ProjectOverview() {
     // never reaches what somebody is typing there (audit G6).
   }, [projectId]);
 
-  async function retireRun(runId: string) {
+  async function retireRun(run: SpecRun) {
     if (!retireRunReason.trim()) return;
+    const runId = run.id;
     setRetiringBusy(true);
     try {
       const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/runs/${runId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ status: "retired", reason: retireRunReason.trim() }),
+        body: JSON.stringify({ status: "retired", reason: retireRunReason.trim(), version: run.version }),
       });
       // Reload first, then report. This screen clears its banner on a
       // successful load, so setting the message first would show a refusal for
@@ -1251,7 +1254,7 @@ function ProjectOverview() {
                       variant="danger"
                       size="sm"
                       disabled={!retireRunReason.trim() || retiringBusy}
-                      onClick={() => void retireRun(run.id)}
+                      onClick={() => void retireRun(run)}
                     >
                       {retiringBusy ? "Retiring…" : "Retire the phase"}
                     </Button>

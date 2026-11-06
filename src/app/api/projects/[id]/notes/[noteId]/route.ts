@@ -10,6 +10,7 @@
 import { z } from "zod";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,11 @@ export async function PATCH(
 ): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id, noteId } = await context.params;
+  const badId = requireUuid(id, noteId);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

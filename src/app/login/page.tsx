@@ -20,9 +20,18 @@
 import EnvironmentChip from "@/components/layout/EnvironmentChip";
 import LoginForm from "@/components/auth/LoginForm";
 import { environmentProblemMessage } from "@/lib/env";
+import { safeReturnPath } from "@/lib/return-path";
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string | string[] }>;
+}) {
   const misconfigured = environmentProblemMessage();
+  // Where the person was: the session-expired link and the middleware both
+  // send `?from=`. Checked here and again in the form (`return-path.ts`).
+  const { from } = await searchParams;
+  const returnTo = safeReturnPath(Array.isArray(from) ? from[0] : from);
   return (
     <div className="flex min-h-screen items-center justify-center bg-stone-50 px-4">
       <div className="w-full max-w-[370px]">
@@ -41,7 +50,7 @@ export default function LoginPage() {
           </p>
         )}
 
-        <LoginForm />
+        <LoginForm returnTo={returnTo} />
 
         {/* There is no self-signup and there is no password reset, so somebody
             who cannot get in has to be told who can let them in rather than

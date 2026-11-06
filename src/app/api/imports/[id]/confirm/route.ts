@@ -26,6 +26,7 @@ import {
 import { confirmDrawingItem, reviewDrawingObservations } from "@/lib/confirm-drawings";
 import { confirmPreambleNotes, reviewPreambleNotes } from "@/lib/confirm-preamble";
 import { confirmFinishScheduleEntries, reviewFinishScheduleEntries } from "@/lib/confirm-finish-schedule";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const maxDuration = 60;
 
@@ -135,7 +136,11 @@ function distinct(refs: { id: string }[]): boolean {
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown = {};
   try {

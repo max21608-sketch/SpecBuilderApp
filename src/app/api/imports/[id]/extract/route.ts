@@ -51,6 +51,7 @@ import { withTransaction, transactionErrorResponse, DomainConflictError } from "
 import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
 import { takeReadSlot, deferRead, WAITING_FOR_SLOT_MESSAGE } from "@/lib/extraction-slots";
 import { attemptRestartable, CLAIM_EXPIRY_SECONDS } from "@/lib/extraction-claim";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +68,11 @@ const ExtractRequest = z
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

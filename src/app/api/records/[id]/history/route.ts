@@ -9,11 +9,14 @@ import { loadRecordHistory, compareRecordVersions } from "@/lib/change-history";
 import { loadRecordBaselines } from "@/lib/baselines";
 import { parseAtoms } from "@/lib/snapshot-diff";
 import type { StoredCell } from "@/lib/record-snapshot";
+import { requireUuid } from "@/lib/route-guards";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const records = await sql`
     select r.id, r.record_no, r.item_description, p.bws_project_number,

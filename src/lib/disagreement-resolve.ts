@@ -50,7 +50,7 @@
 // code the library does not hold, leaves it unlinked and the library untouched.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { changeSetForEdit, type UploadedEvidence } from "@/lib/change-sets";
+import { changeSetForEdit, type VerifiedEvidence } from "@/lib/change-sets";
 import { resolveFinishCode } from "@/lib/finishes";
 import { loadFinishLibrary } from "@/lib/bill-fabric-load";
 import { snapshotRecords } from "@/lib/record-snapshot";
@@ -69,7 +69,7 @@ export type ResolveDisagreementInput = {
    */
   heldVersion?: number | null;
   reason: string;
-  evidence?: UploadedEvidence | null;
+  evidence?: VerifiedEvidence | null;
   actor: string;
 };
 

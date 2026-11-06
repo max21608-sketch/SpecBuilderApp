@@ -36,6 +36,7 @@ import { sql } from "@/lib/db";
 import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
 import { confirmingAsShown } from "./shown-targets";
 import { PATCH as importPatchRoute } from "@/app/api/imports/[id]/route";
+import type { VerifiedEvidence } from "@/lib/change-sets";
 
 // The drawings confirm requires the records the card showed (audit D3).
 const confirmRoute = confirmingAsShown(confirmPost);
@@ -320,7 +321,13 @@ describeIfDb("the BW standard beside the client's words", () => {
         agreeAttributeStandard(txn, {
           attributeId: attribute.id,
           expectedVersion: Number(attribute.version),
-          evidence: { pathname: `projects/${projectId}/evidence/__qa-yes.eml`, filename: "__qa-yes.eml" },
+          // What `verifyEvidence` returns for a file the store holds: the
+          // store is not this tier's, and the HEAD is proved in the pure tier.
+          evidence: {
+            pathname: `projects/${projectId}/evidence/__qa-yes.eml`,
+            filename: "__qa-yes.eml",
+            stored: { size: 120, contentType: "message/rfc822" },
+          } as VerifiedEvidence,
           actor: "qa",
         }),
       );

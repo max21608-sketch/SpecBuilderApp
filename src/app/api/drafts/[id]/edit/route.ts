@@ -40,6 +40,7 @@ import { TEMPLATE_VERSION, buildChaseEmail } from "@/lib/chase-template";
 import { ANSWER_STATE_LABELS } from "@/lib/spec-vocab";
 import { isQuestionTier } from "@/lib/tgq";
 import { draftStateWords } from "@/lib/draft-status";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const maxDuration = 60;
 
@@ -59,7 +60,11 @@ const EditInput = z.object({
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

@@ -40,7 +40,7 @@
 // ============================================================================
 import { randomUUID } from "node:crypto";
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { assertProjectScopedPathname } from "@/lib/blob-source";
+import { assertProjectScopedPathname, headTrustedBlob } from "@/lib/blob-source";
 
 export const CHANGE_SET_KINDS = [
   "boq_confirm",
@@ -235,7 +235,7 @@ export async function changeSetForEdit(
     kind,
     reason,
     evidence,
-  }: { projectId: string; actor: string; kind: ChangeSetKind; reason?: string | null; evidence?: UploadedEvidence | null },
+  }: { projectId: string; actor: string; kind: ChangeSetKind; reason?: string | null; evidence?: VerifiedEvidence | null },
 ): Promise<{ changeSetId: string; attached: boolean }> {
   // A reason or an evidence file supplied with THIS edit is about this edit,
   // so it gets its own change rather than being silently swallowed by whatever
@@ -253,12 +253,50 @@ export async function changeSetForEdit(
   return { changeSetId: id, attached: false };
 }
 
+/** What a request says it uploaded. Believed for nothing until `verifyEvidence` has asked the store. */
 export type UploadedEvidence = {
   pathname: string;
   filename?: string | null;
   contentType?: string | null;
   size?: number | null;
 };
+
+declare const verifiedEvidence: unique symbol;
+
+/**
+ * Evidence the STORE has been asked about (audit A15, 2026-11-06).
+ *
+ * The pathname was scope-checked and never HEADed, so a change could carry
+ * "evidence" pointing at nothing, filed under a size and a type the browser
+ * made up. The store is now asked once, by `verifyEvidence`, BEFORE the
+ * transaction (blob I/O inside one holds row locks across a network call), and
+ * this branded type is the only thing `attachEvidence` and `changeSetForEdit`
+ * accept, so a route that forgets the HEAD does not compile.
+ *
+ * `stored` is null when the store has no such file. That is decided in
+ * `attachEvidence`, AFTER the project check, so a pathname in another project
+ * reads "not one of this project's uploads" whether or not it exists.
+ */
+export type VerifiedEvidence = {
+  readonly pathname: string;
+  readonly filename: string | null;
+  readonly stored: { readonly size: number; readonly contentType: string } | null;
+  readonly [verifiedEvidence]: true;
+};
+
+const PROJECT_OF_PATHNAME = /^\/*projects\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i;
+
+/** Asks the store about the evidence a request names. Never throws: `attachEvidence` decides. */
+export async function verifyEvidence(evidence: UploadedEvidence | null | undefined): Promise<VerifiedEvidence | null> {
+  if (!evidence) return null;
+  const owner = PROJECT_OF_PATHNAME.exec(evidence.pathname)?.[1] ?? null;
+  const meta = owner ? await headTrustedBlob(evidence.pathname, owner).catch(() => null) : null;
+  return {
+    pathname: evidence.pathname,
+    filename: evidence.filename?.trim() ? evidence.filename.trim().slice(0, 300) : null,
+    stored: meta ? { size: meta.size, contentType: meta.contentType } : null,
+  } as VerifiedEvidence;
+}
 
 /**
  * Stores the email (or drawing, or PDF) that caused a change, and returns the
@@ -280,7 +318,7 @@ export async function attachEvidence(
     changeSetId,
     evidence,
     actor,
-  }: { projectId: string; changeSetId: string; evidence: UploadedEvidence; actor: string },
+  }: { projectId: string; changeSetId: string; evidence: VerifiedEvidence; actor: string },
 ): Promise<string> {
   let pathname: string;
   try {
@@ -290,13 +328,23 @@ export async function attachEvidence(
       status: 400,
     });
   }
+  if (!evidence.stored) {
+    throw new DomainConflictError(
+      "evidence_missing",
+      "That file never reached the document store. Attach it again.",
+      { status: 400 },
+    );
+  }
 
+  // The type and the size are the STORE's. The download route serves this
+  // file as an attachment with nosniff whatever its type, so the type is a
+  // label for Outlook, never an instruction to a browser.
   const rows = await txn`
     insert into attachments
       (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
     values
       ('change_sets', ${changeSetId}, 'evidence', ${pathname}, ${evidence.filename ?? "evidence"},
-       ${evidence.contentType ?? "application/octet-stream"}, ${evidence.size ?? null}, ${actor})
+       ${evidence.stored.contentType || "application/octet-stream"}, ${evidence.stored.size}, ${actor})
     returning id
   `;
   const id = String(rows[0]?.id ?? "");

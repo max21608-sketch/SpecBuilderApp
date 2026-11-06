@@ -7,8 +7,10 @@
 // deny check did not recognise -- a mis-cased "Viewer", a role added later --
 // got full write rights. An allowlist fails closed instead.
 //
-// Each mutating route handler still re-checks auth itself via getSessionUser().
-// This middleware is the first line, not the only line.
+// Each mutating route handler re-checks the session AND the role itself, with
+// `requireWriter` (src/lib/route-guards.ts). This middleware is the first line,
+// not the only line. WRITER_ROLES lives in the leaf `src/lib/roles.ts`, so
+// both lines read one allowlist.
 //
 // IT ALSO ENFORCES THE ENVIRONMENT PAIR, which `src/lib/env.ts` has claimed
 // since the scaffold and which this file never did. The consequence was
@@ -28,13 +30,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 import { environmentProblemMessage } from "@/lib/env";
+import { isWriterRole } from "@/lib/roles";
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-
-// Kept in sync with the users_role_check constraint in
-// db/migrations/0001_foundation.sql, minus the read-only role. Changing the
-// role set means a new migration, not just an edit here.
-const WRITER_ROLES = new Set(["admin", "editor"]);
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   // BEFORE THE SESSION CHECK, because a deployment that cannot serve anybody
@@ -56,7 +54,7 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   if (user) {
     const { pathname } = req.nextUrl;
     if (
-      !WRITER_ROLES.has(user.role) &&
+      !isWriterRole(user.role) &&
       pathname.startsWith("/api/") &&
       !READ_METHODS.has(req.method) &&
       pathname !== "/api/auth/logout" // view-only accounts must still be able to log out
@@ -111,9 +109,16 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 //                       notification can at worst ask us to re-read an id that
 //                       does not exist. The route answers 404 entirely when
 //                       MAIL_INGESTION_MODE is not 'enabled'.
+// EVERY EXCEPTION IS ANCHORED (audit A13, 2026-11-06). Inside the lookahead
+// a bare word is a PREFIX: `login` also exempted `/login-as`, `api/cron` an
+// `/api/cronjobs`, and `api/graph/notifications` the admin route the paragraph
+// above promises stays protected. A path that is one route ends in `$`; a
+// family of routes ends in `/`. `tests/lib/middleware-matcher.test.ts` runs a
+// table of both through Next's own matcher compiler.
+//
 // Anything added to this list is a deliberate decision to expose a route.
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|login|api/auth/login|api/queues|api/cron|api/graph/notifications).*)",
+    "/((?!_next/static/|_next/image$|favicon\\.ico$|login$|api/auth/login$|api/queues/|api/cron/|api/graph/notifications$).*)",
   ],
 };

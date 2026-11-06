@@ -13,8 +13,9 @@ import { sql, json } from "@/lib/db";
 import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
-import { closeChangeSet, findOpenChangeSet, openChangeSet, attachEvidence } from "@/lib/change-sets";
+import { closeChangeSet, findOpenChangeSet, openChangeSet, attachEvidence, verifyEvidence } from "@/lib/change-sets";
 import { randomUUID } from "node:crypto";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 const Evidence = z
   .object({
@@ -38,6 +39,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const rows = await sql`
     select cs.id, cs.reason, cs.created_at, a.filename as evidence_filename,
@@ -64,7 +67,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {
@@ -94,6 +101,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       return json({ ok: false, error: "Say what this change is — it is what a later question gets answered with.", field: "reason" }, 400);
     }
 
+    // The store is asked about any evidence before the transaction (audit A15).
+    const evidence = await verifyEvidence(parsed.data.evidence);
     const changeSetId = await withTransaction(async (txn) => {
       // Opening a second change closes the first. Two open changes would make
       // "which one does this edit belong to" a coin toss, and the index
@@ -102,8 +111,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       if (open) await closeChangeSet(txn, open, user.email);
 
       const newId = randomUUID();
-      const evidenceAttachmentId = parsed.data.evidence
-        ? await attachEvidence(txn, { projectId: id, changeSetId: newId, evidence: parsed.data.evidence, actor: user.email })
+      const evidenceAttachmentId = evidence
+        ? await attachEvidence(txn, { projectId: id, changeSetId: newId, evidence, actor: user.email })
         : null;
       await openChangeSet(txn, {
         id: newId,

@@ -26,7 +26,7 @@
 // says so once, attaches the email, and every edit that follows belongs to it.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { changeSetForEdit, type UploadedEvidence } from "@/lib/change-sets";
+import { changeSetForEdit, type VerifiedEvidence } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { lockRecordOfAnswer } from "@/lib/record-lock";
 import type { AnswerState } from "@/lib/spec-vocab";
@@ -59,7 +59,7 @@ export async function editAnswer(
     state: AnswerState;
     expectedVersion: number;
     reason?: string | null;
-    evidence?: UploadedEvidence | null;
+    evidence?: VerifiedEvidence | null;
     actor: string;
     /**
      * An ALREADY OPEN change to attach this edit to, instead of opening one.

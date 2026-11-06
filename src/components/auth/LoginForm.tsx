@@ -12,11 +12,17 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Button from "@/components/ui/Button";
+import { safeReturnPath } from "@/lib/return-path";
 
 const LABEL = "block text-[11px] font-medium uppercase tracking-wider text-neutral-500";
 const INPUT = "mt-1 w-full rounded-md border border-neutral-300 px-2.5 py-1.5 text-[13px]";
 
-export default function LoginForm() {
+/**
+ * `returnTo` is the page's `?from=`: where the person was when the session ran
+ * out or the middleware sent them here. Honoured only as a dashboard path
+ * (`return-path.ts`); anything else is `/dashboard`.
+ */
+export default function LoginForm({ returnTo }: { returnTo?: string } = {}) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,7 +43,7 @@ export default function LoginForm() {
         setError(res.error);
         return;
       }
-      router.push("/dashboard");
+      router.push(safeReturnPath(returnTo));
     } finally {
       // Always, so a response that is not JSON cannot leave the button dead.
       setLoading(false);

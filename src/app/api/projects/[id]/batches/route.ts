@@ -13,6 +13,7 @@
 import { z } from "zod";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,8 @@ const CreateBatch = z.object({ label: z.string().trim().max(200).optional() }).s
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
   const project = await sql`select id from projects where id = ${id}`;
   if (!project[0]) return json({ ok: false, error: "No such project." }, 404);
 
@@ -120,7 +123,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown = {};
   try {

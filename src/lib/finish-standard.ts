@@ -37,7 +37,7 @@
 // never taken.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { changeSetForEdit, type ChangeSetKind, type UploadedEvidence } from "@/lib/change-sets";
+import { changeSetForEdit, type ChangeSetKind, type VerifiedEvidence } from "@/lib/change-sets";
 import { carryFinishToItems } from "@/lib/finish-edit";
 import { loadPalettes, palettesByFieldJsonId } from "@/lib/palette-load";
 import { paletteOptionFor } from "@/lib/palettes";
@@ -184,7 +184,7 @@ export async function setFinishStandard(
     expectedVersion: number;
     choice: StandardChoice;
     reason?: string | null;
-    evidence?: UploadedEvidence | null;
+    evidence?: VerifiedEvidence | null;
     actor: string;
   },
 ): Promise<FinishStandardResult> {
@@ -263,7 +263,7 @@ export async function agreeFinishStandard(
     projectId: string;
     finishId: string;
     expectedVersion: number;
-    evidence?: UploadedEvidence | null;
+    evidence?: VerifiedEvidence | null;
     reason?: string | null;
     actor: string;
   },

@@ -8,6 +8,7 @@ import { json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { transactionErrorResponse } from "@/lib/db-transaction";
 import { assignMessage, triageMessage, unassignMessage } from "@/lib/email-registration";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,11 @@ const Patch = z.union([
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

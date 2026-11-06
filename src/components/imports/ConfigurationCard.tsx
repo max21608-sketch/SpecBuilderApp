@@ -126,7 +126,8 @@ export type ConfigurationCardProps = {
   /** The page is the one the crop was taken FROM — the card covers several. */
   onSwatch: (observationId: string, image: CroppedImage | null, page: number | null, origin?: SwatchOrigin) => void;
   /** One level on the records this card applies to, through the levels route. */
-  onSetLevel: (recordIds: string[], level: ItemLevel) => Promise<void>;
+  /** Each record with the version the card showed it at (audit A16). */
+  onSetLevel: (records: { id: string; version?: number }[], level: ItemLevel) => Promise<void>;
   /**
    * Any other change to a staged ITEM, through the item PATCH — today the
    * reviewer's tick that a named configuration may be created beside existing
@@ -870,7 +871,12 @@ function PageConfigurationCard({
               ),
             )}
             busy={busyHere}
-            onSet={(level) => void onSetLevel(levelForTargets.map((entry) => entry.id), level)}
+            onSet={(level) =>
+              void onSetLevel(
+                levelForTargets.map((entry) => ({ id: entry.id, version: entry.version })),
+                level,
+              )
+            }
           />
         </div>
       </div>

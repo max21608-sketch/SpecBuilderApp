@@ -189,11 +189,14 @@ describeIfDb("a bill uploaded as a PDF", () => {
     const { GET } = await import("@/app/api/imports/[id]/source/route");
     const asPdf = await GET(new Request("http://localhost/test?document=pdf"), params(runId));
     expect(asPdf.status).toBe(200);
-    expect(asPdf.headers.get("content-disposition")).toContain(pdfName);
+    // The real name travels in filename*, percent-encoded (audit A6).
+    expect(decodeURIComponent(/filename\*=UTF-8''([^;]+)/.exec(asPdf.headers.get("content-disposition") ?? "")?.[1] ?? "")).toBe(
+      pdfName,
+    );
     expect(Buffer.from(await asPdf.arrayBuffer()).subarray(0, 5).toString()).toBe("%PDF-");
 
     const asWorkbook = await GET(new Request("http://localhost/test"), params(runId));
-    expect(asWorkbook.headers.get("content-disposition")).toContain("(read from PDF).xlsx");
+    expect(decodeURIComponent(asWorkbook.headers.get("content-disposition") ?? "")).toContain("(read from PDF).xlsx");
     expect((await GET(new Request("http://localhost/test?document=other"), params(runId))).status).toBe(400);
   });
 

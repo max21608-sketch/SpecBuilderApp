@@ -10,6 +10,7 @@ import { z } from "zod";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { CONTACT_ROLES } from "@/lib/spec-vocab";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 const EMAIL = /^[^\s,;<>@]+@[^\s,;<>@]+\.[^\s,;<>@]+$/;
 
@@ -33,7 +34,11 @@ export async function PATCH(
 ): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id, contactId } = await context.params;
+  const badId = requireUuid(id, contactId);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

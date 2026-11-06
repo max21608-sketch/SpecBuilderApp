@@ -12,6 +12,7 @@
 import { json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { loadRecordDocuments } from "@/lib/record-documents";
+import { requireUuid } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
   // A malformed id is a missing record, not a 500 from a uuid cast.
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
     return json({ ok: false, error: "No such record." }, 404);

@@ -55,7 +55,7 @@ import { upload } from "@vercel/blob/client";
 import { apiFetch } from "@/lib/api-fetch";
 import { INTAKE_UPLOAD_ACCEPT, SPREADSHEET_EXTENSIONS, unreadableUploadAdvice } from "@/lib/intake-source-types";
 import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
-import { projectUploadPrefix } from "@/lib/upload-paths";
+import { pathnameSafeName, projectUploadPrefix } from "@/lib/upload-paths";
 import { guessKindFromName } from "@/lib/document-name-guess";
 import SuggestButton from "@/components/ui/SuggestButton";
 import Button from "@/components/ui/Button";
@@ -440,7 +440,7 @@ export default function IntakeBatchUpload({
             // Bytes go browser -> blob store directly, never through a route
             // handler: a real drawing set is well over the request-body ceiling.
             // The store is PRIVATE and stays that way — NDA client documents.
-            const blob = await upload(`${projectUploadPrefix(projectId)}${item.file.name}`, item.file, {
+            const blob = await upload(`${projectUploadPrefix(projectId)}${pathnameSafeName(item.file.name)}`, item.file, {
               access: "private",
               handleUploadUrl: "/api/uploads/token",
               clientPayload: projectId,

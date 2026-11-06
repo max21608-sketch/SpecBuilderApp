@@ -80,6 +80,13 @@ export type ResolvedRecord = {
   id: string;
   label: string;
   itemDescription: string;
+  /**
+   * `spec_records.version` as the server resolved it. Every payload carries it
+   * (the server sends the whole `RecordEntry`); optional only so a test fixture
+   * built as a `RecordChoice` still types. A level click sends it back, and the
+   * levels route refuses a record that moved since (audit A16).
+   */
+  version?: number;
   level?: ItemLevel | null;
   levelSuggested?: ItemLevel | null;
   levelSuggestedReason?: string | null;

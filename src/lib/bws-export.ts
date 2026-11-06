@@ -39,6 +39,7 @@ import {
 import { composeDimensionCell, valueCarriesItsUnit } from "@/lib/dimensions";
 import { type Finish } from "@/lib/finishes";
 import { composeAttributeStatement, type AttributeStandard } from "@/lib/bw-standard";
+import { asciiFilenamePart } from "@/lib/content-disposition";
 
 export type BwsColumn = { name: string; jsonId: number | null };
 
@@ -725,11 +726,11 @@ export function toCsv(rows: string[][], options: { neutraliseFormulas?: boolean 
 
 /**
  * Allowlisted, so a client's project name cannot put a quote, a newline or a
- * path separator into a Content-Disposition header. Copied from the .eml route,
- * which learned it first.
+ * path separator into a Content-Disposition header. The allowlist is
+ * `asciiFilenamePart`, the one copy (audit A6); the route wraps the result in
+ * `contentDisposition`.
  */
 export function exportFilename(projectNumber: string, runName: string | null, extension: string): string {
-  const safe = (raw: string) => raw.replace(/[^A-Za-z0-9 &-]/g, "").slice(0, 60).trim();
-  const scope = runName ? ` - ${safe(runName)}` : "";
-  return `${safe(projectNumber) || "export"}${scope} - BWS spec fields.${extension}`;
+  const scope = runName ? ` - ${asciiFilenamePart(runName)}` : "";
+  return `${asciiFilenamePart(projectNumber) || "export"}${scope} - BWS spec fields.${extension}`;
 }

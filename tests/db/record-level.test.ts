@@ -155,7 +155,7 @@ describeIfDb("item level suggestions", () => {
     const before = await client.query(`select count(*)::int as n from change_sets where project_id = $1`, [projectId]);
 
     const result = await withTransaction((txn) =>
-      setLevelOnRecords(txn, { projectId, recordIds: [a.id, b.id, c.id], level: "complex", actor: "qa" }),
+      setLevelOnRecords(txn, { projectId, records: [a, b, c], level: "complex", actor: "qa" }),
     );
     expect(result.set).toBe(3);
 
@@ -188,7 +188,12 @@ describeIfDb("item level suggestions", () => {
     const before = await client.query(`select count(*)::int as n from change_sets where project_id = $1`, [projectId]);
 
     const result = await withTransaction((txn) =>
-      setLevelOnRecords(txn, { projectId, recordIds: [live.id, retired.id], level: "hero", actor: "qa" }),
+      setLevelOnRecords(txn, {
+        projectId,
+        records: [live, { id: retired.id, version: retired.version + 1 }],
+        level: "hero",
+        actor: "qa",
+      }),
     );
     // Reported as what it wrote, not as the length of the request — a screen
     // echoing its own list would claim a record it never touched.
@@ -200,11 +205,37 @@ describeIfDb("item level suggestions", () => {
     // rows under a change set that says a level was set.
     await expect(
       withTransaction((txn) =>
-        setLevelOnRecords(txn, { projectId, recordIds: [retired.id], level: "hero", actor: "qa" }),
+        setLevelOnRecords(txn, {
+          projectId,
+          records: [{ id: retired.id, version: retired.version + 1 }],
+          level: "hero",
+          actor: "qa",
+        }),
       ),
     ).rejects.toThrow();
     const after = await client.query(`select count(*)::int as n from change_sets where project_id = $1`, [projectId]);
     expect(after.rows[0].n - before.rows[0].n).toBe(1);
+  });
+
+  // AUDIT A16 (2026-11-06). The level was set with no version, so a click on
+  // a card showing "suggested: simple" wrote over a level somebody else had
+  // DECIDED in the meantime, on a record the card had never shown as decided.
+  // The whole fan-out is refused when any one record moved, and nothing is
+  // written: a level on two of three phases is the half-applied card.
+  it("refuses the whole set when one record changed since the card loaded", async () => {
+    const a = await makeRecord("simple");
+    const b = await makeRecord(null);
+    await withTransaction((txn) => setRecordLevel(txn, { recordId: b.id, level: "hero", expectedVersion: b.version, actor: "someone" }));
+    const before = await client.query(`select count(*)::int as n from change_sets where project_id = $1`, [projectId]);
+
+    const error = await withTransaction((txn) =>
+      setLevelOnRecords(txn, { projectId, records: [a, b], level: "complex", actor: "qa" }),
+    ).catch((cause: unknown) => cause);
+    expect((error as { code?: string }).code).toBe("level_stale");
+    expect((await read(a.id)).level).toBeNull();
+    expect((await read(b.id)).level).toBe("hero");
+    const after = await client.query(`select count(*)::int as n from change_sets where project_id = $1`, [projectId]);
+    expect(after.rows[0].n).toBe(before.rows[0].n);
   });
 
   it("a configuration is born on its bill line's level", async () => {

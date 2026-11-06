@@ -14,6 +14,8 @@ import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { agreeAttributeStandard, setAttributeStandard } from "@/lib/attribute-standard";
+import { verifyEvidence } from "@/lib/change-sets";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 const Evidence = z
   .object({
@@ -57,7 +59,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   // Middleware is the authorization boundary and already gates writer roles;
   // this is the session check every write route makes.
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {
@@ -70,6 +76,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return json({ ok: false, error: "That request is not valid.", field: parsed.error.issues[0]?.path.join(".") }, 400);
   }
 
+  // The store is asked about any evidence before the transaction (audit A15).
+  const evidence = await verifyEvidence(parsed.data.evidence);
   try {
     const body = parsed.data;
     const result = await withTransaction((txn) =>
@@ -77,7 +85,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         ? agreeAttributeStandard(txn, {
             attributeId: id,
             expectedVersion: body.version,
-            evidence: body.evidence ?? null,
+            evidence,
             reason: body.reason ?? null,
             actor: user.email,
           })
@@ -86,7 +94,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             expectedVersion: body.version,
             choice: body.standard,
             reason: body.reason ?? null,
-            evidence: body.evidence ?? null,
+            evidence,
             actor: user.email,
           }),
     );

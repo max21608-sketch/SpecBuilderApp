@@ -43,6 +43,7 @@ import {
   type StaleReason,
 } from "@/lib/chase-drafts";
 import { draftStateWords } from "@/lib/draft-status";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 const ConfirmInput = z.object({
   version: z.number().int(),
@@ -64,7 +65,11 @@ const REASON_TEXT: Record<StaleReason, string> = {
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

@@ -14,3 +14,22 @@
 export function projectUploadPrefix(projectId: string): string {
   return `projects/${projectId}/`;
 }
+
+/**
+ * A client's own filename, made safe to be the LAST SEGMENT of a pathname.
+ *
+ * The intake upload keeps the name the client gave the document, so a reviewer
+ * recognises it in the store, and that is why `assertPathnameShape` cannot be
+ * an ASCII allowlist. But a name carrying `#`, `?`, `\`, `/`, a control
+ * character or a percent-encoded octet would be cut short or resolved by the
+ * URL the store's SDK builds from it (audit A7), so those, and only those,
+ * become `_` here, before the browser asks for an upload token. The attachment
+ * row still records the name exactly as the client wrote it.
+ */
+export function pathnameSafeName(name: string): string {
+  const safe = name
+    .replace(/[#?\\/\u0000-\u001f\u007f]/g, "_")
+    .replace(/%(?=[0-9A-Fa-f]{2})/g, "_")
+    .trim();
+  return safe === "" || safe === "." || safe === ".." ? "document" : safe;
+}

@@ -21,6 +21,8 @@ import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
 import { composeCostingSheet, costingRowCells, type CostingSource } from "@/lib/costing-sheet";
 import { toCsv } from "@/lib/bws-export";
 import { blobPathname, readTrustedBlob } from "@/lib/blob-source";
+import { asciiFilenamePart, contentDisposition } from "@/lib/content-disposition";
+import { requireUuid } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -47,15 +49,16 @@ const IMAGE_EXTENSIONS: Record<string, "png" | "jpeg" | "gif"> = {
  * header — but named for THIS file. See the call site.
  */
 function costingFilename(projectNumber: string, runName: string | null, extension: string): string {
-  const safe = (raw: string) => raw.replace(/[^A-Za-z0-9 &-]/g, "").slice(0, 60).trim();
-  const scope = runName ? ` - ${safe(runName)}` : "";
-  return `${safe(projectNumber) || "project"}${scope} - costing block.${extension}`;
+  const scope = runName ? ` - ${asciiFilenamePart(runName)}` : "";
+  return `${asciiFilenamePart(projectNumber) || "project"}${scope} - costing block.${extension}`;
 }
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const url = new URL(request.url);
   for (const key of url.searchParams.keys()) {
@@ -150,7 +153,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   // client's project name still cannot reach the header.
   const filename = costingFilename(loaded.projectNumber, scope.runName, format === "csv" ? "csv" : "xlsx");
   const headers = {
-    "content-disposition": `attachment; filename="${filename}"`,
+    "content-disposition": contentDisposition("attachment", filename),
     "cache-control": "private, no-store",
     "x-costing-records": String(sheet.rows.length),
     "x-costing-notes": String(sheet.notes.length),

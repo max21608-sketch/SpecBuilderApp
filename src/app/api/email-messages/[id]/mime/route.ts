@@ -11,17 +11,17 @@
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { blobPathname, streamTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
+import { contentDisposition } from "@/lib/content-disposition";
+import { requireUuid } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
-
-function safeFilename(name: string): string {
-  return name.replace(/[\r\n"\\]/g, "").slice(0, 200) || "email.eml";
-}
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const rows = await sql`
     select em.project_id, em.subject, em.mailbox_storage_path, a.storage_path, a.filename, a.content_type
@@ -52,7 +52,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     });
     const headers = new Headers({
       "content-type": String(row.content_type || "message/rfc822"),
-      "content-disposition": `attachment; filename="${safeFilename(String(row.filename ?? `${String(row.subject ?? "email").slice(0, 80)}.eml`))}"`,
+      // A subject is the likeliest place for a curly quote or an en dash (A6).
+      "content-disposition": contentDisposition(
+        "attachment",
+        String(row.filename ?? "") || `${String(row.subject ?? "").trim().slice(0, 80) || "email"}.eml`,
+      ),
       "accept-ranges": "bytes",
       // NDA-covered client correspondence. No shared cache may hold it.
       "cache-control": "private, no-store",

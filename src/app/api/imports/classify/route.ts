@@ -40,6 +40,8 @@ function transcribeNote(code: TranscribableReason, pages: number | null): { line
   return { lines: 0, pages: pages ?? 0, transcribe: true, reason: transcriptionReason(code) };
 }
 import { loadBoqReadingRegisters } from "@/lib/boq-stage";
+import { requireWriter } from "@/lib/route-guards";
+import { explainFailure } from "@/lib/error-detail";
 
 // 300, not 60: a PDF over the fast model's page ceiling is identified by the
 // READING model (`classifyModelFor`), which has to take in up to 600 pages
@@ -105,6 +107,8 @@ const Body = z
 export async function POST(request: Request): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
 
   let raw: unknown;
   try {
@@ -162,7 +166,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     source = await prepareDocumentSource(blob.bytes, input.filename, blob.contentType || input.contentType);
   } catch (cause) {
-    return json({ ok: false, error: cause instanceof Error ? cause.message : String(cause) }, 400);
+    return json({ ok: false, error: explainFailure("This file could not be opened to look at.", cause, "classify-source") }, 400);
   }
 
   // A SCANNED PDF COSTS NOTHING TO REFUSE AND FOUR MINUTES TO READ (§6.10.b).

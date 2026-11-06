@@ -39,6 +39,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 10;
 
 const MAX_BODY_BYTES = 256 * 1024;
+/** Graph's handshake token is a short opaque string; this is far above any it sends. */
+const MAX_VALIDATION_TOKEN = 1024;
 const MAX_NOTIFICATIONS = 100;
 
 const Notification = z.object({
@@ -57,11 +59,20 @@ export async function POST(request: Request): Promise<Response> {
 
   // The handshake. Graph sends this once when a subscription is created and
   // expects the token echoed as text/plain, with no body of its own.
+  //
+  // The token is whatever the caller put in the query string, so it is echoed
+  // as text a browser may not sniff into anything else, and refused past a
+  // length Graph never sends (audit A14).
   const validationToken = new URL(request.url).searchParams.get("validationToken");
   if (validationToken) {
+    if (validationToken.length > MAX_VALIDATION_TOKEN) return new Response("Bad request", { status: 400 });
     return new Response(validationToken, {
       status: 200,
-      headers: { "content-type": "text/plain", "cache-control": "no-store" },
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+      },
     });
   }
 

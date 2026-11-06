@@ -32,6 +32,20 @@ import { snapshotRecords } from "@/lib/record-snapshot";
 
 export type RetireRunResult = { runId: string; recordsRetired: number; changeSetId: string };
 
+/**
+ * The phase is the one the screen showed (audit A16). A rename, or a retire
+ * and restore, since the screen loaded moves `spec_runs.version`, and the
+ * press is refused rather than applied to a phase the person has not seen.
+ */
+function assertPhaseVersion(run: Record<string, unknown>, expectedVersion: number): void {
+  if (Number(run.version) !== expectedVersion) {
+    throw new DomainConflictError(
+      "phase_version_stale",
+      "This phase changed since this screen loaded. Reload, look at it again, and then retire or restore it.",
+    );
+  }
+}
+
 export async function retireRun(
   txn: TxnSql,
   {
@@ -39,8 +53,16 @@ export async function retireRun(
     runId,
     reason,
     replacedByRunId,
+    expectedVersion,
     actor,
-  }: { projectId: string; runId: string; reason: string; replacedByRunId?: string | null; actor: string },
+  }: {
+    projectId: string;
+    runId: string;
+    reason: string;
+    replacedByRunId?: string | null;
+    expectedVersion: number;
+    actor: string;
+  },
 ): Promise<RetireRunResult> {
   // The project row, so no import can interleave and add a record to a run
   // this is in the middle of emptying.
@@ -48,7 +70,7 @@ export async function retireRun(
   if (!projects[0]) throw new DomainConflictError("not_found", "No such project.", { status: 404 });
 
   const runs = await txn`
-    select id, project_id, name, status from spec_runs where id = ${runId} for update
+    select id, project_id, name, status, version from spec_runs where id = ${runId} for update
   `;
   const run = runs[0];
   if (!run) throw new DomainConflictError("not_found", "No such phase.", { status: 404 });
@@ -58,6 +80,7 @@ export async function retireRun(
   if (String(run.status) !== "active") {
     throw new DomainConflictError("already_retired", "That phase has already been retired. Reload.");
   }
+  assertPhaseVersion(run, expectedVersion);
 
   if (replacedByRunId) {
     const replacement = await txn`
@@ -115,13 +138,19 @@ export async function retireRun(
 
 export async function restoreRun(
   txn: TxnSql,
-  { projectId, runId, reason, actor }: { projectId: string; runId: string; reason: string; actor: string },
+  {
+    projectId,
+    runId,
+    reason,
+    expectedVersion,
+    actor,
+  }: { projectId: string; runId: string; reason: string; expectedVersion: number; actor: string },
 ): Promise<RetireRunResult> {
   const projects = await txn`select id from projects where id = ${projectId} for update`;
   if (!projects[0]) throw new DomainConflictError("not_found", "No such project.", { status: 404 });
 
   const runs = await txn`
-    select id, project_id, status, retired_at, replaced_by_run_id from spec_runs where id = ${runId} for update
+    select id, project_id, status, retired_at, replaced_by_run_id, version from spec_runs where id = ${runId} for update
   `;
   const run = runs[0];
   if (!run) throw new DomainConflictError("not_found", "No such phase.", { status: 404 });
@@ -131,6 +160,7 @@ export async function restoreRun(
   if (String(run.status) !== "retired") {
     throw new DomainConflictError("not_retired", "That phase is already on the project.");
   }
+  assertPhaseVersion(run, expectedVersion);
   if (run.replaced_by_run_id) {
     throw new DomainConflictError(
       "superseded",

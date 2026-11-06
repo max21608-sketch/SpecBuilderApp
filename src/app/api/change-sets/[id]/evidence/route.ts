@@ -14,19 +14,17 @@
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { blobPathname, streamTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
+import { contentDisposition } from "@/lib/content-disposition";
+import { requireUuid } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
-
-function safeFilename(name: string): string {
-  // Quotes and control characters would let a filename break out of the
-  // header it is quoted in.
-  return name.replace(/[\r\n"\\]/g, "").slice(0, 200) || "evidence";
-}
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const rows = await sql`
     select cs.project_id, a.storage_path, a.content_type, a.filename
@@ -43,7 +41,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     });
     const headers = new Headers({
       "content-type": String(row.content_type || "application/octet-stream"),
-      "content-disposition": `attachment; filename="${safeFilename(String(row.filename ?? "evidence"))}"`,
+      // The RFC 5987 form: an Outlook drag-out's name is often not Latin-1 (A6).
+      "content-disposition": contentDisposition("attachment", String(row.filename ?? "") || "evidence"),
       "accept-ranges": "bytes",
       // NDA-covered client correspondence. No shared cache may hold it.
       "cache-control": "private, no-store",

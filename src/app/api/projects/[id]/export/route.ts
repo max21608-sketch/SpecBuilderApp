@@ -19,6 +19,8 @@ import { json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { composeWorkbook, exportFilename, toCsv } from "@/lib/bws-export";
 import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
+import { contentDisposition } from "@/lib/content-disposition";
+import { requireUuid } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -29,6 +31,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const url = new URL(request.url);
   for (const key of url.searchParams.keys()) {
@@ -60,7 +64,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   const filename = exportFilename(loaded.projectNumber, scope.runName, format);
   const headers = {
-    "content-disposition": `attachment; filename="${filename}"`,
+    "content-disposition": contentDisposition("attachment", filename),
     "cache-control": "private, no-store",
     "x-export-records": String(records.length),
     "x-export-scope": runId ? "run" : "project",
