@@ -15,6 +15,7 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { closeChangeSet, findOpenChangeSet, openChangeSet, attachEvidence, verifyEvidence } from "@/lib/change-sets";
 import { randomUUID } from "node:crypto";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 const Evidence = z
   .object({
@@ -38,6 +39,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const rows = await sql`
     select cs.id, cs.reason, cs.created_at, a.filename as evidence_filename,
@@ -64,7 +67,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

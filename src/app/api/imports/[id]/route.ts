@@ -102,6 +102,7 @@ import { assertStagedFinishSchedule, isStagedFinishSchedule, reviewFinishSchedul
 import { loadScheduleLibrary, setFinishScheduleEntryKind } from "@/lib/confirm-finish-schedule";
 import { isFinishKind } from "@/lib/finishes";
 import { documentClosedSentence, reviewedWord } from "@/lib/intake-status";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -891,6 +892,8 @@ async function patchFinishScheduleEntry(id: string, raw: unknown, actor: string)
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
   const rows = await sql`
     select r.id, r.project_id, r.status, r.parsed, r.error, r.version, r.confirmed_at,
            r.source_kind, r.document_kind, r.model, r.model_metadata,
@@ -2237,7 +2240,11 @@ async function patchLinePicture(
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

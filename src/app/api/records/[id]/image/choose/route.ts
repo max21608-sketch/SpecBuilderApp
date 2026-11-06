@@ -18,6 +18,7 @@ import { json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { chooseItemPicture } from "@/lib/item-image-write";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,11 @@ const Body = z
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
   if (!z.string().uuid().safeParse(id).success) return json({ ok: false, error: "No such item." }, 404);
 
   let raw: unknown;

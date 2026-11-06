@@ -9,6 +9,7 @@ import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { retireRun, restoreRun } from "@/lib/run-retire";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 const Body = z
   .object({
@@ -24,7 +25,11 @@ export async function PATCH(
 ): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id, runId } = await context.params;
+  const badId = requireUuid(id, runId);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

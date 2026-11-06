@@ -22,6 +22,7 @@ import { getSessionUser } from "@/lib/session";
 import { groupByContact, loadOutstanding, type OutstandingQuestion, type ProjectContact } from "@/lib/chase-drafts";
 import { countWithItemTgq } from "@/lib/chase-grouping";
 import { loadMatrixItemTgq } from "@/lib/item-tgq-load";
+import { requireUuid } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const exists = await sql`select id from projects where id = ${id}`;
   if (!exists[0]) return json({ ok: false, error: "No such project." }, 404);

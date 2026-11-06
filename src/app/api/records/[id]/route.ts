@@ -31,11 +31,14 @@ import {
   loadSentCoverage,
   waitingByQuestion,
 } from "@/lib/chase-drafts";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const rows = await sql`
     select r.id, r.record_no, r.item_description, r.product_reference, r.qty, r.designer, r.area,
@@ -572,7 +575,11 @@ const Patch = z.union([
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

@@ -25,6 +25,7 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { editCommonSpec } from "@/lib/configuration-family";
 import { ATTRIBUTE_GROUPS, ATTRIBUTE_UNITS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -103,7 +104,11 @@ const MESSAGES: Record<string, string> = {
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

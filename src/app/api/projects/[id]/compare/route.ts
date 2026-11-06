@@ -9,6 +9,7 @@
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { compareChangeSets } from "@/lib/baselines";
+import { requireUuid } from "@/lib/route-guards";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -16,6 +17,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const url = new URL(request.url);
   const from = url.searchParams.get("from") ?? "";

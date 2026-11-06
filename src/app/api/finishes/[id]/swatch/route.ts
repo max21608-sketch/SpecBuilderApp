@@ -31,6 +31,7 @@ import {
 import { openChangeSet } from "@/lib/change-sets";
 import { isPictureContentType, pictureServing } from "@/lib/picture-types";
 import { contentDisposition } from "@/lib/content-disposition";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const rows = await sql`
     select f.project_id, a.storage_path, a.content_type
@@ -98,7 +101,11 @@ const Body = z
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

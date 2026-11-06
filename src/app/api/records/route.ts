@@ -22,6 +22,7 @@ import { inItemTgq, projectWideTgqKeys, readyToQuote } from "@/lib/chase-groupin
 import { gateSummary, gatesForRecord, itemTgqForRecord, loadGateContext } from "@/lib/gate-load";
 import { EMPTY_SPEC_SUMMARY, loadSpecSummaries } from "@/lib/record-spec-summary";
 import { countOpenDisagreementsByRecord } from "@/lib/disagreements";
+import { requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -437,6 +438,8 @@ const NewRecord = z
 export async function POST(request: Request): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
 
   let raw: unknown;
   try {

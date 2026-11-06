@@ -32,6 +32,7 @@ import { getSessionUser } from "@/lib/session";
 import { blobPathname, streamTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { contentDisposition } from "@/lib/content-disposition";
 import { isPictureContentType } from "@/lib/picture-types";
+import { requireUuid } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +55,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   // A BILL READ FROM A PDF has two documents: the run's source is the workbook
   // its text was put back into, and `?document=pdf` is the PDF itself. Which

@@ -14,11 +14,14 @@ import { FINISH_KINDS, isFinishKind, loadUnlinkedFinishCodes } from "@/lib/finis
 import { loadPalettes, palettesByFieldJsonId } from "@/lib/palette-load";
 import { paletteForFinish } from "@/lib/finish-standard-palette";
 import type { Palette } from "@/lib/palettes";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const projects = await sql`select id, bws_project_number, name from projects where id = ${id}`;
   const project = projects[0];
@@ -134,7 +137,11 @@ const Create = z
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

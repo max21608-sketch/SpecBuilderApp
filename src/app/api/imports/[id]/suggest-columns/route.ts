@@ -44,6 +44,7 @@ import {
   type StructureCall,
 } from "@/lib/boq-structure";
 import { documentClosedSentence } from "@/lib/intake-status";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const maxDuration = 300;
 
@@ -73,7 +74,11 @@ const CLAIM_EXPIRES_MS = STRUCTURE_DEADLINE_MS + 60_000;
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

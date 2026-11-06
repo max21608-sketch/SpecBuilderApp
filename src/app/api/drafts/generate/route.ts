@@ -36,6 +36,7 @@ import {
 } from "@/lib/chase-drafts";
 import { TEMPLATE_VERSION, buildChaseEmail, defaultClosing, defaultIntro, tierCounts } from "@/lib/chase-template";
 import { ANSWER_STATE_LABELS } from "@/lib/spec-vocab";
+import { requireWriter } from "@/lib/route-guards";
 
 export const maxDuration = 60;
 
@@ -82,6 +83,8 @@ const GenerateInput = z.object({
 export async function POST(request: Request): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
 
   let raw: unknown;
   try {

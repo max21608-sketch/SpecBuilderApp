@@ -13,6 +13,7 @@ import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { CONTACT_ROLES } from "@/lib/spec-vocab";
 import { CapsuleNotConfiguredError, CapsuleUpstreamError, getParty } from "@/lib/capsule";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 // Matches the check constraint in 0005. A display name with a comma is fine
 // (eml.ts quotes it); a CR/LF or a second mailbox is not.
@@ -83,6 +84,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
   const rows = await sql`
     select id, name, email, organisation, role, designer_code, version,
            capsule_party_id, capsule_party_type, capsule_synced_at
@@ -96,7 +99,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

@@ -35,6 +35,7 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { acceptSuggestedLevels, setLevelOnRecords } from "@/lib/record-category";
 import { ITEM_LEVELS } from "@/lib/spec-vocab";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 const Body = z
   .union([
@@ -60,7 +61,11 @@ const Body = z
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown = {};
   try {

@@ -12,6 +12,7 @@ import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { addConfiguration, loadCarryOffer, loadOtherPhases } from "@/lib/configuration-add";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
   try {
     const offer = await loadCarryOffer(sql, id);
     // The same bill line on the other live phases, each with ITS OWN offer —
@@ -63,7 +66,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const user = await getSessionUser();
   // Middleware is the authorization boundary and already gates writer roles.
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

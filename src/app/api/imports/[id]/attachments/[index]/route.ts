@@ -38,6 +38,7 @@ import { getSessionUser } from "@/lib/session";
 import { readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { readAttachment } from "@/lib/email-envelope";
 import { contentDisposition } from "@/lib/content-disposition";
+import { requireUuid } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +52,8 @@ export async function GET(
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id, index } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const position = Number(index);
   if (!Number.isInteger(position) || position < 0) {

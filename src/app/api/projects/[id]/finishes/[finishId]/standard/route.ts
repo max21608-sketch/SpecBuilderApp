@@ -17,6 +17,7 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { agreeFinishStandard, setFinishStandard } from "@/lib/finish-standard";
 import { verifyEvidence } from "@/lib/change-sets";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 const Evidence = z
   .object({
@@ -63,7 +64,11 @@ export async function POST(
   // Middleware is the authorization boundary and already gates writer roles;
   // this is the session check every write route makes.
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id, finishId } = await context.params;
+  const badId = requireUuid(id, finishId);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

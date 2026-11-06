@@ -19,6 +19,7 @@ import {
   waitingByQuestion,
   questionKey,
 } from "@/lib/chase-drafts";
+import { requireWriter } from "@/lib/route-guards";
 
 // Needed the moment this route started reading a query string: without it Next
 // caches the default (active-only) response and the "include archived" toggle
@@ -182,6 +183,8 @@ export async function GET(request: Request): Promise<Response> {
 export async function POST(request: Request): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
 
   let body: { bwsProjectNumber?: unknown; name?: unknown; client?: unknown };
   try {

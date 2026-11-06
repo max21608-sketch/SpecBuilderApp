@@ -8,13 +8,18 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { registerTrackerFurniture } from "@/lib/tracker-furniture";
 import { dispatchRegisteredRead } from "@/lib/spec-registration";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const maxDuration = 60;
 
 export async function POST(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
   try {
     const result = await withTransaction((txn) => registerTrackerFurniture(txn, { finishesRunId: id, actor: user.email }));
     if (result.reused) return json({ ok: true, importId: result.importId, reused: true }, 200);

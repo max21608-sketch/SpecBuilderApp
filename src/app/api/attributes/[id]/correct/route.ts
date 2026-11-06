@@ -17,6 +17,7 @@ import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction"
 import { correctAttribute } from "@/lib/attribute-correct";
 import { ATTRIBUTE_UNITS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
 import { verifyEvidence } from "@/lib/change-sets";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 const Body = z
   .object({
@@ -59,7 +60,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   // Middleware is the authorization boundary and already gates writer roles;
   // this is the session check every write route makes, and no more.
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

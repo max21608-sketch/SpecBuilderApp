@@ -20,6 +20,7 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { createAttribute } from "@/lib/manual-capture";
 import { ATTRIBUTE_GROUPS, ATTRIBUTE_UNITS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
+import { requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,8 @@ const Body = z
 export async function POST(request: Request): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
 
   let raw: unknown;
   try {

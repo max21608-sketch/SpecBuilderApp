@@ -98,6 +98,7 @@ import {
   readPdfBill,
   type PdfBillSource,
 } from "@/lib/pdf-bill";
+import { requireWriter } from "@/lib/route-guards";
 
 const XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -135,6 +136,8 @@ const Registration = z
 export async function POST(request: Request): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
 
   const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("multipart/form-data")) return registerDirectBoq(request, user.email);

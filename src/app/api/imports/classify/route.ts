@@ -40,6 +40,7 @@ function transcribeNote(code: TranscribableReason, pages: number | null): { line
   return { lines: 0, pages: pages ?? 0, transcribe: true, reason: transcriptionReason(code) };
 }
 import { loadBoqReadingRegisters } from "@/lib/boq-stage";
+import { requireWriter } from "@/lib/route-guards";
 
 // 300, not 60: a PDF over the fast model's page ceiling is identified by the
 // READING model (`classifyModelFor`), which has to take in up to 600 pages
@@ -105,6 +106,8 @@ const Body = z
 export async function POST(request: Request): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
 
   let raw: unknown;
   try {

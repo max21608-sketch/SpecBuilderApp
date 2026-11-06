@@ -28,6 +28,7 @@ import { getSessionUser } from "@/lib/session";
 import { loadBatchDrawings } from "@/lib/drawing-resolution";
 import { duplicateTargets, repeatedObservations, type PackCard } from "@/lib/drawing-document";
 import { loadPalettes, withPalettes } from "@/lib/palette-load";
+import { requireUuid } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,8 @@ export async function GET(
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id, batchId } = await context.params;
+  const badId = requireUuid(id, batchId);
+  if (badId) return badId;
 
   // Scoped from the batch's own row, never from the path alone: a batch id from
   // another project must 404 rather than leak that project's drawings.

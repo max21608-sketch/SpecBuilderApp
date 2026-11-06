@@ -52,6 +52,7 @@ import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { areaOptions } from "@/lib/area-filter";
 import { normaliseFinishCode } from "@/lib/finishes";
 import { loadPalettes } from "@/lib/palette-load";
+import { requireUuid } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id: projectId } = await context.params;
+  const badId = requireUuid(projectId);
+  if (badId) return badId;
 
   const projects = await sql`
     select id, bws_project_number, name, client from projects where id = ${projectId}

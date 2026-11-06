@@ -14,6 +14,7 @@ import { withTransaction, transactionErrorResponse, DomainConflictError } from "
 import { editFinish } from "@/lib/finish-edit";
 import { changeSetForEdit, verifyEvidence } from "@/lib/change-sets";
 import { FINISH_KINDS } from "@/lib/finishes";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 const Patch = z
   .object({
@@ -47,7 +48,11 @@ export async function PATCH(
 ): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id, finishId } = await context.params;
+  const badId = requireUuid(id, finishId);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

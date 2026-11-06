@@ -30,11 +30,14 @@ import { getSessionUser } from "@/lib/session";
 import { currentAppEnvIsProduction } from "@/lib/env";
 import { buildEml, formatAddress } from "@/lib/eml";
 import { contentDisposition } from "@/lib/content-disposition";
+import { requireUuid } from "@/lib/route-guards";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   const rows = await sql`
     select d.id, d.status, d.subject, d.body, d.body_format, d.version,

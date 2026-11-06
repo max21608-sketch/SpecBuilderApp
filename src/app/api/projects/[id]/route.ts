@@ -22,6 +22,7 @@ import { validateProgramme, type ProgrammeDates } from "@/lib/project-programme"
 import { ATTRIBUTE_UNITS, PROJECT_STATUSES, normaliseUnit } from "@/lib/spec-vocab";
 import { billDescriptionsReadAtConfirm } from "@/lib/bill-specifications";
 import { finishCodePrefixProblem, loadUnlinkedFinishCodes, normaliseFinishCodePrefix } from "@/lib/finishes";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 const EMAIL = /^[^\s,;<>@]+@[^\s,;<>@]+\.[^\s,;<>@]+$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -97,6 +98,8 @@ function asDate(value: unknown): string | null {
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
   const rows = await sql`
     select id, bws_project_number, name, client, shared_inbox, default_dimension_unit, finish_code_prefix,
            status, archived_at::text, archived_by,
@@ -331,7 +334,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id } = await context.params;
+  const badId = requireUuid(id);
+  if (badId) return badId;
 
   let raw: unknown;
   try {

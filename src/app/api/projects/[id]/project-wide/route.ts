@@ -14,6 +14,7 @@ import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction"
 import { applyProjectWide, loadProjectWide } from "@/lib/project-wide";
 import { loadPalettes } from "@/lib/palette-load";
 import { paletteFromRow, type Palette } from "@/lib/palettes";
+import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id: projectId } = await context.params;
+  const badId = requireUuid(projectId);
+  if (badId) return badId;
 
   const exists = await sql`select id from projects where id = ${projectId}`;
   if (!exists[0]) return json({ ok: false, error: "No such project." }, 404);
@@ -74,7 +77,11 @@ const Body = z
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
+  const denied = requireWriter(user);
+  if (denied) return denied;
   const { id: projectId } = await context.params;
+  const badId = requireUuid(projectId);
+  if (badId) return badId;
 
   let raw: unknown;
   try {
