@@ -288,8 +288,10 @@ describeIfDb("the documents behind a record", () => {
     expect(body.origin.noBill).toBe(true);
   });
 
-  it("is a 404 for a record that does not exist, and for an id that is not one", async () => {
+  // An id that is not one is refused before any query, in words (audit A16,
+  // `requireUuid`): a 400 rather than the 404 a real-shaped absent id gets.
+  it("is a 404 for a record that does not exist, and a 400 for an id that is not one", async () => {
     expect((await documents("00000000-0000-0000-0000-000000000000")).status).toBe(404);
-    expect((await documents("not-a-uuid")).status).toBe(404);
+    expect((await documents("not-a-uuid")).status).toBe(400);
   });
 });

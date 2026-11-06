@@ -135,7 +135,11 @@ describeIfDb("the email attachment route", () => {
     // and a browser rendering it is this app showing a stranger's file as its
     // own — the same rule the .eml download follows.
     expect(response.headers.get("content-disposition")).toContain("attachment;");
-    expect(response.headers.get("content-disposition")).toContain("__QA X-100 sizes.pdf");
+    // The real name travels in filename*, percent-encoded (audit A6); the
+    // plain filename is the ASCII fallback.
+    expect(decodeURIComponent(/filename\*=UTF-8''([^;]+)/.exec(response.headers.get("content-disposition") ?? "")?.[1] ?? "")).toBe(
+      "__QA X-100 sizes.pdf",
+    );
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(Buffer.from(await response.arrayBuffer()).equals(sheet)).toBe(true);

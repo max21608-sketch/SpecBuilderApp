@@ -1390,8 +1390,10 @@ describeIfDb("intake routes", () => {
     // can reach a Content-Disposition header as a quote or a newline. The
     // number carries this process's suffix, so the expectation is built from
     // `qaNumber` with the underscores taken off rather than typed out.
-    expect(res.headers.get("content-disposition")).toBe(
-      `attachment; filename="${qaNumber("P90010").replace(/_/g, "")} - QA VE RUN - BWS spec fields.csv"`,
+    // The header is `contentDisposition`'s (audit A6): the allowlisted name as
+    // the fallback, and the same name again in filename*.
+    expect(res.headers.get("content-disposition")).toMatch(
+      new RegExp(`^attachment; filename="${qaNumber("P90010").replace(/_/g, "")} - QA VE RUN - BWS spec fields\\.csv"; filename\\*=UTF-8''`),
     );
 
     const inScope = await client.query(
