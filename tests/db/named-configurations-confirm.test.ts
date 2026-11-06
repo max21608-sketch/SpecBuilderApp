@@ -24,9 +24,13 @@ import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { stageDrawings, type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
-import { POST as confirmRoute } from "@/app/api/imports/[id]/confirm/route";
+import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
+import { confirmingAsShown } from "./shown-targets";
 import { PATCH as importPatchRoute } from "@/app/api/imports/[id]/route";
 import { ONE_CHAIR_TWO_PAGES, SHOP_DRAWING, SPEC_SHEET } from "../fixtures/named-configurations";
+
+// The drawings confirm requires the records the card showed (audit D3).
+const confirmRoute = confirmingAsShown(confirmPost);
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({

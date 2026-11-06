@@ -82,6 +82,7 @@ import {
   isMeasuredRow,
   splitFigureAndUnit,
   namedConfigurationPlans,
+  onRowRetargeted,
   type DrawingItem,
   type DrawingObservation,
   type StagedDrawings,
@@ -532,15 +533,6 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
             );
           }
           standard = { state: "proposed", value: option.value, optionId: option.id ?? null };
-        } else if (
-          changes.specFieldId !== undefined &&
-          changes.specFieldId !== observation.specFieldId &&
-          observation.standard
-        ) {
-          // A standard is an option of ONE field's list. Moving the row to
-          // another field takes it away rather than leaving a timber option
-          // proposed against a metal finish.
-          standard = null;
         }
 
         const next = {
@@ -641,6 +633,27 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
         if (next.attrGroup !== "dimension" && next.dimensionSlot) {
           next.dimensionSlot = null;
         }
+        // ====================================================================
+        // A DECISION KEYED ON THE ROW'S TARGET STAYS WITH THAT TARGET (audit
+        // D2). `onRowRetargeted` is the one rule, read off the row as it will
+        // be stored (after the slot normalisation above): a move of group,
+        // slot or field drops the replace tick and, on a field move, the BW
+        // standard. The screen does not send `replaces: []` with a move; this
+        // is the server's rule, so no caller can forget it. A tick sent IN THE
+        // SAME PATCH as a move is refused rather than guessed at: it was
+        // chosen against the old target or the new one, and the request does
+        // not say which.
+        // ====================================================================
+        const retargeted = onRowRetargeted(observation, next);
+        if (retargeted.replaces && changes.replaces !== undefined) {
+          throw new DomainConflictError(
+            "replace_with_move",
+            "A replace tick is sent on its own, after the row is where it belongs.",
+            { status: 400 },
+          );
+        }
+        if (retargeted.replaces) next.replaces = [];
+        if (retargeted.standard === null && changes.standard === undefined) next.standard = null;
         // TOUCHING A SLOT IS LOOKING AT IT (brief F). A figure, unit, state or
         // slot changed on a row that holds an overall slot — before or after —
         // settles a doubt the read raised about that slot. Recorded on the
@@ -733,7 +746,8 @@ function swapSlotIntoItem(
         ...(row.isOverall !== undefined ? { isOverall: true } : {}),
         // A replace acknowledgement names the occupant of the slot it was
         // ticked for; moving to another slot leaves it describing nothing.
-        ...(row.dimensionSlot !== swap.slot ? { replaces: [] } : {}),
+        // The autosave's own rule, so the two paths cannot drift.
+        ...onRowRetargeted(row, { attrGroup: "dimension", dimensionSlot: swap.slot, specFieldId: row.specFieldId }),
       };
     }
     const displacement = byId.get(row.id);

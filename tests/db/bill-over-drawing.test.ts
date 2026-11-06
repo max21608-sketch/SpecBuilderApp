@@ -33,7 +33,11 @@ import { DrawingsItemsOutput } from "@/lib/extraction-schema";
 import { loadDrawingContext, resolveStagedRun } from "@/lib/drawing-resolution";
 import { withBillAcknowledgements, type BillReplacement } from "@/lib/bill-over-drawing";
 import { PATCH as patchRoute } from "@/app/api/imports/[id]/route";
-import { POST as confirmRoute } from "@/app/api/imports/[id]/confirm/route";
+import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
+import { confirmingAsShown } from "./shown-targets";
+
+// The drawings confirm requires the records the card showed (audit D3).
+const confirmRoute = confirmingAsShown(confirmPost);
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({

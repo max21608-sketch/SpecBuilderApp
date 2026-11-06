@@ -1735,6 +1735,7 @@ export type DrawingBlocker =
   | { code: "dimension_slot_missing"; message: string; observationId: string }
   | { code: "dimension_slot_taken"; message: string; observationId: string; recordId?: string }
   | { code: "dia_conflict"; message: string; observationId: string }
+  | { code: "replace_stale"; message: string; observationId: string; recordId: string }
   | { code: "configuration_name"; message: string; label: string; observationId?: undefined }
   | { code: "configuration_undecided"; message: string; observationId: string }
   | { code: "configuration_pair_twice"; message: string; recordId: string; label: string; observationId?: undefined }
@@ -1893,6 +1894,82 @@ export function acknowledgedReplacements(observation: DrawingObservation): Map<s
     out.set(entry.recordId, { attributeId: entry.attributeId, attributeVersion: entry.attributeVersion });
   }
   return out;
+}
+
+/**
+ * WHAT A REPLACE TICK ON THIS ROW WOULD RETIRE: the slot a dimension writes,
+ * else the BWS field anything else writes, else nothing (a bare note). The
+ * same reading the slot blockers and the confirm's "already recorded" step
+ * make, so the blocker, the confirm and the retire's own where-clause agree
+ * about which occupant a tick may name.
+ */
+export type ReplaceTarget = { kind: "slot"; slot: DimensionSlot } | { kind: "field"; fieldId: string } | null;
+
+export function replaceTargetOf(
+  observation: Pick<DrawingObservation, "attrGroup" | "dimensionSlot" | "specFieldId">,
+): ReplaceTarget {
+  if (observation.attrGroup === "dimension") {
+    return observation.dimensionSlot ? { kind: "slot", slot: observation.dimensionSlot } : null;
+  }
+  return observation.specFieldId ? { kind: "field", fieldId: observation.specFieldId } : null;
+}
+
+/**
+ * A DECISION KEYED ON A ROW'S TARGET DOES NOT FOLLOW THE ROW TO ANOTHER ONE
+ * (audit D2, 2026-11-06). The one rule the autosave applies whenever a patch
+ * moves a row's group, slot or BWS field; it returns the fields to clear.
+ *
+ * A "Use this drawing's" tick names ONE attribute on ONE record: the bill's
+ * width, say. The swap path already dropped it on a move ("moving to another
+ * slot leaves it describing nothing"); the ordinary autosave kept it, so a
+ * reviewer who ticked it and then chose "Keep as a note" saw the clash and the
+ * panel disappear, and the confirm retired the bill's width, superseded by a
+ * note. The composed cell and the BWS file lost W and nothing said so.
+ *
+ * Cleared on ANY change of the three, not only one that changes what is
+ * written: a reviewer who re-files a row is asked again, which costs one tick,
+ * rather than trusted to mean the same, which costs a value.
+ *
+ * The BW standard is an option of ONE field's list, so a field move takes it
+ * too (the route lets a standard sent in the same patch win). The finish
+ * filing is NOT here: it says which library row the CODE files under, a fact
+ * about the code that holds in COM 1 and COM 2 alike, and a new code already
+ * clears it.
+ */
+export function onRowRetargeted(
+  before: Pick<DrawingObservation, "attrGroup" | "dimensionSlot" | "specFieldId" | "replaces" | "standard">,
+  after: Pick<DrawingObservation, "attrGroup" | "dimensionSlot" | "specFieldId">,
+): { replaces?: []; standard?: null } {
+  const moved =
+    before.attrGroup !== after.attrGroup ||
+    (before.dimensionSlot ?? null) !== (after.dimensionSlot ?? null) ||
+    (before.specFieldId ?? null) !== (after.specFieldId ?? null);
+  if (!moved) return {};
+  return {
+    ...((before.replaces ?? []).length > 0 ? { replaces: [] as [] } : {}),
+    ...((before.specFieldId ?? null) !== (after.specFieldId ?? null) && before.standard ? { standard: null } : {}),
+  };
+}
+
+/**
+ * THE RECORDS A CARD WAS SHOWN, AGAINST THE LIVE ONES (audit D3, 2026-11-06).
+ *
+ * An untouched card carries no `targets`, so the confirm took the LIVE
+ * suggestion: a bill confirmed in another tab that added the code on a new
+ * phase had its record written to, specs, picture and answers, by a card that
+ * never listed it. The confirm request now carries the records the card
+ * displayed, and any difference, in either direction, is a refusal. Null when
+ * the two are the same set.
+ */
+export function shownTargetsDiffer(
+  shown: readonly string[],
+  live: readonly string[],
+): { appeared: string[]; gone: string[] } | null {
+  const shownSet = new Set(shown);
+  const liveSet = new Set(live);
+  const appeared = [...liveSet].filter((id) => !shownSet.has(id)).sort();
+  const gone = [...shownSet].filter((id) => !liveSet.has(id)).sort();
+  return appeared.length === 0 && gone.length === 0 ? null : { appeared, gone };
 }
 
 /**
@@ -2131,6 +2208,30 @@ export function drawingItemBlockers(
           ? "A stated value cannot be blank. Give the value or mark it TBC."
           : "This row has nothing to record. Give the value back, or ignore the row.",
       });
+    }
+    // A REPLACE TICK THAT NO LONGER DESCRIBES THIS ROW'S TARGET (audit D2).
+    // The autosave drops a tick on every move now; a row staged before that
+    // can still carry one naming the bill's width while it is a note, or
+    // while it sits in an empty slot, where no clash and no panel show it.
+    // Confirming would retire a value the row does not replace, so the card
+    // is held, and the confirm (which re-runs this) refuses with it.
+    const target = replaceTargetOf(observation);
+    for (const [recordId, acknowledged] of acknowledgedReplacements(observation)) {
+      if (!recordsOf(observation).includes(recordId)) continue;
+      const occupant = !target
+        ? undefined
+        : target.kind === "slot"
+          ? occupied.dimensions.get(recordId)?.get(target.slot)
+          : occupiedFields.get(recordId)?.get(target.fieldId);
+      if (occupant?.attributeId === acknowledged.attributeId) continue;
+      blockers.push({
+        code: "replace_stale",
+        observationId: observation.id,
+        recordId,
+        message:
+          "This row was ticked to replace a value it no longer replaces, so confirming would retire the wrong one. Choose its slot or field again to clear the tick, or ignore the row.",
+      });
+      break;
     }
     if (observation.attrGroup === "dimension" && observation.unit === null && observation.value?.trim()) {
       blockers.push({

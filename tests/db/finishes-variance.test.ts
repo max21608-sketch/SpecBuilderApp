@@ -30,9 +30,13 @@ import pg from "pg";
 import { loadUnlinkedFinishCodes, normaliseFinishCode } from "@/lib/finishes";
 import { sql } from "@/lib/db";
 import { stageDrawings, type SpecFieldEntry } from "@/lib/drawing-document";
-import { POST as confirmRoute } from "@/app/api/imports/[id]/confirm/route";
+import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
+import { confirmingAsShown } from "./shown-targets";
 import { POST as bulkFinishesRoute } from "@/app/api/projects/[id]/finishes/bulk/route";
 import { suggestFinishKind } from "@/lib/finish-kind-guess";
+
+// The drawings confirm requires the records the card showed (audit D3).
+const confirmRoute = confirmingAsShown(confirmPost);
 
 // Only the session is stubbed; the routes are the real ones.
 vi.mock("@/lib/session", () => ({

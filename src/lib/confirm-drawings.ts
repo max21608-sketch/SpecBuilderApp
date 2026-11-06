@@ -41,7 +41,9 @@ import {
   drawingItemBlockers,
   hasPendingObservations,
   occupancyThrough,
+  replaceTargetOf,
   resolveDrawingItem,
+  shownTargetsDiffer,
   targetRecordIds,
   variantLettersByItem,
   namedConfigurationPlans,
@@ -58,6 +60,7 @@ import {
   type DrawingObservation,
   type OccupiedSlots,
   type OccupiedSlot,
+  type ReplaceTarget,
   type StagedDrawings,
 } from "@/lib/drawing-document";
 import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
@@ -378,6 +381,7 @@ export async function confirmDrawingItem(
     itemId,
     itemVersion,
     observations: refs,
+    shownTargets,
     image,
     swatches = [],
     actor,
@@ -387,6 +391,12 @@ export async function confirmDrawingItem(
     itemId: string;
     itemVersion: number;
     observations: ObservationRef[];
+    /**
+     * The records the card DISPLAYED as this item's targets, exactly as the
+     * screen rendered them from the review GET (`ItemResolution.targets`):
+     * ticked minus unticked, or the live suggestion on an untouched card.
+     */
+    shownTargets: readonly string[];
     /** The crop the reviewer looked at, already uploaded. Null for none. */
     image?: ItemImage | null;
     /** Swatch chips cropped off the page, one per finish row. */
@@ -409,6 +419,27 @@ export async function confirmDrawingItem(
   // reviewer was not shown.
   const resolution = resolveDrawingItem(run.staged, item, records);
   const targets = targetRecordIds(item, resolution);
+
+  // ==========================================================================
+  // THE CARD WRITES TO THE RECORDS IT SHOWED, AND NO OTHERS (audit D3).
+  //
+  // The guard below runs only on a card somebody ticked. An untouched card has
+  // no `targets`, and `targetRecordIds` hands back the LIVE suggestion: a bill
+  // confirmed in another tab that put this code on a new phase had that
+  // phase's record written to by a card that never listed it, specs, picture
+  // and answers alike. So the request carries what the card displayed and any
+  // difference from the live set, touched card or not, is a refusal. The
+  // suggestion itself is still `resolveStagedItem`'s, the one call the screen
+  // and this make; what is added is the comparison.
+  // ==========================================================================
+  const differ = shownTargetsDiffer(shownTargets, targets);
+  if (differ) {
+    throw new DomainConflictError(
+      "targets_changed",
+      "The records this drawing applies to changed. Reload.",
+      { diff: differ },
+    );
+  }
 
   // The card-changed guard, in its fan-out form. A record the live resolution
   // suggests that the reviewer neither ticked nor unticked is one that appeared
@@ -865,7 +896,24 @@ export async function confirmDrawingItem(
    * card showed. An occupant that has moved since is refused, never replaced:
    * the value they agreed to drop is not the value that is there.
    */
-  async function retireOccupant(attributeId: string, version: number, recordId: string, slot: "W" | "D" | null) {
+  //
+  // PINNED TO A TARGET, ALWAYS (audit D2, 2026-11-06). A replacement used to
+  // pass no slot, so it retired the named attribute whatever the row had
+  // become since the tick: a row moved to a note retired the bill's width,
+  // superseded by the note. The retire now names the slot or BWS field the
+  // row WRITES (`replaceTargetOf`), and an attribute that is not in it is
+  // refused in words. The blocker `replace_stale` says so on the card first;
+  // this is the gate behind it, so a tick that survived anything still
+  // retires nothing it does not describe.
+  async function retireOccupant(attributeId: string, version: number, recordId: string, target: ReplaceTarget) {
+    const stale = () =>
+      new DomainConflictError(
+        "replace_stale",
+        "This row no longer replaces the value it was ticked for. Nothing was written: choose its slot or field again to clear the tick, or tick it afresh.",
+      );
+    if (!target) throw stale();
+    const slot = target.kind === "slot" ? target.slot : null;
+    const fieldId = target.kind === "field" ? target.fieldId : null;
     const rows = await txn`
       update record_attributes
       set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
@@ -874,9 +922,17 @@ export async function confirmDrawingItem(
         and version = ${version}
         and status = 'active'
         and (${slot}::text is null or dimension_slot = ${slot})
+        and (${fieldId}::uuid is null or spec_field_id = ${fieldId}::uuid)
       returning id
     `;
     if (!rows[0]) {
+      // Which of two refusals: the attribute moved under the reviewer, or it
+      // is still there and simply is not what this row writes.
+      const elsewhere = await txn`
+        select 1 from record_attributes
+        where id = ${attributeId} and record_id = ${recordId} and version = ${version} and status = 'active'
+      `;
+      if (elsewhere[0]) throw stale();
       throw new DomainConflictError(
         "occupant_changed",
         "The spec this page would replace has changed since you looked at it. Nothing was written — reload and check what is there now.",
@@ -943,7 +999,7 @@ export async function confirmDrawingItem(
       // can never retire a row that has since become something else.
       const retiredSquare: string[] = [];
       for (const [slot, retire] of acknowledgedSquareRetirements(observation).get(ackKey) ?? []) {
-        await retireOccupant(retire.attributeId, retire.attributeVersion, recordId, slot);
+        await retireOccupant(retire.attributeId, retire.attributeVersion, recordId, { kind: "slot", slot });
         retiredSquare.push(retire.attributeId);
         superseded.push({ oldId: retire.attributeId, observationId: observation.id, recordId });
       }
@@ -983,7 +1039,7 @@ export async function confirmDrawingItem(
         continue;
       }
       if (replacement) {
-        await retireOccupant(replacement.attributeId, replacement.attributeVersion, recordId, null);
+        await retireOccupant(replacement.attributeId, replacement.attributeVersion, recordId, replaceTargetOf(observation));
         superseded.push({ oldId: replacement.attributeId, observationId: observation.id, recordId });
       }
 

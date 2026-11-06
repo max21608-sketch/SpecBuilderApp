@@ -787,6 +787,8 @@ say("drawings issue B", `${DRAWINGS_B.length} sheets staged, left on the reviewe
         itemId: item.id,
         itemVersion: item.version,
         observations: pending.map((row) => ({ id: row.id, version: row.version })),
+        // What the card shows after the tick above: the ticked records.
+        shownTargets: resolution.suggested,
         image: {
           pathname: picturePath,
           filename: `${drawing.code ?? drawing.sheet}.png`,

@@ -30,8 +30,12 @@ import pg from "pg";
 import { withTransaction } from "@/lib/db-transaction";
 import { createFinish, mintInternalFinishCode } from "@/lib/finish-edit";
 import { stageDrawings, type SpecFieldEntry } from "@/lib/drawing-document";
-import { POST as confirmRoute } from "@/app/api/imports/[id]/confirm/route";
+import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
+import { confirmingAsShown } from "./shown-targets";
 import { PATCH as importPatchRoute } from "@/app/api/imports/[id]/route";
+
+// The drawings confirm requires the records the card showed (audit D3).
+const confirmRoute = confirmingAsShown(confirmPost);
 
 // Only the session is stubbed; the routes are the real ones.
 vi.mock("@/lib/session", () => ({

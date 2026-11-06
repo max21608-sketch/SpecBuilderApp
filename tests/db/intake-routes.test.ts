@@ -7,6 +7,7 @@
 // alone: it is append-only by design.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { withShownTargets } from "./shown-targets";
 import pg from "pg";
 import { stageDrawings, type SpecFieldEntry } from "@/lib/drawing-document";
 import { stagePreamble } from "@/lib/preamble-document";
@@ -189,7 +190,9 @@ describeIfDb("intake routes", () => {
 
   const confirmRoute = async (runId: string, body: unknown) => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    return POST(post(body), params(runId));
+    // A drawings confirm names the records its card showed (audit D3); read
+    // them as the screen does, from the review GET, unless the test sends its own.
+    return POST(post(await withShownTargets(runId, body)), params(runId));
   };
 
   const drawingItem = (code: string) => ({

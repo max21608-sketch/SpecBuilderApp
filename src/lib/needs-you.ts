@@ -90,6 +90,7 @@ const ROW_WORDS: Record<string, (name: string) => string> = {
   empty_value: (name) => `${name}: give it a value`,
   dimension_slot_missing: (name) => `${name}: say which dimension it is`,
   dia_conflict: (name) => `${name}: a diameter beside a width or depth`,
+  replace_stale: (name) => `${name}: its replace tick no longer fits, so choose its slot or field again`,
   field_conflict: (name) => `${name}: same finish, or two?`,
   configuration_undecided: (name) => `${name}: which configuration?`,
 };

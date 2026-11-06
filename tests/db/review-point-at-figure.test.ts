@@ -26,8 +26,12 @@ import { describeIfDb, qaNumber } from "./db-tier";
 import type { DrawingItem, SpecFieldEntry, StagedDrawings } from "@/lib/drawing-document";
 import { stageDrawingsV4 } from "@/lib/drawing-items";
 import { DrawingsItemsOutput } from "@/lib/extraction-schema";
-import { POST as confirmRoute } from "@/app/api/imports/[id]/confirm/route";
+import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
+import { confirmingAsShown } from "./shown-targets";
 import { GET as importGet, PATCH as importPatch } from "@/app/api/imports/[id]/route";
+
+// The drawings confirm requires the records the card showed (audit D3).
+const confirmRoute = confirmingAsShown(confirmPost);
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({

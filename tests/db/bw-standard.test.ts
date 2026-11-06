@@ -33,8 +33,12 @@ import { composeCheckSheet, CHECK_SHEET_HEADER } from "@/lib/export-check-sheet"
 import { diffSnapshots, parseAtoms } from "@/lib/snapshot-diff";
 import { applyStandardBackfill, planStandardBackfill } from "@/lib/standards-backfill";
 import { sql } from "@/lib/db";
-import { POST as confirmRoute } from "@/app/api/imports/[id]/confirm/route";
+import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
+import { confirmingAsShown } from "./shown-targets";
 import { PATCH as importPatchRoute } from "@/app/api/imports/[id]/route";
+
+// The drawings confirm requires the records the card showed (audit D3).
+const confirmRoute = confirmingAsShown(confirmPost);
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({

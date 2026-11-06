@@ -45,6 +45,11 @@ const ConfirmBody = z
     itemId: z.string().min(1).optional(),
     itemVersion: z.number().int().nonnegative().optional(),
     observations: z.array(StagedRef).min(1).max(500).optional(),
+    // A DRAWINGS CONFIRM NAMES THE RECORDS ITS CARD SHOWED (audit D3), so a
+    // record that appeared after the page loaded is refused, not written to.
+    // Required for a drawings confirm: a screen that does not send it is an
+    // old screen, and is asked to reload rather than trusted.
+    shownTargets: z.array(z.string().uuid()).max(500).optional(),
     // The picture the reviewer kept, already uploaded to the project's own
     // blob prefix by the review screen. A PATHNAME, never a URL -- the store
     // resolves it against its own host from the token, so there is no host to
@@ -196,6 +201,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         if (typeof body.itemVersion !== "number") {
           return json({ ok: false, error: "itemVersion is required." }, 400);
         }
+        if (!body.shownTargets) {
+          return json({ ok: false, error: "This screen is out of date. Reload before confirming." }, 400);
+        }
+        const shownTargets = body.shownTargets;
         const result = await withTransaction((txn) =>
           confirmDrawingItem(txn, {
             runId: id,
@@ -203,6 +212,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             itemId: body.itemId as string,
             itemVersion: body.itemVersion as number,
             observations,
+            shownTargets,
             image: body.image ?? null,
             swatches: body.swatches ?? [],
             actor: user.email,

@@ -28,6 +28,7 @@ import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
 import { stageDrawings, type SpecFieldEntry } from "@/lib/drawing-document";
 import { loadRecordAtoms } from "@/lib/record-atoms";
+import { confirmingAsShown } from "./shown-targets";
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
@@ -205,7 +206,7 @@ describeIfDb("a photo or a render beats a drawing", () => {
     const pathname = `projects/${projectId}/item-images/${item.id}-${label}.png`;
     files.set(pathname, { bytes: Buffer.from(`crop ${label}`), contentType: "image/png" });
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    const response = await POST(
+    const response = await confirmingAsShown(POST)(
       post({
         version: Number(run.rows[0].version),
         action: "confirm",

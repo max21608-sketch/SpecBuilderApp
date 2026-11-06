@@ -499,7 +499,16 @@ export default function PackDrawingsReview({
         action,
         itemId: item.id,
         ...(action === "confirm"
-          ? { itemVersion: item.version, image, ...(swatchList.length > 0 ? { swatches: swatchList } : {}) }
+          ? {
+              itemVersion: item.version,
+              // THE RECORDS THIS CARD SHOWED (audit D3), exactly as the review
+              // GET resolved them for this render. The confirm refuses on any
+              // difference from its live resolution, so a record that
+              // appeared since the page loaded is never written to unseen.
+              shownTargets: run.items.find((entry) => entry.id === item.id)?.targets ?? [],
+              image,
+              ...(swatchList.length > 0 ? { swatches: swatchList } : {}),
+            }
           : {}),
         observations: observations.map((observation) => ({ id: observation.id, version: observation.version })),
       }),
