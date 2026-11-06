@@ -15,7 +15,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { requireScriptEnvironment } from "./script-env.mjs";
+import { pgToolConnection, requireScriptEnvironment } from "./script-env.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backupsDir =
@@ -30,5 +30,11 @@ const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 // the wrong target with no signal.
 const outFile = path.join(backupsDir, `spec-builder-${environment}-${stamp}.sql`);
 
-execFileSync("pg_dump", ["--no-owner", "--no-privileges", databaseUrl, "-f", outFile], { stdio: "inherit" });
+// The password travels in the child's environment, never on its command line,
+// where `ps` shows it to anybody for as long as the dump runs (script-env.mjs).
+const connection = pgToolConnection(databaseUrl);
+execFileSync("pg_dump", ["--no-owner", "--no-privileges", connection.url, "-f", outFile], {
+  stdio: "inherit",
+  env: connection.env,
+});
 console.log(`Backup written to ${outFile}`);

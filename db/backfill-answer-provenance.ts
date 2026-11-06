@@ -27,43 +27,19 @@
 // always. On the sandbox and pilot only by Max.
 // ============================================================================
 import pg from "pg";
+import { requireScriptEnvironment } from "./script-env.mjs";
 import type { TxnSql } from "../src/lib/db-transaction";
 import { applyAnswerProvenance, planAnswerProvenance, type AnswerStatement } from "../src/lib/answer-provenance-backfill";
 
-const DATABASE_ENVIRONMENTS = ["sandbox", "pilot", "production"];
-
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
-  console.error("DATABASE_URL is not set. Run with:");
-  console.error("  npm run db:backfill-answer-provenance           (reads .env.local)");
-  console.error("  npm run db:backfill-answer-provenance:local     (the local stack)");
-  console.error("Add -- --apply to write; without it this is a dry run.");
-  process.exit(1);
-}
-const environment = process.env.DATABASE_ENVIRONMENT ?? "";
-if (!DATABASE_ENVIRONMENTS.includes(environment)) {
-  console.error(`DATABASE_ENVIRONMENT must be one of: ${DATABASE_ENVIRONMENTS.join(", ")}.`);
-  process.exit(1);
-}
-let host = "unknown host";
-try {
-  host = new URL(databaseUrl).host;
-} catch {
-  /* connect will report it better */
-}
-console.log(`Target: DATABASE_ENVIRONMENT=${environment} (${host})`);
-
+// The environment guard is db/script-env.mjs's, the one every db script uses:
+// the resolved host printed first, pilot behind --yes-pilot and production
+// behind --yes-production, separate flags on purpose.
+const { databaseUrl } = requireScriptEnvironment("backfill-answer-provenance.ts", [
+  "npm run db:backfill-answer-provenance           (reads .env.local)",
+  "npm run db:backfill-answer-provenance:local     (the local stack)",
+  "Add -- --apply to write; without it this is a dry run.",
+]);
 const apply = process.argv.includes("--apply");
-if (environment === "production" && !process.argv.includes("--yes-production")) {
-  console.error("Refusing to run against the production database without --yes-production.");
-  process.exit(1);
-}
-// Pilot is Matthew's own data, guarded by its OWN flag (db/script-env.mjs
-// carries the reasoning).
-if (environment === "pilot" && !process.argv.includes("--yes-pilot")) {
-  console.error("Refusing to run against the pilot database without --yes-pilot.");
-  process.exit(1);
-}
 const projectArg = process.argv.find((arg) => arg.startsWith("--project="))?.split("=")[1] ?? null;
 
 const actor = "system:backfill-answer-provenance";

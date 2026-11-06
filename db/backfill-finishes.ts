@@ -29,46 +29,43 @@
 // SAFE TO RE-RUN: a code that already has a finish is skipped, and an
 // attribute that is already linked is left alone.
 // ============================================================================
+//
+// ============================================================================
+// HISTORICAL (audit B9, 2026-11-06). Kept, not deleted, because the finishes
+// library's banner for unlinked codes names it as the one way to bring them
+// in (FinishesLibrary.tsx) and nothing in the app links an attribute. But it
+// predates two things, and a person running it today should know both:
+//
+//   * THE ZONE-TWIN LOOKUP (`findFinishByCode`, 2026-10-13). This matches a
+//     code to the library by `code_norm` alone, so a bare `MTL-01` beside the
+//     library's `GR-MTL-01` is created as a second finish. Run
+//     `npm run db:backfill-finish-twins` after it, which merges them.
+//   * THE CHECKLIST. It links attributes and takes a version, and recomposes
+//     no answer, so a checklist answer composed from a spec it links goes on
+//     holding the drawing's words, not the library's, until something next
+//     recomposes that record (any confirm, correction or finish edit on it).
+//     No script does that today.
+//
+// A rebuild on the single paths (`resolveFinishCode`, `recomposeAnswers`) is
+// the fix, and a decision for whoever next needs it.
+// ============================================================================
 import pg from "pg";
+import { requireScriptEnvironment } from "./script-env.mjs";
 import { normaliseFinishCode } from "../src/lib/finishes";
 import { snapshotRecords } from "../src/lib/record-snapshot";
 import type { TxnSql } from "../src/lib/db-transaction";
 
-const DATABASE_ENVIRONMENTS = ["sandbox", "pilot", "production"];
-
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
-  console.error("DATABASE_URL is not set. Run with:");
-  console.error("  npm run db:backfill-finishes           (reads .env.local)");
-  console.error("Add -- --apply to write; without it this is a dry run.");
-  process.exit(1);
-}
-const environment = process.env.DATABASE_ENVIRONMENT ?? "";
-if (!DATABASE_ENVIRONMENTS.includes(environment)) {
-  console.error(`DATABASE_ENVIRONMENT must be one of: ${DATABASE_ENVIRONMENTS.join(", ")}.`);
-  process.exit(1);
-}
-let host = "unknown host";
-try {
-  host = new URL(databaseUrl).host;
-} catch {
-  /* connect will report it better */
-}
-console.log(`Target: DATABASE_ENVIRONMENT=${environment} (${host})`);
-
+// The environment guard is db/script-env.mjs's, the one every db script uses:
+// the resolved host printed first, pilot behind --yes-pilot and production
+// behind --yes-production, separate flags on purpose.
+const { databaseUrl } = requireScriptEnvironment("backfill-finishes.ts", [
+  "npm run db:backfill-finishes           (reads .env.local)",
+  "Add -- --apply to write; without it this is a dry run.",
+]);
+console.warn(
+  "HISTORICAL: this pass predates the zone-twin lookup and recomposes no checklist answer. Read its header, then run npm run db:backfill-finish-twins after it.",
+);
 const apply = process.argv.includes("--apply");
-if (environment === "production" && !process.argv.includes("--yes-production")) {
-  console.error("Refusing to run against the production database without --yes-production.");
-  process.exit(1);
-}
-// Pilot is Matthew's own data, not a database anybody can re-seed, so it is
-// guarded the same way and by its OWN flag (db/script-env.mjs carries the
-// reasoning). A flag standing for "any protected environment" would let
-// somebody who meant one reach the other.
-if (environment === "pilot" && !process.argv.includes("--yes-pilot")) {
-  console.error("Refusing to run against the pilot database without --yes-pilot.");
-  process.exit(1);
-}
 const projectArg = process.argv.find((arg) => arg.startsWith("--project="))?.split("=")[1] ?? null;
 
 const actor = "system:backfill-finishes";

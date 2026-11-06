@@ -11,7 +11,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import pg from "pg";
-import { requireScriptEnvironment } from "./script-env.mjs";
+import { pgToolConnection, requireScriptEnvironment } from "./script-env.mjs";
 
 const dumpFile = process.argv[2];
 if (!dumpFile || dumpFile.startsWith("--")) {
@@ -43,7 +43,18 @@ try {
   await client.end();
 }
 
-execFileSync("psql", ["--set", "ON_ERROR_STOP=on", "-d", databaseUrl, "-f", dumpFile], { stdio: "inherit" });
+// ONE TRANSACTION (audit B9). Without --single-transaction a dump that fails
+// half way -- a role it names that this project lacks, an extension, a full
+// disk -- leaves the target holding the first half of the schema and the
+// rows that loaded before the error, and the empty-database check above then
+// refuses every retry. With it, a failure leaves the target empty, as it was.
+// The password goes in the environment, not on the command line (script-env.mjs).
+const connection = pgToolConnection(databaseUrl);
+execFileSync(
+  "psql",
+  ["--set", "ON_ERROR_STOP=on", "--single-transaction", "-d", connection.url, "-f", dumpFile],
+  { stdio: "inherit", env: connection.env },
+);
 console.log("Restore complete.");
 console.log("Blob is NOT covered by this restore -- see db/README.md; every stored PDF/.eml link");
 console.log("in the restored rows still points at the Blob store, which has its own lifecycle.");

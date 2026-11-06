@@ -28,6 +28,7 @@
 // Node runtime, so no `export const runtime` is needed, but do not import this
 // from middleware.
 // ============================================================================
+import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { getEnvironment } from "@/lib/env";
 import { json, type Row } from "@/lib/db";
@@ -293,6 +294,58 @@ export function transactionErrorResponse(cause: unknown): Response {
 
   // Never return a raw driver message: it carries table and column names, and
   // a constraint violation can carry a fragment of the value that broke it.
-  console.error(`guarded transaction failed: ${describeTransactionFailure(cause)}`, cause);
+  //
+  // NOR LOG THE DRIVER ERROR WHOLE (audit B9). It used to be passed to
+  // console.error as an object, and a Postgres error carries `detail` --
+  // "Key (code_norm)=(<the client's code>) already exists", "Failing row
+  // contains (<every column>)" -- so client material reached the hosting
+  // logs on every unexpected failure. `describeUnexpectedFailure` keeps what
+  // diagnoses it and drops what echoes a value. The reference ties the line to
+  // one failure among many; handing it back in the response is the routes'
+  // decision (audit 4.1), not this line's.
+  const reference = randomUUID();
+  console.error(`guarded transaction failed: ${describeUnexpectedFailure(cause, reference)}`);
   return json({ ok: false, error: "Nothing was written. The operation failed; check the logs." }, 500);
+}
+
+/**
+ * The log line for a failure nobody expected, without any part of a driver
+ * error that can echo a stored value.
+ *
+ * A database error (one with a SQLSTATE) is described by its code, the
+ * constraint, table and column it names, and the statement that was running
+ * -- never its `message` (`invalid input syntax for type uuid: "<value>"`),
+ * its `detail` or its `where`. Anything else is the app's own fault, a
+ * TypeError or a thrown Error, and its name, message and stack are what fixes
+ * it, so they are kept.
+ */
+export function describeUnexpectedFailure(cause: unknown, reference: string): string {
+  const fields = (cause ?? {}) as Record<string, unknown>;
+  const text = (key: string): string | null => (typeof fields[key] === "string" ? (fields[key] as string) : null);
+  const code = text("code");
+  const parts = [`ref=${reference}`];
+  if (code && /^[0-9A-Z]{5}$/.test(code)) {
+    parts.push(`sqlstate=${code}`);
+    for (const key of ["constraint", "table", "column", "schema"]) {
+      const value = text(key);
+      if (value) parts.push(`${key}=${value}`);
+    }
+    const failed = failedStatementOf(cause);
+    if (failed) {
+      const statement = failed.statement.replace(/\s+/g, " ").trim();
+      const clipped =
+        statement.length > MAX_LOGGED_STATEMENT ? `${statement.slice(0, MAX_LOGGED_STATEMENT)}…` : statement;
+      parts.push(`after=${failed.elapsedMs}ms`, `statement=${clipped}`);
+    } else {
+      parts.push("statement=unknown (failed outside a tagged statement)");
+    }
+    return parts.join(" · ");
+  }
+  if (cause instanceof Error) {
+    parts.push(`${cause.name}: ${cause.message}`);
+    if (cause.stack) parts.push(cause.stack);
+    return parts.join(" · ");
+  }
+  parts.push(`non-error thrown: ${typeof cause}`);
+  return parts.join(" · ");
 }

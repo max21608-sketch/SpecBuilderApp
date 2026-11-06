@@ -10,9 +10,10 @@
 // confirm then failed with a constraint violation reaching the reviewer as
 // "Nothing was written", and the cause was a value nobody had typed.
 //
-// There are twelve of these vocabularies. Each is a TypeScript constant AND a
-// CHECK, and the `external-vocabulary-sync` skill's rule is that the two must
-// change together. Nothing asserted it until now.
+// There were twelve of these vocabularies when this was written, and the
+// audit of 2026-11-06 found twelve more; all are below. Each is a TypeScript
+// constant AND a CHECK, and the `external-vocabulary-sync` skill's rule is
+// that the two must change together. Nothing asserted it until now.
 //
 // A value in the DATABASE that the constant does not know is reported too, and
 // is not always a bug: `spec_answers.source_kind` has allowed 'email' since
@@ -27,14 +28,26 @@ import {
   ANSWER_SOURCES,
   ANSWER_STATES,
   ATTRIBUTE_GROUPS,
+  ATTRIBUTE_STATES,
+  ATTRIBUTE_STATUSES,
   ATTRIBUTE_UNITS,
+  CONTACT_ROLES,
   DIMENSION_SLOTS,
   DOCUMENT_KINDS,
+  DRAFT_STATUSES,
+  INTAKE_SOURCE_KINDS,
+  INTAKE_STATUSES,
   ITEM_LEVELS,
+  NOTE_STATUSES,
+  PROJECT_STATUSES,
+  RECORD_STATUSES,
   REF_SYSTEMS,
   REQUIREMENT_KINDS,
+  RUN_STATUSES,
   SPLIT_REASONS,
 } from "@/lib/spec-vocab";
+import { GATE_VALUE_TYPES } from "@/lib/gates";
+import { QUESTION_TIERS } from "@/lib/tgq";
 import { CHANGE_SET_KINDS, REASON_REQUIRED_KINDS } from "@/lib/change-sets";
 import { FINISH_CODE_ORIGINS, FINISH_KINDS } from "@/lib/finishes";
 import { BOQ_ROLES } from "@/lib/boq-roles";
@@ -96,6 +109,23 @@ const VOCABULARIES: {
     constraint: "attribute_disagreements_dimension_slot_check",
     values: DIMENSION_SLOTS,
   },
+  // ---- The twelve the audit found unguarded (B9, 2026-11-06). Every one
+  // matched on the day; each is a list the next re-listing could drop a value
+  // from, with nothing going red.
+  { name: "INTAKE_STATUSES", constraint: "intake_runs_status_check", values: INTAKE_STATUSES },
+  { name: "INTAKE_SOURCE_KINDS", constraint: "intake_runs_source_kind_check", values: INTAKE_SOURCE_KINDS },
+  { name: "RECORD_STATUSES", constraint: "spec_records_status_check", values: RECORD_STATUSES },
+  { name: "RUN_STATUSES", constraint: "spec_runs_status_check", values: RUN_STATUSES },
+  { name: "ATTRIBUTE_STATUSES", constraint: "record_attributes_status_check", values: ATTRIBUTE_STATUSES },
+  { name: "NOTE_STATUSES", constraint: "project_notes_status_check", values: NOTE_STATUSES },
+  { name: "PROJECT_STATUSES", constraint: "projects_status_check", values: PROJECT_STATUSES },
+  { name: "DRAFT_STATUSES", constraint: "email_drafts_status_check", values: DRAFT_STATUSES },
+  { name: "ATTRIBUTE_STATES", constraint: "record_attributes_state_check", values: ATTRIBUTE_STATES },
+  { name: "ATTRIBUTE_STATES (disagreements)", constraint: "attribute_disagreements_state_check", values: ATTRIBUTE_STATES },
+  { name: "CONTACT_ROLES", constraint: "project_contacts_role_check", values: CONTACT_ROLES },
+  { name: "GATE_VALUE_TYPES", constraint: "spec_field_gates_value_type_check", values: GATE_VALUE_TYPES },
+  // The tier a chase question was asked under (0020).
+  { name: "QUESTION_TIERS", constraint: "email_draft_items_tier_check", values: QUESTION_TIERS },
 ];
 
 /** Every single-quoted literal in a constraint definition. */

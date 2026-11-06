@@ -67,7 +67,27 @@ The runner records each applied file in `schema_migrations`, so it is
 idempotent — re-running is a no-op, and "which migrations does production
 have?" is a query, not a guess.
 
+Three things about the runner (`db/migration-runner.mjs`, audit B9,
+2026-11-06) that a new migration has to fit:
+
+- **The ledger row is written inside the file's own transaction.** The runner
+  puts its insert immediately before the file's closing `commit;`, so the
+  change and the record of it commit or roll back together. It used to insert
+  the row after the file committed, and a crash between the two left a schema
+  change with no ledger row, which the next run applied again. So a file MUST
+  be `begin;` first and `commit;` last, each on a line of its own; anything
+  else is refused before a byte of it runs. `create index concurrently`
+  cannot run inside a transaction and therefore cannot be a migration file as
+  things stand (0056 says what to do instead).
+- **Two runners apply a file once.** The run holds a session advisory lock and
+  reads the ledger after taking it.
+- **An applied file that has been edited is reported, never refused.** From
+  `0056` the ledger carries each file's sha256 (`checksum`); a file whose text
+  no longer matches prints a WARNING. Files applied before `0056` have no
+  checksum and are counted, not compared.
+
 **Never edit a migration after it has been applied anywhere.** Add another one.
+The checksum warning is how an edit is noticed.
 
 Open each file with a comment saying *why*. The most useful migrations in this
 company read as post-mortems.
@@ -86,6 +106,20 @@ hand, that conflict key no longer recognises it — so the seed quietly
 re-inserts the original as a duplicate, and a later cleanup migration then
 fails on a unique constraint. The suite is only safe to re-run *before* any
 manual edits to the same records.
+
+**The requirement seeds match on a KEY, never on a position** (`0057`, audit
+B7). `0003`, `0007` and `0009` upsert on `(category_id, seed_key)`: a BWS
+field question is `field:<json_id>`, a matrix readiness question
+`key:<local_key>`, any other `q:<the prompt, lower case, hyphenated>`. They
+used to upsert on `(category_id, sort_order)`, so adding one question in the
+middle of a revised cheat sheet wrote every prompt below it over its
+neighbour, and every answer on those rows silently answered a different
+question. Now a revised sheet may reorder freely (the position constraint is
+deferrable, so one statement can move every row); a reworded readiness
+question is a NEW question, and the old one waits to be retired; and changing
+what an ANSWERED question asks (its kind, field, local key or prompt) is
+refused by a trigger, which fails the seed naming the question and its counts.
+A new question takes a new key; never re-use one.
 
 ## One-off maintenance passes
 
@@ -130,7 +164,9 @@ npm run db:backup
 ```
 
 Writes a timestamped dump to `~/bw-backups/<app>/` — deliberately **outside**
-the repository. Override with `BACKUP_DIR`.
+the repository. Override with `BACKUP_DIR`. The password reaches `pg_dump`
+through `PGPASSWORD`, never its command line, where `ps` would show it to
+every user on the machine for as long as the dump runs.
 
 Take one before any schema change.
 
@@ -141,7 +177,9 @@ node --env-file=.env.restore-target db/restore.mjs <path to dump.sql>
 ```
 
 This is destructive, and it **refuses to run against a database that already
-has tables**. A restore belongs in an empty database (a fresh branch or
+has tables**. It runs the dump as ONE transaction (`--single-transaction`), so
+a dump that fails half way leaves the target empty rather than half built
+(which the table check would then refuse to retry over). A restore belongs in an empty database (a fresh branch or
 project) which the app is then repointed at — never on top of a live one. That
 refusal is deliberate: it makes "restore over the live database" something you
 cannot do by accident.
@@ -188,16 +226,48 @@ prevent.
 |---|---|
 | `npm run db:backfill-answer-provenance` | After `0050`: marks the answers composed from a record's specs as `attribute`, recomposes the ones that had stopped following them, and leaves a reviewer's own answer off a schedule alone. Prints what it cannot decide |
 | `npm run db:backfill-snapshots` | Gives every record that predates `0012` a version 1, under a `history_begins` change. It does NOT reconstruct the past from `audit_log` — see decision 58 |
-| `npm run db:backfill-finishes` | Builds each project's finishes library from the codes its drawings carry, links every attribute, and takes a version of each record it changed. A code whose items disagree is left blank and NAMED, never guessed |
+| `npm run db:backfill-finishes` | **Historical** (audit B9). Builds each project's finishes library from the codes its drawings carry, links every attribute, and takes a version of each record it changed; a code whose items disagree is left blank and NAMED. Kept because the finishes page names it as the way to bring unlinked codes in. It predates the zone-twin lookup (run `db:backfill-finish-twins` after it) and recomposes no checklist answer; its header says what that leaves |
+
+## Deleting a project
+
+```bash
+npm run db:delete-project -- --project=<id or BWS number>            # dry run
+npm run db:delete-project -- --project=<id or BWS number> --apply
+npm run db:delete-project:local -- --project=<...>                    # the local stack
+```
+
+A project is deletable BY SCRIPT, never from the app (Max, 2026-11-06, audit
+B5). The dry run prints every table's row count, every file the database
+records under `projects/<id>/` (and, where the store can be listed, files
+under it that no row names), and how many messages survive. `--apply` deletes
+the rows in ONE transaction, counts again before committing and refuses if
+anything of the project is left, then deletes the files after the commit.
+Pilot needs `--yes-pilot` and production `--yes-production`, as everywhere; a
+`TEST` project (kept on purpose) also needs `--yes-test`.
+
+What goes and what stays (`db/project-delete.mjs` has the reasons):
+
+- **Every row of the project**: one `delete from projects` cascades through
+  every table that hangs off it (`0055` made that order-proof), and the
+  attachments, notes, status history and messages no foreign key reaches are
+  deleted around it.
+- **Mail that arrived through the mailbox stays**, taken off the project
+  (unassigned, "Its project was deleted."), because its arrival record under
+  `mailbox/` is the record that it arrived at all. Mail whose only copy is under
+  the project's prefix (an `.eml` uploaded to it) goes.
+- **`audit_log` stays**, by design. Since `0054` it no longer holds the staged
+  documents, the email bodies or the password hashes.
 
 ## Sweeping after a failed test run
 
 `npm run db:qa-clean` removes every `__QA` project a database-tier run left
-behind, in foreign-key-safe order. A suite that fails partway leaves its
-project in place, and the NEXT run then fails on the unique project number
-rather than on whatever was actually wrong — which is how a real failure gets
-mistaken for a flake.
+behind, through the same `db/project-delete.mjs` the script above uses. A
+suite that fails partway leaves its project in place, and the NEXT run then
+fails on the unique project number rather than on whatever was actually
+wrong — which is how a real failure gets mistaken for a flake.
 
-It leaves `audit_log` alone, by design. `change_sets` and `record_snapshots` go
-with the project by cascade (`0013`, `0014`), which is why the project is
-deleted last.
+It matches `left(name, 5) = '__QA '`, never `like '__QA%'`, where an
+underscore is a wildcard. It deletes rows only: the files a swept project
+named stay in the store. It leaves `audit_log` alone, by design. It sweeps
+EVERY `__QA` project, including one a concurrent test run is using right now,
+so do not run it while another run is in progress.
