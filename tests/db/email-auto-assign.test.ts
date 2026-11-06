@@ -102,6 +102,7 @@ const databaseUrl = process.env.DATABASE_URL;
 
 const PROJECT_NUMBER = qaNumber("P90211");
 const SECOND_NUMBER = qaNumber("P90212");
+const MOVED_TO_NUMBER = qaNumber("P90213");
 const INBOX = `__qa-p90211-${QA_RUN_SUFFIX}@example.test`;
 const SECOND_INBOX = `__qa-p90212-${QA_RUN_SUFFIX}@example.test`;
 const CONTACT = `__qa-router-contact-${QA_RUN_SUFFIX}@example.test`;
@@ -195,7 +196,7 @@ describeIfDb("a confidently routed email assigns itself", () => {
     }
     const projects = await client.query(
       `select id from projects where bws_project_number = any($1::text[])`,
-      [[PROJECT_NUMBER, SECOND_NUMBER]],
+      [[PROJECT_NUMBER, SECOND_NUMBER, MOVED_TO_NUMBER]],
     );
     for (const row of projects.rows) {
       await client.query(`delete from email_messages where project_id = $1`, [row.id]);
@@ -423,7 +424,7 @@ describeIfDb("a confidently routed email assigns itself", () => {
     const runs = await client.query(
       `select count(*)::int as n from intake_runs
         where project_id = $1 and registration_request_id = $2`,
-      [projectId, `email:${first.messageId}`],
+      [projectId, `email:${first.messageId}:${projectId}`],
     );
     expect(runs.rows[0].n).toBe(1);
   });
@@ -458,6 +459,147 @@ describeIfDb("a confidently routed email assigns itself", () => {
     // The run stays: it is what the model was paid to produce.
     const kept = await runRow(String(before.intake_run_id));
     expect(kept).toBeTruthy();
+  });
+
+  // ---- putting it somewhere else (audit A1) ------------------------------
+  //
+  // Unassign is the only remedy the auto-assign gate promises, and it was a
+  // dead end: the replay key was the message alone, so assigning the message
+  // to the RIGHT project found the wrong project's run, linked it, answered
+  // 200, and never set the project — the message read "unassigned" while
+  // pointing at a run on the project it had just been taken off.
+  it("puts a message taken off one project onto another, as a new read on that project", async () => {
+    const elsewhere = await client.query(
+      `insert into projects (bws_project_number, name, created_by, updated_by)
+       values ($1, '__QA Router project moved to', 'qa', 'qa') returning id`,
+      [MOVED_TO_NUMBER],
+    );
+    const otherId = String(elsewhere.rows[0].id);
+
+    const outcome = await ingest("__qa_router_move", {
+      to: INBOX,
+      from: "someone@elsewhere.test",
+      subject: "Placed on the wrong project",
+    });
+    expect(outcome.outcome).toBe("stored");
+    if (outcome.outcome !== "stored") return;
+    const placed = await messageRow(outcome.messageId);
+    const firstRunId = String(placed.intake_run_id);
+    expect(String(placed.project_id)).toBe(projectId);
+
+    const { assignMessage, unassignMessage } = await import("@/lib/email-registration");
+    await unassignMessage(outcome.messageId, { actor: "__qa@example.test", expectedVersion: Number(placed.version) });
+    const held = await messageRow(outcome.messageId);
+    expect(held.routing_status).toBe("unassigned");
+
+    published.length = 0;
+    copied.length = 0;
+    const moved = await assignMessage({
+      messageId: outcome.messageId,
+      projectId: otherId,
+      kind: "manual",
+      actor: "__qa@example.test",
+      expectedVersion: Number(held.version),
+    });
+    // A NEW READ, and it says so: the other project has never seen this email.
+    expect(moved.read).toBe(true);
+    expect(moved.runId).not.toBe(firstRunId);
+
+    const after = await messageRow(outcome.messageId);
+    expect(String(after.project_id)).toBe(otherId);
+    expect(after.routing_status).toBe("assigned");
+    expect(after.assignment_kind).toBe("manual");
+    expect(String(after.intake_run_id)).toBe(moved.runId);
+
+    const run = await runRow(moved.runId);
+    expect(String(run.project_id)).toBe(otherId);
+    expect(run.registration_request_id).toBe(`email:${outcome.messageId}:${otherId}`);
+    expect(published).toHaveLength(1);
+    expect(published[0]!.extractionId).toBe(moved.runId);
+
+    // The run reads the message from UNDER THE NEW PROJECT. The first copy
+    // sits under the first project, whose prefix this project's read refuses.
+    expect(copied).toHaveLength(1);
+    expect(copied[0]!.to.startsWith(`projects/${otherId}/`)).toBe(true);
+    const attachment = await client.query(
+      `select a.storage_path from intake_runs r join attachments a on a.id = r.attachment_id where r.id = $1`,
+      [moved.runId],
+    );
+    expect(String(attachment.rows[0].storage_path).startsWith(`projects/${otherId}/`)).toBe(true);
+    expect(String(after.mailbox_storage_path).startsWith("mailbox/")).toBe(true);
+
+    // The first project's run is untouched: it is what the model was paid for.
+    const first = await runRow(firstRunId);
+    expect(String(first.project_id)).toBe(projectId);
+    expect(first.registration_request_id).toBe(`email:${outcome.messageId}:${projectId}`);
+
+    // ---- and back again: the run it already has, no second read ----------
+    const { unassignMessage: unassignAgain } = await import("@/lib/email-registration");
+    await unassignAgain(outcome.messageId, { actor: "__qa@example.test", expectedVersion: Number(after.version) });
+    const heldAgain = await messageRow(outcome.messageId);
+    published.length = 0;
+    copied.length = 0;
+    const back = await assignMessage({
+      messageId: outcome.messageId,
+      projectId,
+      kind: "manual",
+      actor: "__qa@example.test",
+      expectedVersion: Number(heldAgain.version),
+    });
+    expect(back.read).toBe(false);
+    expect(back.runId).toBe(firstRunId);
+    expect(published).toHaveLength(0);
+    expect(copied).toHaveLength(0);
+
+    const returned = await messageRow(outcome.messageId);
+    expect(String(returned.project_id)).toBe(projectId);
+    expect(returned.routing_status).toBe("assigned");
+    expect(String(returned.intake_run_id)).toBe(firstRunId);
+    const runs = await client.query(
+      `select count(*)::int as n from intake_runs where registration_request_id like $1`,
+      [`email:${outcome.messageId}%`],
+    );
+    expect(runs.rows[0].n).toBe(2);
+  });
+
+  it("re-links a run stored under the old one-key-per-message form, on its own project only", async () => {
+    // Keys written before A1 are `email:<messageId>`. Such a run is still
+    // correctly linked to the project it was made on, so assigning the message
+    // back there finds it; on any other project it is not this project's run.
+    const outcome = await ingest("__qa_router_legacy", {
+      to: INBOX,
+      from: "someone@elsewhere.test",
+      subject: "Registered before the key changed",
+    });
+    expect(outcome.outcome).toBe("stored");
+    if (outcome.outcome !== "stored") return;
+    const placed = await messageRow(outcome.messageId);
+    const runId = String(placed.intake_run_id);
+    // And it never finished its read: unassign settles such a run as
+    // `confirmed`, which on its project again would call an unread email
+    // reviewed.
+    await client.query(
+      `update intake_runs set registration_request_id = $1, status = 'failed', error = 'qa' where id = $2`,
+      [`email:${outcome.messageId}`, runId],
+    );
+
+    const { assignMessage, unassignMessage } = await import("@/lib/email-registration");
+    await unassignMessage(outcome.messageId, { actor: "__qa@example.test", expectedVersion: Number(placed.version) });
+    const held = await messageRow(outcome.messageId);
+    published.length = 0;
+    const back = await assignMessage({
+      messageId: outcome.messageId,
+      projectId,
+      kind: "manual",
+      actor: "__qa@example.test",
+      expectedVersion: Number(held.version),
+    });
+    expect(back.read).toBe(false);
+    expect(back.runId).toBe(runId);
+    expect(published).toHaveLength(0);
+    const relinked = await runRow(runId);
+    expect(relinked.status).toBe("failed");
+    expect(String(relinked.error)).toContain("taken off the project before it was read");
   });
 
   // ---- the cap ------------------------------------------------------------

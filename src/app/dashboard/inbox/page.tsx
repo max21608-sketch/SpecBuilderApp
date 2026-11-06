@@ -43,6 +43,7 @@ import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { useUrlTab } from "@/lib/use-url-tab";
 import { WAITING_FOR_SLOT_LABEL } from "@/lib/intake-status";
 import { inboxBuckets, outcome } from "@/lib/inbox-outcome";
+import { assignCost } from "@/lib/email-assign-cost";
 
 /** What a read turned up. Computed in the route by `describeChange`, per 0021. */
 type Found = {
@@ -86,6 +87,8 @@ type Message = {
   triage: string;
   parse_error: string | null;
   version: number;
+  /** Every project a run for this message exists on: putting it back there reads nothing. */
+  read_on?: string[] | null;
 };
 
 type Project = { id: string; bws_project_number: string; name: string };
@@ -513,6 +516,10 @@ function InboxView() {
                     // two projects matching equally well is a decision, and a
                     // pre-selected picker would make agreeing with it silent.
                     const offer = message.routing_status === "ambiguous" && candidates.length > 0 ? candidates : data.projects;
+                    const cost = assignCost(
+                      message.read_on,
+                      data.projects.find((project) => project.id === assignTo[message.id]) ?? null,
+                    );
                     return (
                       <Tr key={message.id}>
                         <Td>
@@ -583,7 +590,7 @@ function InboxView() {
                                 void act(message, { action: "assign", projectId: assignTo[message.id] })
                               }
                             >
-                              Assign &amp; read
+                              {cost.label}
                             </Button>
                             <Button
                               variant="quiet"
@@ -594,8 +601,9 @@ function InboxView() {
                               Not a spec
                             </Button>
                           </div>
-                          {/* THE SPEND POINT, said before the click. */}
-                          <span className="mt-1 block text-[11px] text-neutral-500">One charged model call.</span>
+                          {/* THE SPEND POINT, said before the click — and since A1
+                              it depends on the project chosen. */}
+                          <span className="mt-1 block text-[11px] text-neutral-500">{cost.sentence}</span>
                         </Td>
                       </Tr>
                     );

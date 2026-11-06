@@ -56,8 +56,26 @@
 // `openAttempt` inside the transaction that inserts the run; `publishAttempt`
 // AFTER the commit. A run committed at `pending` with a message already
 // published against it is a paid call against state that may not exist.
-// `registration_request_id` is `email:<messageId>`, so a replayed assignment
-// returns the run it already made instead of opening a second attempt.
+// `registration_request_id` is `email:<messageId>:<projectId>`, so a replayed
+// assignment returns the run it already made instead of opening a second
+// attempt.
+//
+// ---- THE KEY NAMES THE PROJECT, OR UNASSIGN IS A DEAD END (audit A1) -----
+//
+// It was `email:<messageId>`, one run per message forever. That was right
+// until a message could be taken OFF a project: `unassignMessage` keeps the
+// run (it is what the model was paid to produce), so assigning the message to
+// the right project found the wrong project's run by its key, linked it,
+// answered 200 — and never set the project. The message read "unassigned"
+// while pointing at a run on the project it had just been taken off, and
+// Unassign is the only remedy the auto-assign gate promises.
+//
+// So the key carries the project. On a project the message has been read on
+// before, assigning it again RE-LINKS that run and reads nothing; on any other
+// it is a new run, a new copy of the `.eml` under that project, and a new
+// charged read, which the inbox says before the click. A key written before
+// this change has no project in it; it still belongs to the project its run
+// is on, so it is read as that project's key there and nowhere else.
 // ============================================================================
 import { randomUUID } from "node:crypto";
 import { copy } from "@vercel/blob";
@@ -67,6 +85,7 @@ import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
 import { takeReadSlot, deferRead } from "@/lib/extraction-slots";
 import {
   assertMailboxScopedPathname,
+  assertProjectScopedPathname,
   blobPathname,
   projectUploadPrefix,
   UntrustedBlobError,
@@ -80,8 +99,29 @@ export type AssignResult = {
   read: boolean;
 };
 
-/** `email:<uuid>` — one run per message, forever, whatever retries happen. */
-export function emailRegistrationKey(messageId: string): string {
+/**
+ * `email:<message>:<project>` — one run per message PER PROJECT, whatever
+ * retries happen. A message moved to another project is a new read there.
+ */
+export function emailRegistrationKey(messageId: string, projectId: string): string {
+  return `email:${messageId}:${projectId}`;
+}
+
+/**
+ * The key as it was written before A1: the message alone. Read, never written,
+ * and only ever matched together with the run's own `project_id`, because such
+ * a run is correctly linked to the project it was made on and to no other.
+ */
+export function legacyEmailRegistrationKey(messageId: string): string {
+  return `email:${messageId}`;
+}
+
+/**
+ * Every key this message has ever been registered under starts with this.
+ * For a `like` over `registration_request_id`: the projects it has been read
+ * on, which is what the inbox needs to say whether an assignment is charged.
+ */
+export function emailRegistrationKeyPrefix(messageId: string): string {
   return `email:${messageId}`;
 }
 
@@ -119,17 +159,26 @@ export function planMimeLocation(
   storedPath: string | null | undefined,
   projectId: string,
   messageId: string,
+  options: {
+    /**
+     * For a message a person UPLOADED: the project registration scope-checked
+     * the upload against (`readTrustedBlob` in `/api/imports`). Its file sits
+     * under that project's prefix, not the mailbox's, and moving the message
+     * to another project has to copy it from there. Nothing else may be a
+     * source outside the mailbox: a stored path under some other project is
+     * still refused, whatever wrote it.
+     */
+    uploadedTo?: string | null;
+  } = {},
 ): MimeLocation {
   if (!storedPath) return { kind: "none" };
   const from = blobPathname(String(storedPath));
   // An uploaded .eml is already under the project the person chose, because
   // the browser could only have put it there. Nothing to copy.
   if (from.startsWith(projectUploadPrefix(projectId))) return { kind: "already", pathname: from };
-  return {
-    kind: "copy",
-    from: assertMailboxScopedPathname(from),
-    to: `${projectUploadPrefix(projectId)}emails/${messageId}.eml`,
-  };
+  const to = `${projectUploadPrefix(projectId)}emails/${messageId}.eml`;
+  if (options.uploadedTo) return { kind: "copy", from: assertProjectScopedPathname(from, options.uploadedTo), to };
+  return { kind: "copy", from: assertMailboxScopedPathname(from), to };
 }
 
 type AssignInput = {
@@ -179,8 +228,12 @@ async function assignInTransaction(
     throw new DomainConflictError("project_archived", "That project is archived.", { status: 400 });
   }
 
-  // A replay: the run exists, its read was dispatched the first time round.
-  if (message.intake_run_id) {
+  // A replay: the message is on this project (the guard above refused any
+  // other) and its run exists; the read was dispatched the first time round.
+  // Only an ASSIGNED message is a replay. A row unassigned before A1 kept the
+  // old project's run in `intake_run_id`, and treating that as a replay is the
+  // defect itself.
+  if (message.routing_status === "assigned" && message.intake_run_id) {
     return {
       messageId: input.messageId,
       projectId: input.projectId,
@@ -190,18 +243,52 @@ async function assignInTransaction(
     };
   }
 
+  // A project this message has been read on before: put it back on the run it
+  // already has. Nothing is read and nothing is copied (`copyMimeUnderProject`
+  // asks the same question), and the message takes that run's `.eml` as its
+  // own again, because the confirm attaches `mime_attachment_id` as evidence.
   const existing = await txn`
-    select id from intake_runs where registration_request_id = ${emailRegistrationKey(input.messageId)}
+    select id, attachment_id, status, parsed is null as unread,
+           (select count(*)::int from jsonb_array_elements(coalesce(parsed -> 'lines', '[]'::jsonb)) line
+             where line ->> 'reviewStatus' = 'pending') as pending
+    from intake_runs
+    where project_id = ${input.projectId}
+      and registration_request_id in (
+        ${emailRegistrationKey(input.messageId, input.projectId)},
+        ${legacyEmailRegistrationKey(input.messageId)}
+      )
+    for update
   `;
-  if (existing[0]) {
+  const previous = existing[0];
+  if (previous) {
+    // `unassignMessage` settled the run as `confirmed` so nothing went on
+    // offering it for review. Back on its project that is no longer true, and
+    // `confirmed` means "no pending proposals remain": a run with pending
+    // lines is `parsed` again, and one that was never read is `failed` with
+    // the reason, so the review screen offers a person the (charged) read
+    // rather than calling an unread email reviewed.
+    if (String(previous.status) === "confirmed" && Number(previous.pending) > 0) {
+      await txn`update intake_runs set status = 'parsed', updated_by = ${input.actor} where id = ${previous.id}`;
+    } else if (String(previous.status) === "confirmed" && previous.unread) {
+      await txn`
+        update intake_runs
+        set status = 'failed', updated_by = ${input.actor},
+            error = 'This email was taken off the project before it was read. Reading it is one charged model call.'
+        where id = ${previous.id}
+      `;
+    }
     await txn`
-      update email_messages set intake_run_id = ${existing[0].id}, updated_by = ${input.actor}
+      update email_messages
+      set project_id = ${input.projectId}, routing_status = 'assigned',
+          assigned_by = ${input.actor}, assigned_at = now(), assignment_kind = ${input.kind},
+          mime_attachment_id = ${previous.attachment_id ?? null}, intake_run_id = ${previous.id},
+          updated_by = ${input.actor}
       where id = ${input.messageId}
     `;
     return {
       messageId: input.messageId,
       projectId: input.projectId,
-      runId: String(existing[0].id),
+      runId: String(previous.id),
       read: false,
       attemptId: null,
     };
@@ -209,8 +296,18 @@ async function assignInTransaction(
 
   // The message, under the project's own prefix, as the thing the confirm will
   // attach to its change set. `attachments` is polymorphic, so `entity_type`
-  // names this table rather than carrying a foreign key.
-  let attachmentId = message.mime_attachment_id ? String(message.mime_attachment_id) : null;
+  // names this table rather than carrying a foreign key. An attachment the row
+  // still names is reused only where it is under THIS project's prefix: a row
+  // unassigned before A1 kept the old project's copy, which this project's
+  // read is refused.
+  let attachmentId: string | null = null;
+  if (message.mime_attachment_id) {
+    const held = await txn`select storage_path from attachments where id = ${message.mime_attachment_id}`;
+    const path = held[0]?.storage_path ? String(held[0].storage_path) : "";
+    if (path && blobPathname(path).startsWith(projectUploadPrefix(input.projectId))) {
+      attachmentId = String(message.mime_attachment_id);
+    }
+  }
   if (!attachmentId && message.mailbox_storage_path) {
     const attachment = await txn`
       insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
@@ -228,7 +325,7 @@ async function assignInTransaction(
       (project_id, attachment_id, batch_id, source_kind, document_kind, status,
        registration_request_id, created_by, updated_by)
     values (${input.projectId}, ${attachmentId}, null, 'spec_document', 'email', 'pending',
-            ${emailRegistrationKey(input.messageId)}, ${input.actor}, ${input.actor})
+            ${emailRegistrationKey(input.messageId, input.projectId)}, ${input.actor}, ${input.actor})
     returning id
   `;
   if (!run[0]) throw new Error("the email import was not recorded");
@@ -273,11 +370,26 @@ async function assignInTransaction(
  */
 async function copyMimeUnderProject(input: AssignInput): Promise<string | null> {
   const rows = await sql`
-    select mailbox_storage_path, mime_attachment_id from email_messages where id = ${input.messageId}
+    select em.mailbox_storage_path, em.origin, em.routing_status,
+           exists (
+             select 1 from intake_runs r
+             where r.project_id = ${input.projectId}
+               and r.registration_request_id in (
+                 ${emailRegistrationKey(input.messageId, input.projectId)},
+                 ${legacyEmailRegistrationKey(input.messageId)}
+               )
+           ) as read_here,
+           (select r.project_id from intake_runs r join attachments a on a.id = r.attachment_id
+             where r.registration_request_id like ${`${emailRegistrationKeyPrefix(input.messageId)}%`}
+               and a.storage_path = em.mailbox_storage_path
+             order by r.created_at limit 1) as uploaded_to
+    from email_messages em where em.id = ${input.messageId}
   `;
   const row = rows[0];
-  // A replay: the attachment exists, so its path is already whatever it is.
-  if (!row || row.mime_attachment_id) return null;
+  // On a project already (a replay, or a refusal the transaction words), or
+  // going back to a project it has a run on (a re-link, which reads the copy
+  // that run already has): nothing to copy.
+  if (!row || row.routing_status === "assigned" || row.read_here) return null;
 
   let plan;
   try {
@@ -287,6 +399,11 @@ async function copyMimeUnderProject(input: AssignInput): Promise<string | null> 
         : String(row.mailbox_storage_path),
       input.projectId,
       input.messageId,
+      {
+        // An upload's file is under the project it was uploaded to, which its
+        // first run records. A Graph arrival is under the mailbox and has none.
+        uploadedTo: String(row.origin) === "upload" && row.uploaded_to ? String(row.uploaded_to) : null,
+      },
     );
   } catch (cause) {
     if (cause instanceof UntrustedBlobError) {
@@ -402,6 +519,10 @@ export async function unassignMessage(
       update email_messages
       set project_id = null, routing_status = 'unassigned', assigned_by = null, assigned_at = null,
           assignment_kind = null, intake_run_id = null,
+          -- The copy under the old project stays (it is that run's evidence),
+          -- and so does the arrival copy; the MESSAGE stops naming the old
+          -- one, or the next project's read is handed a path it is refused.
+          mime_attachment_id = null,
           routing_reason = 'Taken off its project by a person.', updated_by = ${actor}
       where id = ${messageId}
     `;

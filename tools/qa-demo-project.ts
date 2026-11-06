@@ -85,6 +85,7 @@ import { confirmPreambleNotes } from "@/lib/confirm-preamble";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
 import { resolveProposals, PROPOSAL_SCHEMA_VERSION } from "@/lib/spec-document";
 import { recordMessage } from "@/lib/email-ingest";
+import { emailRegistrationKey } from "@/lib/email-registration";
 import { autoAssignDecision, describeAutoAssignment, ROUTER_ACTOR } from "@/lib/email-routing";
 import { createFinish } from "@/lib/finish-edit";
 import { openChangeSet } from "@/lib/change-sets";
@@ -1129,7 +1130,7 @@ say("inbox", `${INBOX.length} messages, all held`);
        registration_request_id, created_by, updated_by)
     values (${projectId}, ${attachment[0]?.id}, 'spec_document', 'email', 'parsed',
             ${JSON.stringify(staged)}::jsonb, ${"demo (no model call)"},
-            ${`email:${recorded.id}`}, ${ACTOR}, ${ACTOR})
+            ${emailRegistrationKey(recorded.id, projectId)}, ${ACTOR}, ${ACTOR})
     returning id
   `;
   // ASSIGNED AUTOMATICALLY, BECAUSE THAT IS WHAT WOULD HAVE HAPPENED. This

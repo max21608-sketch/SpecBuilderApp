@@ -45,6 +45,25 @@ describe("planMimeLocation", () => {
     );
   });
 
+  // audit A1: a message moved between projects. An UPLOADED message's file is
+  // under the project it was uploaded to, and registration scope-checked it
+  // there; that project, and only that project, may be the source.
+  it("copies an uploaded message from the project it was uploaded to, when it moves", () => {
+    const uploaded = `projects/${OTHER}/uploads/reply.eml`;
+    expect(planMimeLocation(uploaded, PROJECT, MESSAGE, { uploadedTo: OTHER })).toEqual({
+      kind: "copy",
+      from: uploaded,
+      to: `projects/${PROJECT}/emails/${MESSAGE}.eml`,
+    });
+  });
+
+  it("refuses an upload source under any project but the one it was uploaded to", () => {
+    const THIRD = "12121212-3434-5656-7878-909090909090";
+    expect(() =>
+      planMimeLocation(`projects/${THIRD}/uploads/theirs.eml`, PROJECT, MESSAGE, { uploadedTo: OTHER }),
+    ).toThrow(UntrustedBlobError);
+  });
+
   it("refuses a path outside both prefixes", () => {
     expect(() => planMimeLocation("secrets/keys.txt", PROJECT, MESSAGE)).toThrow(UntrustedBlobError);
   });

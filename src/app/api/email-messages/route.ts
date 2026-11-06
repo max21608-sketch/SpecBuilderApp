@@ -109,7 +109,15 @@ export async function GET(request: Request): Promise<Response> {
            -- 200 staged documents is a payload nobody asked for. Withheld for a
            -- run still queued or failed, so "not read yet" and "read, and it
            -- said nothing" stay different answers.
-           case when r.status in ('parsed', 'confirmed') then r.parsed else null end as staged
+           case when r.status in ('parsed', 'confirmed') then r.parsed else null end as staged,
+           -- EVERY PROJECT THIS MESSAGE HAS A RUN ON (audit A1). Assigning it
+           -- back to one of them re-links that run and reads nothing; any other
+           -- project is a new charged read, and the inbox says which before the
+           -- click. Every key starts with the message id: the old form is the
+           -- message alone, the new one adds the project.
+           (select coalesce(array_agg(distinct x.project_id::text), '{}')
+              from intake_runs x
+             where x.registration_request_id like ('email:' || em.id::text || '%')) as read_on
     from email_messages em
     left join projects p on p.id = em.project_id
     left join intake_runs r on r.id = em.intake_run_id
