@@ -31,6 +31,7 @@ import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { changeSetForEdit, openChangeSet, type UploadedEvidence } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { recomposeAnswers } from "@/lib/attribute-retire";
+import { lockRecordOfAttribute } from "@/lib/record-lock";
 import {
   normaliseFinishCode,
   isFinishKind,
@@ -330,6 +331,10 @@ export async function setAttributeFinish(
     actor,
   }: { attributeId: string; finishId: string | null; expectedVersion: number; reason: string; actor: string },
 ): Promise<{ recordId: string; changeSetId: string }> {
+  // The record first, then the attribute (`record-lock.ts`): this recomposes
+  // and versions the record, and taking the attribute first deadlocked
+  // against any confirm that locks records and then writes attributes.
+  await lockRecordOfAttribute(txn, attributeId);
   const rows = await txn`
     select a.id, a.record_id, a.version, a.status, a.finish_id, r.project_id
     from record_attributes a

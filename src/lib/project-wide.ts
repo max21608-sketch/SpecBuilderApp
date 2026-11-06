@@ -47,6 +47,7 @@ import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { changeSetForEdit, findOpenChangeSet } from "@/lib/change-sets";
 import { editAnswer } from "@/lib/answer-edit";
 import { snapshotRecords } from "@/lib/record-snapshot";
+import { lockRecords } from "@/lib/record-lock";
 import { DIMENSIONS_JSON_ID } from "@/lib/promote-answers";
 
 type Exec = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Row[]>;
@@ -349,6 +350,15 @@ export async function applyProjectWide(
     // would detach this from the meeting it happened in.
     reason: open ? null : reason?.trim() ? `${reason.trim()} — ${sentence}` : sentence,
   });
+
+  // EVERY RECORD THIS WRITES, locked in id order before the first answer
+  // (`record-lock.ts`). `editAnswer` takes its record's lock itself, but one
+  // at a time in the plan's order, which is not id order; a confirm holding
+  // two of these records in id order could then deadlock with this loop.
+  await lockRecords(
+    txn,
+    targets.map((row) => row.recordId),
+  );
 
   for (const row of targets) {
     let answerId = row.answerId;

@@ -28,6 +28,7 @@
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { changeSetForEdit, type UploadedEvidence } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
+import { lockRecordOfAnswer } from "@/lib/record-lock";
 import type { AnswerState } from "@/lib/spec-vocab";
 
 export type EditAnswerResult = {
@@ -94,6 +95,11 @@ export async function editAnswer(
     snapshot?: boolean;
   },
 ): Promise<EditAnswerResult> {
+  // THE RECORD FIRST, then the answer (audit B6). This used to lock the answer
+  // and reach the record only inside `snapshotRecords`, the reverse of every
+  // confirm, so an edit on the checklist and a drawings confirm on the same
+  // item could deadlock. `record-lock.ts` carries the contract.
+  await lockRecordOfAnswer(txn, answerId);
   const rows = await txn`
     select a.id, a.record_id, a.value, a.qualifier, a.state, a.version, r.project_id, q.prompt
     from spec_answers a

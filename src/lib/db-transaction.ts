@@ -145,6 +145,9 @@ function taggedSql(client: pg.Client): TxnSql {
  * where project-wide serialization is actually needed), then the owning draft
  * or intake row, then records, then requirements, then answers, each by id.
  * Reversing it between two call sites is how a deadlock gets introduced.
+ * A single-row edit (an answer, an attribute, a disagreement) takes its
+ * RECORD first through `src/lib/record-lock.ts`, never the row and then the
+ * record; tests/db/lock-order.test.ts holds every one of them to it.
  */
 export async function withTransaction<T>(fn: (sql: TxnSql) => Promise<T>): Promise<T> {
   // Same guard the HTTP client applies: refuse to open a connection at all if

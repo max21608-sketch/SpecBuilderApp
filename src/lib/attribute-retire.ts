@@ -33,6 +33,7 @@ import { isFinishCodeOrigin, isFinishKind } from "@/lib/finishes";
 import { finishStandardFromRow, standardFromRow } from "@/lib/bw-standard";
 import { changeSetForEdit, type UploadedEvidence } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
+import { lockRecordOfAttribute } from "@/lib/record-lock";
 import {
   applyAnswerFills,
   applyAnswerRetractions,
@@ -149,6 +150,11 @@ export async function restoreAttribute(
     actor,
   }: { attributeId: string; expectedVersion: number; reason: string; actor: string },
 ): Promise<RetireAttributeResult> {
+  // THE RECORD FIRST (audit E8): the "what is in the way" check below is a
+  // promise about the slot, and only the record lock keeps it true until the
+  // update. Without it two restores into one slot both found it empty and the
+  // second met the partial unique index as a 500.
+  await lockRecordOfAttribute(txn, attributeId);
   const rows = await txn`
     select a.id, a.record_id, a.version, a.status, a.label, a.spec_field_id, a.dimension_slot,
            a.superseded_by_id, r.project_id
@@ -269,6 +275,10 @@ export async function retireAttribute(
     snapshot?: boolean;
   },
 ): Promise<RetireAttributeResult> {
+  // The record first, then the attribute: `record-lock.ts`. `editCommonSpec`
+  // retires a common row on every configuration with their records already
+  // locked, and the attribute-first order deadlocked against it.
+  await lockRecordOfAttribute(txn, attributeId);
   const rows = await txn`
     select a.id, a.record_id, a.version, a.status, a.label, r.project_id, r.status as record_status
     from record_attributes a

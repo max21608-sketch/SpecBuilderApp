@@ -55,6 +55,7 @@ import { resolveFinishCode } from "@/lib/finishes";
 import { loadFinishLibrary } from "@/lib/bill-fabric-load";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { recomposeAnswers } from "@/lib/attribute-retire";
+import { lockRecordOfDisagreement } from "@/lib/record-lock";
 import type { DisagreementDecision } from "@/lib/disagreements";
 
 export type ResolveDisagreementInput = {
@@ -105,6 +106,12 @@ export async function resolveDisagreement(
     );
   }
 
+  // THE RECORD FIRST, then the disagreement and the held row (audit E8,
+  // `record-lock.ts`). "Use this instead" checks the slot it lands in and then
+  // writes it; with the record unlocked a second writer could fill that slot
+  // in between and the insert met the slot index as a 500. Taking the held
+  // attribute first also deadlocked against any records-first confirm.
+  await lockRecordOfDisagreement(txn, disagreementId);
   const rows = await txn`
     select d.id, d.project_id, d.record_id, d.held_attribute_id, d.status, d.version,
            d.attr_group, d.label, d.value, d.unit, d.dimension_slot, d.spec_field_id,

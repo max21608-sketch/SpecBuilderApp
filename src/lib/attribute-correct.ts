@@ -50,6 +50,7 @@ import { changeSetForEdit, type UploadedEvidence } from "@/lib/change-sets";
 import { isFinishCodeOrigin, isFinishKind, resolveFinishCode, type Finish } from "@/lib/finishes";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { recomposeAnswers } from "@/lib/attribute-retire";
+import { lockRecordOfAttribute } from "@/lib/record-lock";
 import type { AttributeState, AttributeUnit, DimensionSlot } from "@/lib/spec-vocab";
 
 export type CorrectAttributeResult = {
@@ -121,6 +122,14 @@ export async function correctAttribute(
     snapshot = true,
   }: CorrectAttributeInput,
 ): Promise<CorrectAttributeResult> {
+  // THE RECORD FIRST, then the attribute (audit E8, B6). Two things depend on
+  // it. The occupancy check below is only true while nothing else can write
+  // to this record: unlocked, two corrections moving two values into SH both
+  // found it free and the second died on the slot index as a 500. And
+  // `editCommonSpec` locks the configurations' records and then calls this
+  // for each attribute, so taking the attribute first here deadlocked against
+  // a correction made on the configuration's own screen.
+  await lockRecordOfAttribute(txn, attributeId);
   const rows = await txn`
     select a.id, a.record_id, a.version, a.status, a.label, a.value, a.attr_group,
            a.dimension_slot, a.spec_field_id, a.material_code, a.qualifier,

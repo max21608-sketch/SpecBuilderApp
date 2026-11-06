@@ -60,6 +60,7 @@ import { changeSetForEdit, findOpenChangeSet } from "@/lib/change-sets";
 import { editAnswer } from "@/lib/answer-edit";
 import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { snapshotRecords } from "@/lib/record-snapshot";
+import { lockRecordsOfAnswers } from "@/lib/record-lock";
 import { DIMENSIONS_JSON_ID } from "@/lib/promote-answers";
 import { isAnswerState, type AnswerState } from "@/lib/spec-vocab";
 
@@ -135,6 +136,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   try {
     const result = await withTransaction(async (txn) => {
+      // THE RECORDS FIRST, in id order, then the answers (audit B6). This
+      // locked the answers and reached the records only in the version pass
+      // at the end — the reverse of every confirm, which locks records and
+      // then writes answers — so a press here and a drawings confirm on one
+      // of these items could deadlock. `record-lock.ts` carries the contract.
+      await lockRecordsOfAnswers(
+        txn,
+        asked.map((row) => row.answerId),
+      );
       // ONE read, locked in a deterministic order so two people pressing this
       // at once cannot interleave into a deadlock. The join is what makes the
       // row's PROJECT, its question and its BWS field the server's own reading
