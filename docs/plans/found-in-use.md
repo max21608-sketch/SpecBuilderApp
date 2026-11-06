@@ -33,6 +33,49 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-11-06: read in the source, during the whole-codebase audit
+
+`docs/plans/audit-2026-11-06.md` §2 holds every entry with its file and line.
+Read in code at `2cb4630`; **none reproduced on a screen.** The ones a person
+would hit first, each OPEN:
+
+### A retired bill fabric still ships, and a bill-sourced answer never follows a change — OPEN
+
+`promote-answers.ts:330-355` and `:446-479` admit only an answer a
+shop-drawings run wrote; the bill confirm recomposes with the bill run as
+source. From then on no correction, finish edit, BW standard or retire reaches
+the answer, and the export falls through to it. Audit E1.
+
+### A revised bill retires every configuration on the phase — OPEN
+
+`confirm-boq.ts:699-712` with the loader at `imports/[id]/route.ts:1064`. A
+configuration has no bill code, so nothing pairs with it. Audit C1.
+
+### `TBC` in a quantity cell is 0, and `1.5` fails the whole confirm — OPEN
+
+`boq-import.ts:661-665`. `Number("")` is 0; `spec_records.qty` is integer.
+Audit C3.
+
+### `W1,200` composes `W1mm` — OPEN
+
+`dimensions.ts:257` reads a comma as a decimal point, in every reader. Audit C4.
+
+### Confirm within a second of typing reads "edited in another tab" — OPEN
+
+The three review components send the version from the click's render, not
+the one the awaited save produced. Audit G1.
+
+### Typing in a second checklist question is lost when the first saves — OPEN
+
+`RecordChecklist.tsx:796` keys every input on `reloadKey`. Audit G2.
+
+### An email taken off the wrong project cannot be put on the right one — OPEN
+
+`email-registration.ts:182-207`, `:364-410`. The replay key is the message
+alone. Audit A1.
+
+---
+
 ## 2026-10-23: read in the source, during the spec-change audit
 
 From `docs/plans/spec-change-audit-2026-10-23.md` §3. Read in code at

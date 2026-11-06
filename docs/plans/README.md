@@ -21,6 +21,33 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-11-06 — The whole-codebase audit, and the plan it leaves
+
+`docs/plans/audit-2026-11-06.md`. Max asked for every area read, meticulously,
+and a plan to green-light. Eight read-only auditors, one per area; every
+consequential finding re-read in the source before it went into the short
+list. Nothing was run and nothing is fixed.
+
+- **Twelve things in the short version**, led by: the checklist freezes
+  against the bill (`applyAnswerFills`/`applyAnswerRetractions` recognise only
+  a shop-drawings run, so a retired bill fabric still ships); a revised bill
+  retires every configuration on the phase; the quantity reader turns `TBC`
+  into 0 and sends `1.5` to an integer column; a comma is always a decimal
+  point; a timed-out read is billed up to four times; an unassigned email
+  cannot be re-assigned; a stale replace tick retires a value into a note; a
+  second edit inside an open change takes no version; confirm sends the
+  version from before the save it awaited; `db:backfill-answers` would
+  corrupt answers if run; CI proves none of the database tier.
+- **Clean, and said so:** no path makes the BWS export partial; one dimension
+  composer; every client fetch through `apiFetch`; every CHECK re-listing a
+  true union; no import cycle; `next` past the 2025 middleware advisory.
+- **The plan is five stages** (the file, what a person hits, before Graph, the
+  boundary and the trail, shape) with the decisions each needs named per
+  person. §4 places the open items of the 12 Oct, 23 Oct and 15 Oct plans, the
+  phase-control design and the tracker plan against the findings.
+- **Waits on Max:** which stage first, seven questions in §6, and the green
+  light.
+
 ## 2026-10-18 — Promoted to pilot: the Ronnie Scott's follow-ups, at `261d730` (v1.13)
 
 - **What went:**
