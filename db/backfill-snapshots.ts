@@ -27,7 +27,7 @@
 // record is NOW — which is true, and which is the only thing anybody can
 // check.
 //
-// NOT A MIGRATION, for the reason db/backfill-answers.ts gives: composing the
+// NOT A MIGRATION, for the reason db/README.md gives (One-off backfills): composing the
 // version means running composeRowCells, and rebuilding that in SQL is the
 // second composer the export design exists to prevent.
 //

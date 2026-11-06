@@ -90,31 +90,38 @@ manual edits to the same records.
 ## One-off maintenance passes
 
 ```bash
-npm run db:backfill-answers                          # dry run
-npm run db:backfill-answers -- --apply
-npm run db:backfill-answers -- --project=<uuid>
+npm run db:backfill-answer-provenance                # dry run
+npm run db:backfill-answer-provenance -- --apply
+npm run db:backfill-answer-provenance -- --project=<uuid>
+npm run db:backfill-answer-provenance:local          # the local stack
 ```
 
-Fills checklist answers from `record_attributes` that were confirmed before
-`confirm-drawings` started carrying them through. Ran on sandbox 2026-09-15:
-11 answers across five records.
+Run once after `0050`. Marks every checklist answer that is the record's
+specs composed (`spec_answers.source_kind = 'attribute'`), and recomposes the
+ones that had stopped following them: before 0050 an answer a bill, a
+schedule, the tracker or an email filled could never be updated again, and a
+retired bill fabric's answer went on shipping in the BWS file (audit E1).
+The dry run prints, per project, how many answers were confirmed over no spec
+before the pass, every answer whose value changes, and every one it cannot
+decide, which it leaves for a person. The decision table is in
+`src/lib/answer-provenance-backfill.ts`.
 
 Three things about it are deliberate:
 
-- **Dry run is the default.** It writes to real spec records in bulk, and the
-  useful thing to see first is which ones and what to. The dry run counts with
-  the SAME predicate the writer uses, so it cannot promise more than `--apply`
-  delivers.
-- **It is safe to re-run.** It calls the same `planAnswerFills` /
-  `applyAnswerFills` the confirm route calls, which only touch an answer still
-  `missing` or one a shop-drawings run wrote. A person's answer is never in
-  scope, so a second pass cannot lose work.
+- **Dry run is the default**, and it prints what `--apply` writes: both read
+  the same plan, built with the same `planAnswerFills` the confirm calls.
+- **It is safe to re-run.** Only an answer still `document` is relabelled,
+  so a second pass finds nothing and opens no change set.
 - **It is not a numbered migration.** The composition is
-  `composeDimensionCell`, and rebuilding that in SQL — slot order, a diameter
-  replacing width and depth, the millimetre conversion, the verbatim fallback
-  for a figure it could not derive — is the second composer the dimension
-  design exists to prevent. This is also why `tsx` is a devDependency: a
-  maintenance script has to be able to call the app's own TypeScript.
+  `composeDimensionCell` and `composeAttributeStatement`, and rebuilding them
+  in SQL is the second composer the dimension design exists to prevent. This
+  is also why `tsx` is a devDependency: a maintenance script has to be able to
+  call the app's own TypeScript.
+
+It replaces `db:backfill-answers` (retired 2026-11-06, audit B2), which
+predated qualifiers, the finishes library and BW standards and wrote outside
+any change set: a re-run would have overwritten the library's words with a
+drawing's, dropped qualifiers, and confirmed an answer over a TBC finish.
 
 ## Backups
 
@@ -172,14 +179,14 @@ down so nobody mistakes this section for a safety net.
 
 Each is dry-run by default, prints the resolved host before acting, refuses
 production without `--yes-production`, and is safe to re-run. None is a
-numbered migration, for the reason `db/backfill-answers.ts` gives at length:
+numbered migration, for the reason `db/backfill-answer-provenance.ts` gives:
 what they compute is `composeRowCells` and `composeDimensionCell`, and
 rebuilding those in SQL is the second composer the export design exists to
 prevent.
 
 | Script | What it does |
 |---|---|
-| `npm run db:backfill-answers` | Fills checklist answers from attributes confirmed before promotion existed |
+| `npm run db:backfill-answer-provenance` | After `0050`: marks the answers composed from a record's specs as `attribute`, recomposes the ones that had stopped following them, and leaves a reviewer's own answer off a schedule alone. Prints what it cannot decide |
 | `npm run db:backfill-snapshots` | Gives every record that predates `0012` a version 1, under a `history_begins` change. It does NOT reconstruct the past from `audit_log` — see decision 58 |
 | `npm run db:backfill-finishes` | Builds each project's finishes library from the codes its drawings carry, links every attribute, and takes a version of each record it changed. A code whose items disagree is left blank and NAMED, never guessed |
 
