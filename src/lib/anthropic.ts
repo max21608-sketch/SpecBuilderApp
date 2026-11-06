@@ -890,7 +890,7 @@ class StreamFailure {
 // When MODEL_DEADLINE_MS or the run's abort fires, the SDK rejects with an
 // APIUserAbortError: no `.status`, no streamed error type. It used to fall
 // through every branch of `classifyTransportFailure` to the last one, which
-// is RETRYABLE `transport` — so the worker released the claim and the queue
+// is RETRYABLE `transport`, so the worker released the claim and the queue
 // read the whole document again, up to four times, each billed for what it
 // streamed before the abort, and the row finally said "The model could not be
 // reached", which sends a person to look at the network.
