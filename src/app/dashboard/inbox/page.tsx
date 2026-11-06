@@ -43,6 +43,7 @@ import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { useUrlTab } from "@/lib/use-url-tab";
 import { WAITING_FOR_SLOT_LABEL } from "@/lib/intake-status";
 import { inboxBuckets, outcome } from "@/lib/inbox-outcome";
+import { assignCost } from "@/lib/email-assign-cost";
 
 /** What a read turned up. Computed in the route by `describeChange`, per 0021. */
 type Found = {
@@ -86,6 +87,8 @@ type Message = {
   triage: string;
   parse_error: string | null;
   version: number;
+  /** Every project a run for this message exists on: putting it back there reads nothing. */
+  read_on?: string[] | null;
 };
 
 type Project = { id: string; bws_project_number: string; name: string };
@@ -257,7 +260,7 @@ function InboxView() {
         // visible, which is the 2026-09-15 precedent: asking per message was
         // ceremony rather than consent, and the decision belongs where a
         // morning's post can be seen at once.
-        subtitle="Mail addressed to a project's inbox, or forwarded from it, is assigned and read automatically the moment it arrives — one charged model call each. Anything placed by a subject reference or a known sender waits below for you to confirm."
+        subtitle="Mail addressed to a project's inbox, or forwarded from it, is assigned and read automatically the moment it arrives — one charged model call each. Anything placed by a subject reference, a known sender or a header any sender could have written, or past a project's daily cap of automatic reads, waits below for you to confirm."
         actions={
           // AN .eml IS UPLOADED ON THE PROJECT IT BELONGS TO, through the pack
           // upload, because a spec document arrives as part of a delivery and
@@ -513,6 +516,10 @@ function InboxView() {
                     // two projects matching equally well is a decision, and a
                     // pre-selected picker would make agreeing with it silent.
                     const offer = message.routing_status === "ambiguous" && candidates.length > 0 ? candidates : data.projects;
+                    const cost = assignCost(
+                      message.read_on,
+                      data.projects.find((project) => project.id === assignTo[message.id]) ?? null,
+                    );
                     return (
                       <Tr key={message.id}>
                         <Td>
@@ -549,11 +556,16 @@ function InboxView() {
                               asked to choose cannot see which project routing
                               meant. Named, and never PRESELECTED: the picker
                               still offers every project and chooses none, for
-                              the reason the ambiguous one does. */}
+                              the reason the ambiguous one does. WHY it was
+                              held is the reason above, which since audit A5 and
+                              A8 is one of three: a weak signal, an inbox named
+                              by a line any sender can write, or the project's
+                              daily cap on automatic reads. A fixed sentence
+                              here would contradict two of them. */}
                           {message.routing_status !== "ambiguous" && candidates.length > 0 && (
                             <span className="mt-1 block">
-                              Routing read it as {candidates.map((project) => project.bws_project_number).join(", ")} —
-                              held because that signal is not strong enough to spend a charged read on its own.
+                              Routing read it as {candidates.map((project) => project.bws_project_number).join(", ")}.
+                              Nothing has been read yet.
                             </span>
                           )}
                         </Td>
@@ -583,7 +595,7 @@ function InboxView() {
                                 void act(message, { action: "assign", projectId: assignTo[message.id] })
                               }
                             >
-                              Assign &amp; read
+                              {cost.label}
                             </Button>
                             <Button
                               variant="quiet"
@@ -594,8 +606,9 @@ function InboxView() {
                               Not a spec
                             </Button>
                           </div>
-                          {/* THE SPEND POINT, said before the click. */}
-                          <span className="mt-1 block text-[11px] text-neutral-500">One charged model call.</span>
+                          {/* THE SPEND POINT, said before the click, and since A1
+                              it depends on the project chosen. */}
+                          <span className="mt-1 block text-[11px] text-neutral-500">{cost.sentence}</span>
                         </Td>
                       </Tr>
                     );

@@ -5,6 +5,7 @@ import {
   AUTO_ASSIGN_SIGNALS,
   autoAssignDecision,
   describeAutoAssignment,
+  describeHeld,
   routeMessage,
   type RoutingOutcome,
   type RoutingRegisters,
@@ -227,12 +228,26 @@ describe("routeMessage — precedence and ambiguity", () => {
 // a bill and a staged run on the wrong client's project.
 // ============================================================================
 describe("autoAssignDecision", () => {
-  const assigned = (signal: RoutingSignal): RoutingOutcome => ({
+  const assigned = (signal: RoutingSignal, stamped = true): RoutingOutcome => ({
     status: "assigned",
     projectId: panther.id,
     signal,
     evidence: "__qa evidence",
     candidates: [],
+    stamped,
+  });
+
+  // audit A8: a strong SIGNAL read off a line the sender wrote is not enough.
+  it("holds a strong signal that nothing Exchange or Graph stamped vouches for", () => {
+    expect(autoAssignDecision(assigned("forwarded_from_inbox", false))).toEqual({
+      assign: false,
+      reason: "unstamped_evidence",
+    });
+    expect(autoAssignDecision(assigned("recipient_is_inbox", false))).toEqual({
+      assign: false,
+      reason: "unstamped_evidence",
+    });
+    expect(describeHeld({ assign: false, reason: "unstamped_evidence" })).toContain("any sender can write");
   });
 
   it("assigns a message addressed to a project inbox", () => {
@@ -300,9 +315,12 @@ describe("autoAssignDecision", () => {
 // A whole-path assertion rather than a unit one: these two are what the
 // ingestion path actually composes, so the pair is worth one test each way.
 describe("routeMessage into autoAssignDecision", () => {
-  it("reads a message to the project inbox as one to assign", () => {
+  it("reads a message Graph reports as sent to the project inbox as one to assign", () => {
     const outcome = routeMessage(
-      envelope({ to: [{ name: null, address: "p17726@benwhistler.test" }] }),
+      envelope({
+        to: [{ name: null, address: "p17726@benwhistler.test" }],
+        reportedRecipients: ["p17726@benwhistler.test"],
+      }),
       registers,
     );
     expect(autoAssignDecision(outcome)).toEqual({
@@ -310,6 +328,86 @@ describe("routeMessage into autoAssignDecision", () => {
       projectId: panther.id,
       signal: "recipient_is_inbox",
     });
+  });
+
+  // ---- audit A8: the strong signals, spoofed ------------------------------
+  //
+  // Each of these used to be assigned and read with nobody watching, on the
+  // strength of a line any outside sender can write.
+
+  it("HOLDS a forged X-Forwarded-To naming a project inbox, and still names the project", () => {
+    const outcome = routeMessage(
+      envelope({ headers: [{ name: "X-Forwarded-To", value: "p17726@benwhistler.test" }] }),
+      registers,
+    );
+    expect(outcome.status).toBe("assigned");
+    if (outcome.status !== "assigned") return;
+    // Routing still says WHICH project, so the held row can name it.
+    expect(outcome.projectId).toBe(panther.id);
+    expect(outcome.signal).toBe("forwarded_from_inbox");
+    expect(autoAssignDecision(outcome)).toEqual({ assign: false, reason: "unstamped_evidence" });
+  });
+
+  it("HOLDS a forged inbox-rules-loop header without Exchange's auto-forwarded stamp", () => {
+    const outcome = routeMessage(
+      envelope({ headers: [{ name: "X-MS-Exchange-Inbox-Rules-Loop", value: "p17726@benwhistler.test" }] }),
+      registers,
+    );
+    expect(autoAssignDecision(outcome)).toEqual({ assign: false, reason: "unstamped_evidence" });
+  });
+
+  it("assigns a forward that Exchange stamped auto-forwarded", () => {
+    const outcome = routeMessage(
+      envelope({
+        headers: [
+          { name: "X-Forwarded-To", value: "p17726@benwhistler.test" },
+          { name: "X-MS-Exchange-Organization-AutoForwarded", value: "true" },
+        ],
+      }),
+      registers,
+    );
+    expect(autoAssignDecision(outcome)).toEqual({
+      assign: true,
+      projectId: panther.id,
+      signal: "forwarded_from_inbox",
+    });
+  });
+
+  it("HOLDS a To line naming the project inbox that Graph did not report", () => {
+    // An uploaded .eml, or bytes routed without Graph: the To line is the
+    // sender's words and nothing else.
+    const outcome = routeMessage(
+      envelope({ to: [{ name: null, address: "p17726@benwhistler.test" }] }),
+      registers,
+    );
+    expect(autoAssignDecision(outcome)).toEqual({ assign: false, reason: "unstamped_evidence" });
+  });
+
+  it("HOLDS a blind copy whose To line names the project inbox", () => {
+    // Exchange stamps the P2 type on the delivery; a sender cannot write or
+    // remove an X-MS-Exchange-Organization header.
+    const outcome = routeMessage(
+      envelope({
+        to: [{ name: null, address: "p17726@benwhistler.test" }],
+        reportedRecipients: ["p17726@benwhistler.test"],
+        headers: [{ name: "X-MS-Exchange-Organization-Recipient-P2-Type", value: "Bcc" }],
+      }),
+      registers,
+    );
+    expect(autoAssignDecision(outcome)).toEqual({ assign: false, reason: "unstamped_evidence" });
+  });
+
+  it("lets stamped evidence for the same project outweigh an unstamped header beside it", () => {
+    const outcome = routeMessage(
+      envelope({
+        headers: [{ name: "X-Original-To", value: "p17726@benwhistler.test" }],
+        to: [{ name: null, address: "p17726@benwhistler.test" }],
+        reportedRecipients: ["p17726@benwhistler.test"],
+      }),
+      registers,
+    );
+    // And it says what actually vouched for it, not the header beside it.
+    expect(autoAssignDecision(outcome)).toEqual({ assign: true, projectId: panther.id, signal: "recipient_is_inbox" });
   });
 
   it("reads a message from a known contact as one to hold", () => {

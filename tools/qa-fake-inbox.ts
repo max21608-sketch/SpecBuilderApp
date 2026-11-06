@@ -59,7 +59,7 @@
 import pg from "pg";
 import { del, put } from "@vercel/blob";
 import { recordMessage } from "@/lib/email-ingest";
-import { autoAssignDecision, describeAutoAssignment } from "@/lib/email-routing";
+import { autoAssignDecision, describeAutoAssignment, describeHeld } from "@/lib/email-routing";
 
 // The two fields nothing renders, carrying the cleanup marker.
 const QA_MAILBOX = "__qa_inbox";
@@ -572,6 +572,9 @@ try {
       storagePath,
       mimeSize: bytes.byteLength,
       actor: "qa-seed",
+      // Standing in for Graph, so the recipients Graph would REPORT go with
+      // it: routing trusts only those to place a message by itself (audit A8).
+      reportedRecipients: [...message.to, ...(message.cc ?? [])],
     });
 
     // What routing ACTUALLY decided, which is the only reason the expectation
@@ -587,7 +590,7 @@ try {
     const outcome = decision.assign
       ? `${describeAutoAssignment(decision.signal)} (arriving; this script assigns nothing)`
       : recorded.routing.status === "assigned"
-        ? `held — ${recorded.routing.evidence}; that signal is not strong enough to spend a charged read`
+        ? `held — ${recorded.routing.evidence}. ${describeHeld(decision) ?? ""}`
         : recorded.routing.status;
     console.log(`  recorded "${message.subject || "(no subject)"}" — ${outcome}`);
   }

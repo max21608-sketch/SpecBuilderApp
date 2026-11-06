@@ -85,7 +85,7 @@ import { DOCUMENT_KINDS, type DocumentKind } from "@/lib/spec-vocab";
 import { headTrustedBlob, readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/extraction-slots";
 import { dispatchRegisteredRead, insertSpecDocumentRun } from "@/lib/spec-registration";
-import { recordMessage } from "@/lib/email-ingest";
+import { describeDuplicate, recordMessageUnlessKnown } from "@/lib/email-ingest";
 import { assignMessage } from "@/lib/email-registration";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { MAX_MODEL_PDF_BYTES } from "@/lib/upload-limits";
@@ -229,7 +229,11 @@ async function registerEmail(input: Registered, actor: string): Promise<Response
   }
 
   try {
-    const recorded = await recordMessage({
+    // THE SAME EMAIL TWICE IS ONE MESSAGE (audit B8). Uploaded again, or
+    // already arrived through the mailbox, it is OFFERED rather than recorded
+    // and read a second time. 200, not 201: nothing was created, and the
+    // sentence says where the one that exists is.
+    const known = await recordMessageUnlessKnown({
       mailbox: "upload",
       origin: "upload",
       bytes: blob.bytes,
@@ -238,6 +242,13 @@ async function registerEmail(input: Registered, actor: string): Promise<Response
       actor,
       intendedProjectId: input.projectId,
     });
+    if (known.duplicateOf) {
+      return json(
+        { ok: true, duplicateOf: known.duplicateOf, note: describeDuplicate(known.duplicateOf) },
+        200,
+      );
+    }
+    const recorded = known.recorded;
 
     // Assigning is what starts the read and spends the money, and the upload
     // screen has already said so.

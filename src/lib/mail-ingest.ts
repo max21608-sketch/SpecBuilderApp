@@ -23,6 +23,7 @@
 // ============================================================================
 import { put } from "@vercel/blob";
 import { sql } from "@/lib/db";
+import { DomainConflictError, withTransaction } from "@/lib/db-transaction";
 import { MAILBOX_PREFIX } from "@/lib/blob-source";
 import {
   GraphError,
@@ -32,8 +33,14 @@ import {
   mailIngestionEnabled,
   mailboxPath,
 } from "@/lib/graph-client";
-import { autoAssignDecision, describeRouting, routeMessage, ROUTER_ACTOR } from "@/lib/email-routing";
-import { loadRoutingRegisters, loadSentDrafts } from "@/lib/email-ingest";
+import { autoAssignDecision, describeHeld, describeRouting, routeMessage, ROUTER_ACTOR } from "@/lib/email-routing";
+import {
+  findDuplicateMessage,
+  loadRoutingRegisters,
+  loadSentDrafts,
+  lockMessageIdentity,
+  mimeSha256,
+} from "@/lib/email-ingest";
 import { parseEnvelope, type EmailEnvelope } from "@/lib/email-envelope";
 import { matchReplyToChase } from "@/lib/chase-reply";
 import { assignMessage } from "@/lib/email-registration";
@@ -47,6 +54,7 @@ type MailIngestMessage = Extract<ExtractionQueueMessage, { kind: "mail-ingest" }
 
 export type IngestOutcome =
   | { outcome: "stored"; messageId: string; assigned: boolean }
+  /** `messageId` is the row that already holds this email, where there is one. */
   | { outcome: "duplicate"; messageId: string | null }
   | { outcome: "gone"; messageId: string }
   | { outcome: "skipped"; reason: string };
@@ -184,6 +192,19 @@ export async function ingestGraphMessage(job: MailIngestMessage): Promise<Ingest
     throw cause;
   }
 
+  // 2b. THE SAME EMAIL BY ANOTHER ROUTE (audit B8). A redirect and a cc, or a
+  //     person who uploaded it before it arrived here, put the same message
+  //     in the app mailbox twice under two Graph ids, and the stub key cannot
+  //     see that. Asked first by Message-ID, before a byte is fetched; asked
+  //     again by Message-ID AND the bytes when the stub is filled, under the
+  //     identity locks, which is the answer that counts.
+  const known = await findDuplicateMessage(
+    sql,
+    { internetMessageId: message.internetMessageId ?? null, sha256: null },
+    messageId,
+  );
+  if (known) return await dropDuplicateStub(messageId, known.messageId);
+
   // 3. The message itself, kept whole. A parsed body is a reading of the email;
   //    the .eml is the email.
   const received = message.receivedDateTime ? new Date(message.receivedDateTime) : new Date();
@@ -193,6 +214,7 @@ export async function ingestGraphMessage(job: MailIngestMessage): Promise<Ingest
   let mimeError: string | null = null;
   let envelope: EmailEnvelope | null = null;
   let parseError: string | null = null;
+  let sha256: string | null = null;
 
   const mime = await graphBytes(mailboxPath(`/messages/${encodeURIComponent(graphMessageId)}/$value`), MAX_MIME_BYTES);
   if ("tooLarge" in mime) {
@@ -209,6 +231,7 @@ export async function ingestGraphMessage(job: MailIngestMessage): Promise<Ingest
     });
     mimeStored = true;
     mimeSize = mime.bytes.byteLength;
+    sha256 = mimeSha256(mime.bytes);
     try {
       envelope = await parseEnvelope(mime.bytes);
     } catch (cause) {
@@ -216,6 +239,16 @@ export async function ingestGraphMessage(job: MailIngestMessage): Promise<Ingest
     }
   }
   if (!envelope) envelope = envelopeFromGraph(message);
+  // WHO GRAPH SAYS IT WAS SENT TO, beside who the bytes say (audit A8). The
+  // MIME keeps its own To and Cc, exactly as sent; this is the mailbox's own
+  // server's account of the delivered item, and routing reads only this as
+  // vouching for a project inbox.
+  envelope = {
+    ...envelope,
+    reportedRecipients: [...people(message.toRecipients), ...people(message.ccRecipients)].map(
+      (person) => person.address,
+    ),
+  };
 
   // 4. Attachment metadata only. Bytes are never fetched: a file's kind is
   //    declared by a person and reading one costs money.
@@ -247,33 +280,49 @@ export async function ingestGraphMessage(job: MailIngestMessage): Promise<Ingest
     ? matchReplyToChase(envelope, await loadSentDrafts(chaseProjectId))
     : null;
 
-  // 6. Fill the stub, fenced on it still being ours.
-  const filled = await sql`
-    update email_messages
-    set fetch_status = 'fetched', fetch_error = null,
-        internet_message_id = ${envelope.messageId}, conversation_id = ${message.conversationId ?? null},
-        in_reply_to = ${envelope.inReplyTo},
-        references_raw = ${envelope.references.length ? envelope.references.join(" ") : null},
-        from_addr = ${envelope.from?.address ?? null}, from_name = ${envelope.from?.name ?? null},
-        to_addrs = ${JSON.stringify(envelope.to)}::jsonb,
-        cc_addrs = ${JSON.stringify(envelope.cc)}::jsonb,
-        reply_to_addrs = ${JSON.stringify(envelope.replyTo)}::jsonb,
-        subject = ${envelope.subject}, received_at = ${received.toISOString()},
-        has_attachments = ${attachments.length > 0},
-        attachments_meta = ${JSON.stringify(attachments)}::jsonb,
-        headers_raw = ${JSON.stringify(envelope.headers)}::jsonb,
-        body_text = ${envelope.textBody}, parse_error = ${parseError},
-        mailbox_storage_path = ${mimeStored ? storagePath : null},
-        mime_size = ${mimeSize}, mime_stored = ${mimeStored}, mime_error = ${mimeError},
-        routing_status = ${routing.status === "assigned" ? "unassigned" : routing.status},
-        routing_reason = ${describeRouting(routing)},
-        routing_candidates = ${JSON.stringify(routing.candidates)}::jsonb,
-        chase_draft_id = ${chase?.draft.id ?? null}, chase_match = ${chase?.kind ?? null},
-        updated_by = ${actor}
-    where id = ${messageId} and fetch_status = 'pending'
-    returning id
-  `;
-  if (!filled[0]) {
+  // What the router will decide, so a held row says WHY in the same write.
+  const decision = autoAssignDecision(routing);
+  const held = describeHeld(decision);
+  const routingReason = held ? `${describeRouting(routing)}. ${held}` : describeRouting(routing);
+
+  // 6. Fill the stub, fenced on it still being ours, unless the inbox already
+  //    holds this email: the look and the fill are one transaction under the
+  //    identity locks, so two routes delivering it at once record it once.
+  const identity = { internetMessageId: envelope.messageId, sha256 };
+  const filledEnvelope = envelope;
+  const fill = await withTransaction(async (txn) => {
+    await lockMessageIdentity(txn, identity);
+    const duplicate = await findDuplicateMessage(txn, identity, messageId);
+    if (duplicate) return { duplicateOf: duplicate.messageId, filled: false };
+    const rows = await txn`
+      update email_messages
+      set fetch_status = 'fetched', fetch_error = null,
+          internet_message_id = ${filledEnvelope.messageId}, conversation_id = ${message.conversationId ?? null},
+          in_reply_to = ${filledEnvelope.inReplyTo},
+          references_raw = ${filledEnvelope.references.length ? filledEnvelope.references.join(" ") : null},
+          from_addr = ${filledEnvelope.from?.address ?? null}, from_name = ${filledEnvelope.from?.name ?? null},
+          to_addrs = ${JSON.stringify(filledEnvelope.to)}::jsonb,
+          cc_addrs = ${JSON.stringify(filledEnvelope.cc)}::jsonb,
+          reply_to_addrs = ${JSON.stringify(filledEnvelope.replyTo)}::jsonb,
+          subject = ${filledEnvelope.subject}, received_at = ${received.toISOString()},
+          has_attachments = ${attachments.length > 0},
+          attachments_meta = ${JSON.stringify(attachments)}::jsonb,
+          headers_raw = ${JSON.stringify(filledEnvelope.headers)}::jsonb,
+          body_text = ${filledEnvelope.textBody}, parse_error = ${parseError},
+          mailbox_storage_path = ${mimeStored ? storagePath : null},
+          mime_size = ${mimeSize}, mime_sha256 = ${sha256}, mime_stored = ${mimeStored}, mime_error = ${mimeError},
+          routing_status = ${routing.status === "assigned" ? "unassigned" : routing.status},
+          routing_reason = ${routingReason},
+          routing_candidates = ${JSON.stringify(routing.candidates)}::jsonb,
+          chase_draft_id = ${chase?.draft.id ?? null}, chase_match = ${chase?.kind ?? null},
+          updated_by = ${actor}
+      where id = ${messageId} and fetch_status = 'pending'
+      returning id
+    `;
+    return { duplicateOf: null, filled: Boolean(rows[0]) };
+  });
+  if (fill.duplicateOf) return await dropDuplicateStub(messageId, fill.duplicateOf);
+  if (!fill.filled) {
     // Somebody else filled it while we were fetching. Not an error: their row
     // says the same things.
     return { outcome: "duplicate", messageId };
@@ -287,7 +336,8 @@ export async function ingestGraphMessage(job: MailIngestMessage): Promise<Ingest
   //    outcome all wait on the Inbox screen with routing's own sentence. The
   //    decision lives beside the signals it reads rather than here, so the one
   //    other thing that will ever act on it cannot come to a different answer.
-  const decision = autoAssignDecision(routing);
+  //    Since A8 "strongest" also means VOUCHED FOR: a forwarding header or a
+  //    To line with nothing Exchange or Graph stamped behind it is held.
   if (decision.assign) {
     try {
       await assignMessage({
@@ -311,7 +361,12 @@ export async function ingestGraphMessage(job: MailIngestMessage): Promise<Ingest
       const why = cause instanceof Error ? cause.message : String(cause);
       // Composed OUTSIDE the query: a backtick inside a tagged sql template
       // closes it, and esbuild then reports the syntax error thirty lines away.
-      const reason = describeRouting(routing) + ". It could not be placed automatically: " + why;
+      // The DAILY CAP (audit A5) is not a failure, and its sentence already
+      // says what happens next, so it stands on its own after routing's.
+      const reason =
+        cause instanceof DomainConflictError && cause.code === "auto_read_cap"
+          ? describeRouting(routing) + ". " + why
+          : describeRouting(routing) + ". It could not be placed automatically: " + why;
       await sql`
         update email_messages
         set routing_reason = ${reason}, updated_by = ${actor}
@@ -322,6 +377,18 @@ export async function ingestGraphMessage(job: MailIngestMessage): Promise<Ingest
   }
 
   return { outcome: "stored", messageId, assigned: false };
+}
+
+/**
+ * This delivery is an email the inbox already holds: remove the stub this
+ * delivery claimed, and ack. Fenced on the stub still being ours and still
+ * unfilled, so nothing anybody has seen is ever removed. Removing it rather
+ * than keeping a second row is the point (audit B8): a kept row is a second
+ * message on the held list and a second Assign button for the same read.
+ */
+async function dropDuplicateStub(stubId: string, existingId: string): Promise<IngestOutcome> {
+  await sql`delete from email_messages where id = ${stubId} and fetch_status = 'pending'`;
+  return { outcome: "duplicate", messageId: existingId };
 }
 
 /** Deliveries exhausted. The inbox screen renders this with a Retry. */

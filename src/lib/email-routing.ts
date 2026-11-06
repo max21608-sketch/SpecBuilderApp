@@ -60,10 +60,29 @@ export const ROUTING_SIGNAL_LABELS: Record<RoutingSignal, string> = {
   sender_is_contact: "the sender is a contact on one project",
 };
 
-export type RoutingCandidate = { projectId: string; signal: RoutingSignal; evidence: string };
+export type RoutingCandidate = {
+  projectId: string;
+  signal: RoutingSignal;
+  evidence: string;
+  /**
+   * True when the evidence is something the sender could not have written:
+   * a header Exchange stamps inside the organisation, or a recipient Graph
+   * reported. Only the two strong signals ever carry it. See "WHICH EVIDENCE
+   * MAY SPEND MONEY" below.
+   */
+  stamped?: boolean;
+};
 
 export type RoutingOutcome =
-  | { status: "assigned"; projectId: string; signal: RoutingSignal; evidence: string; candidates: RoutingCandidate[] }
+  | {
+      status: "assigned";
+      projectId: string;
+      signal: RoutingSignal;
+      evidence: string;
+      candidates: RoutingCandidate[];
+      /** Some stamped evidence names this project. What an automatic read requires. */
+      stamped: boolean;
+    }
   | { status: "ambiguous"; candidates: RoutingCandidate[] }
   | { status: "unassigned"; candidates: RoutingCandidate[] };
 
@@ -89,6 +108,18 @@ function autoForwarded(envelope: EmailEnvelope): boolean {
   );
 }
 
+/**
+ * Exchange says this mailbox received the message as a BLIND copy, so the To
+ * and Cc lines are the sender's words about somebody else and say nothing
+ * about how it reached us. An `X-MS-Exchange-Organization-*` header, so the
+ * sender cannot write it and cannot remove it.
+ */
+function deliveredAsBcc(envelope: EmailEnvelope): boolean {
+  return headerValues(envelope, "x-ms-exchange-organization-recipient-p2-type").some(
+    (value) => fold(value) === "bcc",
+  );
+}
+
 /** Every address that appears anywhere in a value, lowercased. */
 function addressesIn(value: string): string[] {
   return (value.match(/[^\s<>,;"]+@[^\s<>,;"]+/g) ?? []).map((a) => a.toLowerCase().replace(/[.,;]+$/, ""));
@@ -105,18 +136,35 @@ export function routeMessage(envelope: EmailEnvelope, registers: RoutingRegister
   }
 
   const candidates: RoutingCandidate[] = [];
-  const push = (projectId: string, signal: RoutingSignal, evidence: string) => {
-    if (candidates.some((c) => c.projectId === projectId && c.signal === signal)) return;
-    candidates.push({ projectId, signal, evidence });
+  const push = (candidate: RoutingCandidate) => {
+    const same = candidates.find((c) => c.projectId === candidate.projectId && c.signal === candidate.signal);
+    if (same) {
+      // One stamped piece of evidence is enough; a second, unstamped header
+      // naming the same inbox must not take that back.
+      if (candidate.stamped) same.stamped = true;
+      return;
+    }
+    candidates.push({ ...candidate });
   };
 
   // ---- 1. forwarded from a project inbox ----------------------------------
+  // Every forwarding header still NAMES the project, so a held row can say
+  // which one it pointed at. Only Exchange's own stamp VOUCHES for any of
+  // them (audit A8): without it the header is a line the sender typed.
+  const stampedForward = autoForwarded(envelope);
   const forwardMatches: RoutingCandidate[] = [];
   for (const name of FORWARD_HEADERS) {
     for (const value of headerValues(envelope, name)) {
       for (const address of addressesIn(value)) {
         const project = byInbox.get(address);
-        if (project) forwardMatches.push({ projectId: project.id, signal: "forwarded_from_inbox", evidence: `${name}: ${address}` });
+        if (project) {
+          forwardMatches.push({
+            projectId: project.id,
+            signal: "forwarded_from_inbox",
+            evidence: `${name}: ${address}`,
+            stamped: stampedForward,
+          });
+        }
       }
     }
   }
@@ -130,11 +178,16 @@ export function routeMessage(envelope: EmailEnvelope, registers: RoutingRegister
         projectId: project.id,
         signal: "forwarded_from_inbox",
         evidence: `auto-forwarded from ${envelope.from.address}`,
+        stamped: true,
       });
     }
   }
 
   // ---- 2. addressed to a project inbox ------------------------------------
+  // Vouched for only where Graph REPORTED the recipient and Exchange did not
+  // stamp this delivery as a blind copy (audit A8).
+  const reported = new Set((envelope.reportedRecipients ?? []).map(fold));
+  const blind = deliveredAsBcc(envelope);
   const recipientMatches: RoutingCandidate[] = [];
   for (const person of [...envelope.to, ...envelope.cc]) {
     const project = byInbox.get(person.address);
@@ -143,6 +196,7 @@ export function routeMessage(envelope: EmailEnvelope, registers: RoutingRegister
         projectId: project.id,
         signal: "recipient_is_inbox",
         evidence: `addressed to ${person.address}`,
+        stamped: !blind && reported.has(fold(person.address)),
       });
     }
   }
@@ -194,15 +248,28 @@ export function routeMessage(envelope: EmailEnvelope, registers: RoutingRegister
 
   const tiers = [forwardMatches, recipientMatches, numberMatches, codeMatches, contactMatches];
   for (const tier of tiers) {
-    for (const candidate of tier) push(candidate.projectId, candidate.signal, candidate.evidence);
+    for (const candidate of tier) push(candidate);
   }
 
   for (const tier of tiers) {
     if (tier.length === 0) continue;
     const projectIds = [...new Set(tier.map((c) => c.projectId))];
     if (projectIds.length === 1) {
-      const chosen = tier[0]!;
-      return { status: "assigned", projectId: chosen.projectId, signal: chosen.signal, evidence: chosen.evidence, candidates };
+      // The deciding tier names the project. The evidence REPORTED is the
+      // most trustworthy that names it, from this tier or the other strong
+      // one, so a row placed on a Graph-reported recipient never says it was
+      // placed on a forwarding header anybody could have typed.
+      const projectId = projectIds[0]!;
+      const vouched =
+        tier.find((c) => c.stamped) ?? candidates.find((c) => c.projectId === projectId && c.stamped) ?? tier[0]!;
+      return {
+        status: "assigned",
+        projectId,
+        signal: vouched.signal,
+        evidence: vouched.evidence,
+        candidates,
+        stamped: vouched.stamped === true,
+      };
     }
     // Two projects at the same strength. A weaker signal must not arbitrate:
     // the reviewer sees both and picks.
@@ -250,6 +317,37 @@ export function describeRouting(outcome: RoutingOutcome): string {
 // exactly the behaviour they have today — HELD, with routing's own sentence and
 // the offer to place it — which costs a click and never costs the wrong
 // project.
+//
+// ---- WHICH EVIDENCE MAY SPEND MONEY (audit A8, 2026-11-06) ----------------
+//
+// The two strongest SIGNALS were read off ordinary headers, and any sender can
+// write an ordinary header. `Resent-To`, `X-Original-To`, `Delivered-To`,
+// `X-Forwarded-To` and `X-MS-Exchange-Inbox-Rules-Loop` are lines in the
+// message: Exchange's header firewall strips only the
+// `X-MS-Exchange-Organization-*` family from mail entering the organisation.
+// And a blind copy to the app mailbox carries whatever To and Cc the sender
+// chose to write. Either way, one outside sender who knew a project inbox's
+// address could start a charged read on that project with nobody watching.
+//
+// So a strong signal assigns only on evidence the sender cannot have written:
+//
+//   forwarded   the message carries `X-MS-Exchange-Organization-AutoForwarded:
+//               true`. The rule-forward shape has always been trusted only
+//               alongside it; it is now the rule for EVERY forwarding header.
+//   addressed   the inbox is among the recipients GRAPH reported for the
+//               delivered item, and Exchange did not stamp the delivery
+//               `X-MS-Exchange-Organization-Recipient-P2-Type: Bcc`. An
+//               uploaded `.eml` has no reported recipients, which is right:
+//               an upload is a person's assignment anyway.
+//
+// Everything else that names a project inbox still NAMES it (the held row
+// says which project, like a subject reference) and is held for a person.
+// WHAT THIS DOES NOT PROVE, and the activation checklist in
+// `docs/integration.md` measures on the first real messages: that Exchange
+// stamps those two headers on the shapes this organisation's rules produce.
+// If it does not, the failure is in the safe direction (the mail is held and
+// costs a click), and the per-project daily cap on automatic reads
+// (`auto-read-cap.ts`) bounds the other direction.
 // ============================================================================
 
 /** The signals strong enough to start a charged read with nobody watching. */
@@ -257,8 +355,8 @@ export const AUTO_ASSIGN_SIGNALS: readonly RoutingSignal[] = ["forwarded_from_in
 
 export type AutoAssignDecision =
   | { assign: true; projectId: string; signal: RoutingSignal }
-  /** Held, and which of the three reasons — a screen says a different sentence for each. */
-  | { assign: false; reason: "signal_too_weak" | "ambiguous" | "nothing_named_a_project" };
+  /** Held, and which of the four reasons: a screen says a different sentence for each. */
+  | { assign: false; reason: "signal_too_weak" | "unstamped_evidence" | "ambiguous" | "nothing_named_a_project" };
 
 /** The actor an automatic assignment is recorded under, in the trail and on the row. */
 export const ROUTER_ACTOR = "system:router";
@@ -276,7 +374,23 @@ export function autoAssignDecision(outcome: RoutingOutcome): AutoAssignDecision 
   if (outcome.status === "ambiguous") return { assign: false, reason: "ambiguous" };
   if (outcome.status === "unassigned") return { assign: false, reason: "nothing_named_a_project" };
   if (!AUTO_ASSIGN_SIGNALS.includes(outcome.signal)) return { assign: false, reason: "signal_too_weak" };
+  if (!outcome.stamped) return { assign: false, reason: "unstamped_evidence" };
   return { assign: true, projectId: outcome.projectId, signal: outcome.signal };
+}
+
+/**
+ * The sentence a held row adds to routing's own, for the two reasons routing's
+ * sentence does not already explain. Null where it does.
+ */
+export function describeHeld(decision: AutoAssignDecision): string | null {
+  if (decision.assign) return null;
+  if (decision.reason === "unstamped_evidence") {
+    return "Held: what names the project inbox here is a line any sender can write, and nothing Exchange or Graph stamped confirms it.";
+  }
+  if (decision.reason === "signal_too_weak") {
+    return "Held: that signal is not strong enough to spend a charged read on its own.";
+  }
+  return null;
 }
 
 /** One line for a row the app placed on its own. */

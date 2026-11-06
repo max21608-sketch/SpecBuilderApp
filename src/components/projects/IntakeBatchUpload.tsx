@@ -578,8 +578,11 @@ export default function IntakeBatchUpload({
 
         update(item.key, { status: "registering", failure: null, held: null });
         const res = await apiFetch<{
-          importId: string;
+          importId?: string;
           autoRead?: { dispatched: boolean; error?: string; waiting?: boolean; note?: string };
+          /** An email the inbox already holds (audit B8): nothing was recorded or read. */
+          duplicateOf?: { messageId: string };
+          note?: string;
         }>("/api/imports", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -605,6 +608,12 @@ export default function IntakeBatchUpload({
           } else {
             update(item.key, { status: "failed", error: res.error, errorDetail: null });
           }
+          continue;
+        }
+        // AN EMAIL THE INBOX ALREADY HOLDS. Not a failure and not a new read:
+        // the server's sentence names the message that exists and where.
+        if (res.data.duplicateOf) {
+          update(item.key, { status: "done", progress: 100, error: null, note: res.data.note ?? null });
           continue;
         }
         // Stored and registered, but its read did not reach the queue. NOT a

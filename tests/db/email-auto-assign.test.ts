@@ -17,12 +17,21 @@
 // `disabled` on every deployment, and this suite only asserts what the
 // ingestion function does with a message once it has one.
 //
-// Rows are prefixed `__QA ` under project number `__QA P90211` (2.11's own
-// number, so a suite running beside this one cannot collide on it), and swept
-// FK-safe at both ends.
+// EVERY KEY THIS FILE WRITES IS THIS PROCESS'S OWN (audit H2, 2026-11-06).
+// The project numbers come from `qaNumber()`, and the project inboxes, the
+// contact, the mailbox and every Message-ID carry the same per-process suffix.
+// They used to be literals (`__QA P90211`, one inbox, one mailbox) swept by a
+// `beforeAll`, so two runs at once either died on
+// `projects_bws_project_number_key` or, worse, the second run's sweep deleted
+// the first run's fixtures mid-test. A literal ROUTING key fails more quietly
+// than a literal project number: a crashed run's project still holding the
+// same inbox or the same contact turns the next run's confident outcome into
+// an AMBIGUOUS one, and the assertion that fails reads as a routing defect.
+// Nothing is swept before the run any more; what a crashed run left is
+// `npm run db:qa-clean`'s. Each run sweeps its own rows, FK-safe, at the end.
 // ============================================================================
 import { it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber, QA_RUN_SUFFIX } from "./db-tier";
 import pg from "pg";
 import { MAX_IN_FLIGHT_READS_PER_PACK } from "@/lib/extraction-claim";
 import { ROUTER_ACTOR } from "@/lib/email-routing";
@@ -63,8 +72,17 @@ vi.mock("@vercel/blob", () => ({
 }));
 
 /** One message at a time, handed to the ingestion function as Graph would. */
-const inflight: { bytes: Buffer; receivedDateTime: string; subject: string } = {
+const inflight: {
+  bytes: Buffer;
+  receivedDateTime: string;
+  subject: string;
+  internetMessageId: string;
+  /** Who Graph reports the delivered item was sent to (audit A8). */
+  reportedTo: string[];
+} = {
   bytes: Buffer.alloc(0),
+  internetMessageId: "",
+  reportedTo: [],
   receivedDateTime: new Date().toISOString(),
   subject: "",
 };
@@ -79,10 +97,11 @@ vi.mock("@/lib/graph-client", async (importOriginal) => {
     mailboxPath: (suffix: string) => `/users/__qa-mailbox${suffix}`,
     graphJson: async () => ({
       id: "__qa_graph_id",
-      internetMessageId: "<__qa@example.test>",
+      internetMessageId: inflight.internetMessageId,
       receivedDateTime: inflight.receivedDateTime,
       subject: inflight.subject,
       hasAttachments: false,
+      toRecipients: inflight.reportedTo.map((address) => ({ emailAddress: { address } })),
     }),
     graphBytes: async () => ({ bytes: inflight.bytes, contentType: "message/rfc822" }),
   };
@@ -90,16 +109,32 @@ vi.mock("@/lib/graph-client", async (importOriginal) => {
 
 const databaseUrl = process.env.DATABASE_URL;
 
-const PROJECT_NUMBER = "__QA P90211";
-const INBOX = "__qa-p90211@example.test";
-const CONTACT = "__qa-router-contact@example.test";
-const MAILBOX = "__qa_router_mailbox";
+const PROJECT_NUMBER = qaNumber("P90211");
+const SECOND_NUMBER = qaNumber("P90212");
+const MOVED_TO_NUMBER = qaNumber("P90213");
+const CAPPED_NUMBER = qaNumber("P90214");
+const CAPPED_INBOX = `__qa-p90214-${QA_RUN_SUFFIX}@example.test`;
+const INBOX = `__qa-p90211-${QA_RUN_SUFFIX}@example.test`;
+const SECOND_INBOX = `__qa-p90212-${QA_RUN_SUFFIX}@example.test`;
+const CONTACT = `__qa-router-contact-${QA_RUN_SUFFIX}@example.test`;
+const MAILBOX = `__qa_router_mailbox_${QA_RUN_SUFFIX}`;
+// THE PROJECT CODE IS THIS RUN'S TOO. The subject signal matches a code in the
+// project NAME, so two runs naming their projects alike would each read the
+// other's as a second candidate and hold the message as ambiguous. Two letters
+// and five digits is the shape `routeMessage` reads as a code; the digits come
+// from the suffix.
+const PROJECT_CODE = `QA${String(parseInt(QA_RUN_SUFFIX, 16) % 100000).padStart(5, "0")}`;
+
+/** A Message-ID unique to this run and this delivery. */
+function messageIdFor(tag: string): string {
+  return `<__qa.router.${tag}.${QA_RUN_SUFFIX}@example.test>`;
+}
 
 /** A real RFC 5322 message, so `parseEnvelope` does the reading it always does. */
-function eml({ to, from, subject }: { to: string; from: string; subject: string }): Buffer {
+function eml({ to, from, subject, messageId }: { to: string; from: string; subject: string; messageId: string }): Buffer {
   return Buffer.from(
     [
-      "Message-ID: <__qa.router.1@example.test>",
+      `Message-ID: ${messageId}`,
       "Date: Mon, 21 Sep 2026 09:00:00 +0000",
       `From: ${from}`,
       `To: ${to}`,
@@ -119,9 +154,18 @@ describeIfDb("a confidently routed email assigns itself", () => {
   let projectId = "";
 
   /** Hand one message to the real ingestion function. */
-  async function ingest(graphMessageId: string, message: { to: string; from: string; subject: string }) {
-    inflight.bytes = eml(message);
+  async function ingest(
+    graphMessageId: string,
+    message: { to: string; from: string; subject: string },
+    /** The same Message-ID under two Graph ids is the same mail by two routes. */
+    sameMessageAs?: string,
+  ) {
+    inflight.internetMessageId = messageIdFor(sameMessageAs ?? graphMessageId);
+    inflight.bytes = eml({ ...message, messageId: inflight.internetMessageId });
     inflight.subject = message.subject;
+    // Graph reports what was delivered; here, what the To line says, which is
+    // the honest case. The spoofed cases set their own.
+    inflight.reportedTo = message.to.split(",").map((address) => address.trim());
     const { ingestGraphMessage } = await import("@/lib/mail-ingest");
     return ingestGraphMessage({
       kind: "mail-ingest",
@@ -152,30 +196,41 @@ describeIfDb("a confidently routed email assigns itself", () => {
     return rows.rows[0];
   }
 
+  /**
+   * This run's rows, and only this run's: every message arrived in this run's
+   * mailbox, and every project carries this run's number. The `.eml`
+   * attachments belong to the MESSAGE (`entity_type = 'email_messages'`), so
+   * they are found through it; the old sweep deleted by the project's id and
+   * left every one of them behind.
+   */
   async function sweep() {
-    const stale = await client.query(`select id from projects where bws_project_number = $1`, [PROJECT_NUMBER]);
-    for (const row of stale.rows) {
+    const messages = await client.query(`select id from email_messages where mailbox = $1`, [MAILBOX]);
+    const ids = messages.rows.map((row) => String(row.id));
+    if (ids.length > 0) {
+      await client.query(`delete from email_messages where id = any($1::uuid[])`, [ids]);
+      await client.query(
+        `delete from attachments where entity_type = 'email_messages' and entity_id = any($1::uuid[])`,
+        [ids],
+      );
+    }
+    const projects = await client.query(
+      `select id from projects where bws_project_number = any($1::text[])`,
+      [[PROJECT_NUMBER, SECOND_NUMBER, MOVED_TO_NUMBER, CAPPED_NUMBER]],
+    );
+    for (const row of projects.rows) {
       await client.query(`delete from email_messages where project_id = $1`, [row.id]);
-      await client.query(`delete from attachments where entity_id = $1`, [row.id]);
       await client.query(`delete from intake_runs where project_id = $1`, [row.id]);
       await client.query(`delete from project_contacts where project_id = $1`, [row.id]);
       await client.query(`delete from projects where id = $1`, [row.id]);
-    }
-    // Held messages never acquire a project, so they are swept by mailbox.
-    const held = await client.query(`select id from email_messages where mailbox = $1`, [MAILBOX]);
-    for (const row of held.rows) {
-      await client.query(`delete from attachments where entity_id = $1`, [row.id]);
-      await client.query(`delete from email_messages where id = $1`, [row.id]);
     }
   }
 
   beforeAll(async () => {
     await client.connect();
-    await sweep();
     const project = await client.query(
       `insert into projects (bws_project_number, name, shared_inbox, created_by, updated_by)
-       values ($1, '__QA Router project QA9021', $2, 'qa', 'qa') returning id`,
-      [PROJECT_NUMBER, INBOX],
+       values ($1, $2, $3, 'qa', 'qa') returning id`,
+      [PROJECT_NUMBER, `__QA Router project ${PROJECT_CODE}`, INBOX],
     );
     projectId = project.rows[0].id;
     await client.query(
@@ -256,13 +311,17 @@ describeIfDb("a confidently routed email assigns itself", () => {
   it("assigns a message forwarded from the project inbox", async () => {
     // The redirect shape: the loop header names the project mailbox and the
     // original sender survives.
+    inflight.internetMessageId = messageIdFor("fwd");
     inflight.bytes = Buffer.from(
       [
-        "Message-ID: <__qa.router.fwd@example.test>",
+        `Message-ID: ${inflight.internetMessageId}`,
         "Date: Mon, 21 Sep 2026 09:05:00 +0000",
         "From: someone@elsewhere.test",
         "To: kam@benwhistler.test",
         `X-MS-Exchange-Inbox-Rules-Loop: ${INBOX}`,
+        // Exchange's own stamp, which a sender cannot write (audit A8): the
+        // loop header beside it is an ordinary line anybody can.
+        "X-MS-Exchange-Organization-AutoForwarded: true",
         "Subject: FW: lounge chair",
         "",
         "Body.",
@@ -271,6 +330,7 @@ describeIfDb("a confidently routed email assigns itself", () => {
       "utf8",
     );
     inflight.subject = "FW: lounge chair";
+    inflight.reportedTo = ["kam@benwhistler.test"];
     const { ingestGraphMessage } = await import("@/lib/mail-ingest");
     const outcome = await ingestGraphMessage({
       kind: "mail-ingest",
@@ -286,6 +346,107 @@ describeIfDb("a confidently routed email assigns itself", () => {
     expect(message.assignment_kind).toBe("auto");
     expect(message.routing_reason).toContain("forwarded from the project inbox");
     expect(published).toHaveLength(1);
+  });
+
+  // ---- audit A8: the strong signals, spoofed ------------------------------
+
+  it("HOLDS a forged X-Forwarded-To from an outside address, names the project, and spends nothing", async () => {
+    inflight.internetMessageId = messageIdFor("forged");
+    inflight.bytes = Buffer.from(
+      [
+        `Message-ID: ${inflight.internetMessageId}`,
+        "Date: Mon, 21 Sep 2026 09:06:00 +0000",
+        "From: stranger@elsewhere.test",
+        "To: kam@benwhistler.test",
+        // An ordinary header, which any sender can write.
+        `X-Forwarded-To: ${INBOX}`,
+        "Subject: Looks forwarded",
+        "",
+        "Body.",
+        "",
+      ].join("\r\n"),
+      "utf8",
+    );
+    inflight.subject = "Looks forwarded";
+    inflight.reportedTo = ["kam@benwhistler.test"];
+    const { ingestGraphMessage } = await import("@/lib/mail-ingest");
+    const outcome = await ingestGraphMessage({
+      kind: "mail-ingest",
+      mailbox: MAILBOX,
+      graphMessageId: "__qa_router_forged",
+      source: "notification",
+      requestedBy: "system:microsoft-graph",
+    });
+    expect(outcome.outcome).toBe("stored");
+    if (outcome.outcome !== "stored") return;
+    expect(outcome.assigned).toBe(false);
+    const message = await messageRow(outcome.messageId);
+    expect(message.routing_status).toBe("unassigned");
+    expect(message.project_id).toBeNull();
+    // Routing still names the inbox it read, and says why that was not enough.
+    expect(message.routing_reason).toContain("forwarded from the project inbox");
+    expect(message.routing_reason).toContain("any sender can write");
+    expect(published).toHaveLength(0);
+  });
+
+  it("HOLDS a message whose To line names the inbox when Graph does not report it", async () => {
+    inflight.internetMessageId = messageIdFor("bcc");
+    inflight.bytes = eml({
+      to: INBOX,
+      from: "stranger@elsewhere.test",
+      subject: "Blind copy",
+      messageId: inflight.internetMessageId,
+    });
+    inflight.subject = "Blind copy";
+    // Delivered to the app mailbox as a blind copy: the To line is the
+    // sender's, and Graph reports nobody it can stand behind.
+    inflight.reportedTo = [];
+    const { ingestGraphMessage } = await import("@/lib/mail-ingest");
+    const outcome = await ingestGraphMessage({
+      kind: "mail-ingest",
+      mailbox: MAILBOX,
+      graphMessageId: "__qa_router_bcc",
+      source: "notification",
+      requestedBy: "system:microsoft-graph",
+    });
+    expect(outcome.outcome).toBe("stored");
+    if (outcome.outcome !== "stored") return;
+    expect(outcome.assigned).toBe(false);
+    expect((await messageRow(outcome.messageId)).routing_status).toBe("unassigned");
+    expect(published).toHaveLength(0);
+  });
+
+  // ---- audit B8: the same mail by two routes -------------------------------
+
+  it("records the same email arriving under two Graph ids once", async () => {
+    const first = await ingest("__qa_router_route_a", {
+      to: INBOX,
+      from: "someone@elsewhere.test",
+      subject: "By two routes",
+    });
+    expect(first.outcome).toBe("stored");
+    if (first.outcome !== "stored") return;
+    expect(published).toHaveLength(1);
+
+    published.length = 0;
+    const second = await ingest(
+      "__qa_router_route_b",
+      { to: INBOX, from: "someone@elsewhere.test", subject: "By two routes" },
+      "__qa_router_route_a",
+    );
+    // Acked as a duplicate of the row that exists, and nothing read twice.
+    expect(second).toEqual({ outcome: "duplicate", messageId: first.messageId });
+    expect(published).toHaveLength(0);
+    const rows = await client.query(`select count(*)::int as n from email_messages where internet_message_id = $1`, [
+      messageIdFor("__qa_router_route_a"),
+    ]);
+    expect(rows.rows[0].n).toBe(1);
+    // And the stub the second delivery claimed is gone, not left pending.
+    const stub = await client.query(`select count(*)::int as n from email_messages where mailbox = $1 and graph_message_id = $2`, [
+      MAILBOX,
+      "__qa_router_route_b",
+    ]);
+    expect(stub.rows[0].n).toBe(0);
   });
 
   // ---- the trap this item exists not to fall into -------------------------
@@ -322,7 +483,7 @@ describeIfDb("a confidently routed email assigns itself", () => {
     const outcome = await ingest("__qa_router_subject", {
       to: "kam@benwhistler.test",
       from: "someone@elsewhere.test",
-      subject: "QA9021 lounge chair",
+      subject: `${PROJECT_CODE} lounge chair`,
     });
     expect(outcome.outcome).toBe("stored");
     if (outcome.outcome !== "stored") return;
@@ -336,12 +497,13 @@ describeIfDb("a confidently routed email assigns itself", () => {
   it("HOLDS a message addressed to two project inboxes", async () => {
     const second = await client.query(
       `insert into projects (bws_project_number, name, shared_inbox, created_by, updated_by)
-       values ('__QA P90212', '__QA Router project two', '__qa-p90212@example.test', 'qa', 'qa') returning id`,
+       values ($1, '__QA Router project two', $2, 'qa', 'qa') returning id`,
+      [SECOND_NUMBER, SECOND_INBOX],
     );
     const secondId = String(second.rows[0].id);
     try {
       const outcome = await ingest("__qa_router_ambiguous", {
-        to: `${INBOX}, __qa-p90212@example.test`,
+        to: `${INBOX}, ${SECOND_INBOX}`,
         from: "someone@elsewhere.test",
         subject: "Two projects",
       });
@@ -386,7 +548,7 @@ describeIfDb("a confidently routed email assigns itself", () => {
     const runs = await client.query(
       `select count(*)::int as n from intake_runs
         where project_id = $1 and registration_request_id = $2`,
-      [projectId, `email:${first.messageId}`],
+      [projectId, `email:${first.messageId}:${projectId}`],
     );
     expect(runs.rows[0].n).toBe(1);
   });
@@ -421,6 +583,219 @@ describeIfDb("a confidently routed email assigns itself", () => {
     // The run stays: it is what the model was paid to produce.
     const kept = await runRow(String(before.intake_run_id));
     expect(kept).toBeTruthy();
+  });
+
+  // ---- putting it somewhere else (audit A1) ------------------------------
+  //
+  // Unassign is the only remedy the auto-assign gate promises, and it was a
+  // dead end: the replay key was the message alone, so assigning the message
+  // to the RIGHT project found the wrong project's run, linked it, answered
+  // 200, and never set the project: the message read "unassigned" while
+  // pointing at a run on the project it had just been taken off.
+  it("puts a message taken off one project onto another, as a new read on that project", async () => {
+    const elsewhere = await client.query(
+      `insert into projects (bws_project_number, name, created_by, updated_by)
+       values ($1, '__QA Router project moved to', 'qa', 'qa') returning id`,
+      [MOVED_TO_NUMBER],
+    );
+    const otherId = String(elsewhere.rows[0].id);
+
+    const outcome = await ingest("__qa_router_move", {
+      to: INBOX,
+      from: "someone@elsewhere.test",
+      subject: "Placed on the wrong project",
+    });
+    expect(outcome.outcome).toBe("stored");
+    if (outcome.outcome !== "stored") return;
+    const placed = await messageRow(outcome.messageId);
+    const firstRunId = String(placed.intake_run_id);
+    expect(String(placed.project_id)).toBe(projectId);
+
+    const { assignMessage, unassignMessage } = await import("@/lib/email-registration");
+    await unassignMessage(outcome.messageId, { actor: "__qa@example.test", expectedVersion: Number(placed.version) });
+    const held = await messageRow(outcome.messageId);
+    expect(held.routing_status).toBe("unassigned");
+
+    published.length = 0;
+    copied.length = 0;
+    const moved = await assignMessage({
+      messageId: outcome.messageId,
+      projectId: otherId,
+      kind: "manual",
+      actor: "__qa@example.test",
+      expectedVersion: Number(held.version),
+    });
+    // A NEW READ, and it says so: the other project has never seen this email.
+    expect(moved.read).toBe(true);
+    expect(moved.runId).not.toBe(firstRunId);
+
+    const after = await messageRow(outcome.messageId);
+    expect(String(after.project_id)).toBe(otherId);
+    expect(after.routing_status).toBe("assigned");
+    expect(after.assignment_kind).toBe("manual");
+    expect(String(after.intake_run_id)).toBe(moved.runId);
+
+    const run = await runRow(moved.runId);
+    expect(String(run.project_id)).toBe(otherId);
+    expect(run.registration_request_id).toBe(`email:${outcome.messageId}:${otherId}`);
+    expect(published).toHaveLength(1);
+    expect(published[0]!.extractionId).toBe(moved.runId);
+
+    // The run reads the message from UNDER THE NEW PROJECT. The first copy
+    // sits under the first project, whose prefix this project's read refuses.
+    expect(copied).toHaveLength(1);
+    expect(copied[0]!.to.startsWith(`projects/${otherId}/`)).toBe(true);
+    const attachment = await client.query(
+      `select a.storage_path from intake_runs r join attachments a on a.id = r.attachment_id where r.id = $1`,
+      [moved.runId],
+    );
+    expect(String(attachment.rows[0].storage_path).startsWith(`projects/${otherId}/`)).toBe(true);
+    expect(String(after.mailbox_storage_path).startsWith("mailbox/")).toBe(true);
+
+    // The first project's run is untouched: it is what the model was paid for.
+    const first = await runRow(firstRunId);
+    expect(String(first.project_id)).toBe(projectId);
+    expect(first.registration_request_id).toBe(`email:${outcome.messageId}:${projectId}`);
+
+    // ---- and back again: the run it already has, no second read ----------
+    const { unassignMessage: unassignAgain } = await import("@/lib/email-registration");
+    await unassignAgain(outcome.messageId, { actor: "__qa@example.test", expectedVersion: Number(after.version) });
+    const heldAgain = await messageRow(outcome.messageId);
+    published.length = 0;
+    copied.length = 0;
+    const back = await assignMessage({
+      messageId: outcome.messageId,
+      projectId,
+      kind: "manual",
+      actor: "__qa@example.test",
+      expectedVersion: Number(heldAgain.version),
+    });
+    expect(back.read).toBe(false);
+    expect(back.runId).toBe(firstRunId);
+    expect(published).toHaveLength(0);
+    expect(copied).toHaveLength(0);
+
+    const returned = await messageRow(outcome.messageId);
+    expect(String(returned.project_id)).toBe(projectId);
+    expect(returned.routing_status).toBe("assigned");
+    expect(String(returned.intake_run_id)).toBe(firstRunId);
+    const runs = await client.query(
+      `select count(*)::int as n from intake_runs where registration_request_id like $1`,
+      [`email:${outcome.messageId}%`],
+    );
+    expect(runs.rows[0].n).toBe(2);
+  });
+
+  it("re-links a run stored under the old one-key-per-message form, on its own project only", async () => {
+    // Keys written before A1 are `email:<messageId>`. Such a run is still
+    // correctly linked to the project it was made on, so assigning the message
+    // back there finds it; on any other project it is not this project's run.
+    const outcome = await ingest("__qa_router_legacy", {
+      to: INBOX,
+      from: "someone@elsewhere.test",
+      subject: "Registered before the key changed",
+    });
+    expect(outcome.outcome).toBe("stored");
+    if (outcome.outcome !== "stored") return;
+    const placed = await messageRow(outcome.messageId);
+    const runId = String(placed.intake_run_id);
+    // And it never finished its read: unassign settles such a run as
+    // `confirmed`, which on its project again would call an unread email
+    // reviewed.
+    await client.query(
+      `update intake_runs set registration_request_id = $1, status = 'failed', error = 'qa' where id = $2`,
+      [`email:${outcome.messageId}`, runId],
+    );
+
+    const { assignMessage, unassignMessage } = await import("@/lib/email-registration");
+    await unassignMessage(outcome.messageId, { actor: "__qa@example.test", expectedVersion: Number(placed.version) });
+    const held = await messageRow(outcome.messageId);
+    published.length = 0;
+    const back = await assignMessage({
+      messageId: outcome.messageId,
+      projectId,
+      kind: "manual",
+      actor: "__qa@example.test",
+      expectedVersion: Number(held.version),
+    });
+    expect(back.read).toBe(false);
+    expect(back.runId).toBe(runId);
+    expect(published).toHaveLength(0);
+    const relinked = await runRow(runId);
+    expect(relinked.status).toBe("failed");
+    expect(String(relinked.error)).toContain("taken off the project before it was read");
+  });
+
+  // ---- audit A5: the daily cap on automatic reads ---------------------------
+
+  it("holds the automatic read over the project's daily cap, and a person's read still starts", async () => {
+    const { AUTO_READ_DAILY_CAP_DEFAULT } = await import("@/lib/auto-read-cap");
+    const capped = await client.query(
+      `insert into projects (bws_project_number, name, shared_inbox, created_by, updated_by)
+       values ($1, '__QA Router capped project', $2, 'qa', 'qa') returning id`,
+      [CAPPED_NUMBER, CAPPED_INBOX],
+    );
+    const cappedId = String(capped.rows[0].id);
+
+    // One short of the cap: reads the router started today, all settled so
+    // the in-flight slots (a different limit) are free.
+    for (let n = 0; n < AUTO_READ_DAILY_CAP_DEFAULT - 1; n += 1) {
+      await client.query(
+        `insert into intake_runs (project_id, batch_id, source_kind, document_kind, status, created_by, updated_by)
+         values ($1, null, 'spec_document', 'email', 'confirmed', $2, $2)`,
+        [cappedId, ROUTER_ACTOR],
+      );
+    }
+    // A PERSON'S reads today do not count against it.
+    await client.query(
+      `insert into intake_runs (project_id, batch_id, source_kind, document_kind, status, created_by, updated_by)
+       values ($1, null, 'spec_document', 'email', 'confirmed', 'someone@benwhistler.test', 'qa')`,
+      [cappedId],
+    );
+
+    // The last one the cap allows.
+    const last = await ingest("__qa_router_cap_last", {
+      to: CAPPED_INBOX,
+      from: "someone@elsewhere.test",
+      subject: "The twentieth today",
+    });
+    expect(last.outcome).toBe("stored");
+    if (last.outcome !== "stored") return;
+    expect(last.assigned).toBe(true);
+    expect(published).toHaveLength(1);
+
+    // The one after it: HELD, with the sentence, the project still named.
+    published.length = 0;
+    const over = await ingest("__qa_router_cap_over", {
+      to: CAPPED_INBOX,
+      from: "someone@elsewhere.test",
+      subject: "The twenty-first today",
+    });
+    expect(over.outcome).toBe("stored");
+    if (over.outcome !== "stored") return;
+    expect(over.assigned).toBe(false);
+    const held = await messageRow(over.messageId);
+    expect(held.routing_status).toBe("unassigned");
+    expect(held.intake_run_id).toBeNull();
+    expect(held.routing_reason).toContain("addressed to the project inbox");
+    expect(held.routing_reason).toContain(
+      `The automatic-read cap for this project (${AUTO_READ_DAILY_CAP_DEFAULT} a day) is reached; a person starts this read.`,
+    );
+    expect(published).toHaveLength(0);
+    const runs = await client.query(`select count(*)::int as n from intake_runs where project_id = $1`, [cappedId]);
+    expect(runs.rows[0].n).toBe(AUTO_READ_DAILY_CAP_DEFAULT + 1);
+
+    // A person's click is never capped.
+    const { assignMessage } = await import("@/lib/email-registration");
+    const pressed = await assignMessage({
+      messageId: over.messageId,
+      projectId: cappedId,
+      kind: "manual",
+      actor: "__qa@example.test",
+      expectedVersion: Number(held.version),
+    });
+    expect(pressed.read).toBe(true);
+    expect(published).toEqual([expect.objectContaining({ extractionId: pressed.runId })]);
   });
 
   // ---- the cap ------------------------------------------------------------
