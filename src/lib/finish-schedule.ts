@@ -25,6 +25,7 @@ import {
   foldFinishDescription,
   normaliseFinishCode,
   resolveFinishCode,
+  zonedCodeParts,
   type Finish,
   type FinishKind,
 } from "@/lib/finishes";
@@ -438,6 +439,7 @@ export type ScheduleReviewRow = {
  * the confirm, so the screen and the write cannot disagree.
  */
 export function reviewFinishSchedule(staged: StagedFinishSchedule, library: readonly LibraryFinish[]): ScheduleReviewRow[] {
+  const zoned = scheduleZonesOnBareCodes(staged, library);
   const firstPending = new Map<string, string>();
   return staged.entries.map((entry) => {
     const code = scheduleCode(entry.codeRaw);
@@ -447,13 +449,20 @@ export function reviewFinishSchedule(staged: StagedFinishSchedule, library: read
     if (!code) return { entryId: entry.id, code, composed, verdict: { status: "no_code" }, suggestion };
 
     const codeNorm = normaliseFinishCode(code);
-    const earlier = firstPending.get(codeNorm);
+    const resolution = resolveFinishCode(code, composed.description, zoned);
+
+    // "REPEATED" IS ONE LIBRARY ROW, NOT ONE SPELLING (audit E7). Keyed on the
+    // code as printed, a bare `MTL-01` and its zoned twin `GR-MTL-01` were two
+    // entries that both resolved to the same row: two fills carrying the same
+    // `expectedVersion`, and the second 409'd the whole confirm. A code the
+    // library does not hold is still keyed by its own spelling.
+    const key =
+      resolution.status === "matched" || resolution.status === "conflict" ? `finish:${resolution.finish.id}` : `code:${codeNorm}`;
+    const earlier = firstPending.get(key);
     if (earlier) {
       return { entryId: entry.id, code, composed, verdict: { status: "repeated", code, firstEntryId: earlier }, suggestion };
     }
-    firstPending.set(codeNorm, entry.id);
-
-    const resolution = resolveFinishCode(code, composed.description, [...library]);
+    firstPending.set(key, entry.id);
     let verdict: ScheduleVerdict;
     if (resolution.status === "new") verdict = { status: "new", code, codeNorm };
     else if (resolution.status === "conflict") {
@@ -469,6 +478,39 @@ export function reviewFinishSchedule(staged: StagedFinishSchedule, library: read
       verdict = { status: "no_code" };
     }
     return { entryId: entry.id, code, composed, verdict, suggestion };
+  });
+}
+
+/**
+ * The library as this schedule should be read against it: a bare code also
+ * carries the ZONES the schedule itself prints for it (audit E7).
+ *
+ * `findFinishByCode` folds `GR-MTL-01` onto a bare `MTL-01` only where nothing
+ * says the zones are kept apart. Another zone's twin in the LIBRARY says so,
+ * and so do items already filed as another zone (`zonesOnItems`). A schedule
+ * printing `GR-MTL-01` and `PL-MTL-01` says it too, and nothing read it, so
+ * both folded onto the one bare row and GR's words and PL's words were two
+ * fills of it. The zones the pending entries print are added to the bare
+ * row's own, so neither folds and each is its own finish. A schedule naming
+ * ONE zone still folds onto the bare row, exactly as before.
+ *
+ * Copies, never the caller's rows: the screen and the confirm each call this
+ * over a library they loaded, and must read the same thing.
+ */
+function scheduleZonesOnBareCodes(staged: StagedFinishSchedule, library: readonly LibraryFinish[]): LibraryFinish[] {
+  const zonesByTail = new Map<string, Set<string>>();
+  for (const entry of staged.entries) {
+    if (entry.reviewStatus !== "pending") continue;
+    const parts = zonedCodeParts(scheduleCode(entry.codeRaw));
+    if (!parts) continue;
+    const zones = zonesByTail.get(parts.tail) ?? new Set<string>();
+    zones.add(parts.zone);
+    zonesByTail.set(parts.tail, zones);
+  }
+  return library.map((finish) => {
+    const printed = zonesByTail.get(finish.codeNorm);
+    if (!printed) return finish;
+    return { ...finish, zonesOnItems: [...new Set([...(finish.zonesOnItems ?? []), ...printed])] };
   });
 }
 

@@ -39,12 +39,22 @@ import {
 } from "@/lib/finish-schedule";
 import type { Row } from "@/lib/db";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
+import { loadFinishLibrary } from "@/lib/bill-fabric-load";
 import { documentClosedSentence, reviewedWord } from "@/lib/intake-status";
 
 type AnySql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Row[]>;
 
-/** The project's active library, with what a fill needs to send every field back. */
+/**
+ * The project's active library, with what a fill needs to send every field back.
+ *
+ * ITS ZONES COME FROM THE ONE LOADER (audit E7). This query carried no
+ * `zonesOnItems`, so `findFinishByCode` here could not see that a bare
+ * `MTL-01` already stood for PL items and read a schedule's `GR-MTL-01` onto
+ * it. The zones expression lives in `bill-fabric-load.ts` alone; this reads
+ * the extra columns a fill needs and takes the zones from there by id.
+ */
 export async function loadScheduleLibrary(exec: AnySql, projectId: string): Promise<LibraryFinish[]> {
+  const zones = new Map((await loadFinishLibrary(exec, projectId)).map((finish) => [finish.id, finish.zonesOnItems ?? []]));
   const rows = await exec`
     select f.id, f.code, f.code_norm, f.code_origin, f.kind, f.description, f.supplier_raw, f.reference, f.colour,
            f.notes, f.state, f.version,
@@ -70,6 +80,7 @@ export async function loadScheduleLibrary(exec: AnySql, projectId: string): Prom
     state: row.state === "confirmed" ? "confirmed" : "tbc",
     version: Number(row.version),
     hasSwatch: row.has_swatch === true,
+    zonesOnItems: zones.get(String(row.id)) ?? [],
   }));
 }
 

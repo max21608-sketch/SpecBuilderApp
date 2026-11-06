@@ -17,6 +17,7 @@
 // that moment on.
 import { loadFieldsWithPalettes } from "@/lib/palette-load";
 import { sql } from "@/lib/db";
+import { loadFinishLibrary as loadFinishLibraryWith } from "@/lib/bill-fabric-load";
 import { loadBillHeldIds } from "@/lib/attribute-from-bill";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
 import { itemImageSource } from "@/lib/item-image";
@@ -54,9 +55,7 @@ import {
 import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
 import { billReplacements, type BillReplacement } from "@/lib/bill-over-drawing";
 import {
-  isFinishCodeOrigin,
   isFinishGroup,
-  isFinishKind,
   readUncodedFinish,
   resolveFinishCode,
   type Finish,
@@ -182,32 +181,12 @@ export type FinishFilingView = {
   suggestion: { code: string; codeNorm: string; why: string } | null;
 };
 
-/** The project's finishes library, as the pure resolver wants it. */
+/**
+ * The project's finishes library, as the pure resolver wants it: the one
+ * loader in `bill-fabric-load.ts`, over the HTTP driver.
+ */
 export async function loadFinishLibrary(projectId: string): Promise<Finish[]> {
-  const rows = await sql`
-    select id, code, code_norm, code_origin, kind, description, supplier_raw, reference, colour, state,
-           -- The zones of three-part codes this finish's items carry
-           -- (Finish.zonesOnItems). THE SAME EXPRESSION in bill-fabric-load.ts,
-           -- drawing-resolution.ts and confirm-drawings.ts; change all three.
-           (select coalesce(array_agg(distinct split_part(upper(btrim(a.material_code)), '-', 1)), '{}')
-              from record_attributes a
-             where a.finish_id = project_finishes.id and a.status = 'active'
-               and upper(btrim(a.material_code)) ~ '^[A-Z]{2,4}-[A-Z]{2,4}-[0-9]{1,4}[A-Z]?$') as zones_on_items
-    from project_finishes where project_id = ${projectId} and status = 'active'
-  `;
-  return rows.map((row) => ({
-    id: String(row.id),
-    code: String(row.code),
-    codeNorm: String(row.code_norm),
-    codeOrigin: isFinishCodeOrigin(row.code_origin) ? row.code_origin : "client",
-    kind: isFinishKind(row.kind) ? row.kind : null,
-    description: row.description === null || row.description === undefined ? null : String(row.description),
-    supplierRaw: row.supplier_raw === null || row.supplier_raw === undefined ? null : String(row.supplier_raw),
-    reference: row.reference === null || row.reference === undefined ? null : String(row.reference),
-    colour: row.colour === null || row.colour === undefined ? null : String(row.colour),
-    state: String(row.state) as Finish["state"],
-    zonesOnItems: Array.isArray(row.zones_on_items) ? row.zones_on_items.map(String) : [],
-  }));
+  return loadFinishLibraryWith(sql, projectId);
 }
 
 /**

@@ -12,13 +12,22 @@ import { heldBillFinishKind, type BillFinishKind } from "@/lib/bill-finish-kind"
 
 const text = (value: unknown) => (value === null || value === undefined ? null : String(value));
 
-/** The project's ACTIVE finishes, in the shape `resolveFinishCode` reads. */
+/**
+ * The project's ACTIVE finishes, in the shape `resolveFinishCode` reads.
+ *
+ * THE ONE LIBRARY LOADER (audit E7, 2026-11-06). There were five, three of
+ * them the same query kept in step by a comment ("change all three"), and the
+ * finishes schedule's loader carried no `zonesOnItems` at all, so a schedule
+ * folded `GR-` and `PL-` codes onto one bare row that every other confirm
+ * would have kept apart. `drawing-resolution.ts`, `confirm-drawings.ts` and
+ * `confirm-finish-schedule.ts` now read this; a loader that needs more columns
+ * adds them beside it, keyed by id, and never re-types the zones expression.
+ */
 export async function loadFinishLibrary(exec: SqlLike, projectId: string): Promise<Finish[]> {
   const rows = await exec`
     select id, code, code_norm, code_origin, kind, description, supplier_raw, reference, colour, state,
            -- The zones of three-part codes this finish's items carry
-           -- (Finish.zonesOnItems). THE SAME EXPRESSION in bill-fabric-load.ts,
-           -- drawing-resolution.ts and confirm-drawings.ts; change all three.
+           -- (Finish.zonesOnItems), read by findFinishByCode.
            (select coalesce(array_agg(distinct split_part(upper(btrim(a.material_code)), '-', 1)), '{}')
               from record_attributes a
              where a.finish_id = project_finishes.id and a.status = 'active'

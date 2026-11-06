@@ -287,6 +287,17 @@ export type FinishResolution =
 const TWO_PART_CODE = /^([A-Z]{2,4})-(\d{1,4}[A-Z]?)$/;
 const THREE_PART_CODE = /^([A-Z]{2,4})-([A-Z]{2,4})-(\d{1,4}[A-Z]?)$/;
 
+/**
+ * A three-part code's ZONE and the bare code it would fold onto:
+ * `GR-MTL-01` is `{ zone: "GR", tail: "MTL-01" }`. Null for anything else.
+ * For a caller that has to tell `findFinishByCode` which zones a document
+ * keeps apart, without re-typing the shape.
+ */
+export function zonedCodeParts(code: string | null | undefined): { zone: string; tail: string } | null {
+  const parts = THREE_PART_CODE.exec(normaliseFinishCode(code ?? ""));
+  return parts ? { zone: parts[1]!, tail: `${parts[2]}-${parts[3]}` } : null;
+}
+
 /** A finish the library holds under this code: exactly, or as its one zone twin (with the sentence saying so). */
 export function findFinishByCode(
   code: string | null | undefined,
