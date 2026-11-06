@@ -149,11 +149,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
       // Live rows for everything involved: retained questions to re-check,
       // added ones to snapshot.
-      const live = await loadQuestionsByKey(input.questions, sql);
+      // Scoped to THE DRAFT'S project (audit A3/F11): a question on another
+      // project's record, or one its category no longer asks, comes back
+      // absent. Absent is `questionGone` for a retained question and a
+      // refusal for an added one.
+      const live = await loadQuestionsByKey(String(draft.project_id), input.questions, sql);
 
       const covered: CoveredQuestion[] = [];
       const staleRetained: { recordLabel: string; prompt: string; why: string }[] = [];
-      const ineligibleAdded: { recordLabel: string; prompt: string; reason: string }[] = [];
+      const ineligibleAdded: { recordLabel: string; prompt: string; reason: string; gone?: true }[] = [];
 
       for (const q of input.questions) {
         const key = questionKey(q.recordId, q.requirementId, 0);
@@ -196,9 +200,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           continue;
         }
 
-        // Added: must be genuinely outstanding right now.
+        // Added: must be genuinely outstanding right now. An absent key names
+        // nothing, because it may be another project's record.
         if (!liveQuestion) {
-          ineligibleAdded.push({ recordLabel: "", prompt: "", reason: "that question no longer exists" });
+          ineligibleAdded.push({ recordLabel: "", prompt: "", reason: "it is not on this project's records", gone: true });
           continue;
         }
         if (liveQuestion.recordStatus !== "active") {
@@ -221,7 +226,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           ineligibleAdded.push({
             recordLabel: liveQuestion.recordLabel,
             prompt: liveQuestion.prompt,
-            reason: "that record has no item level, so the email cannot say whether it blocks the quote",
+            reason: "that record has no item level, and its category needs one to say whether it blocks the quote",
           });
           continue;
         }
@@ -237,9 +242,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         );
       }
       if (ineligibleAdded.length > 0) {
+        const gone = ineligibleAdded.filter((row) => row.gone).length;
         throw new DomainConflictError(
           "questions_ineligible",
-          `${ineligibleAdded.length} question${ineligibleAdded.length === 1 ? " is" : "s are"} no longer outstanding and cannot be added.`,
+          gone > 0
+            ? `${gone} selected question${gone === 1 ? " is" : "s are"} no longer on this project's records, so nothing was added.`
+            : `${ineligibleAdded.length} question${ineligibleAdded.length === 1 ? " is" : "s are"} no longer outstanding and cannot be added.`,
           { diff: ineligibleAdded },
         );
       }

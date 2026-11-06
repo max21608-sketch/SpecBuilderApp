@@ -184,7 +184,11 @@ export async function POST(request: Request): Promise<Response> {
 
       // 6. Every selected question, validated against live locked rows.
       const allQuestions = input.selections.flatMap((s) => s.questions);
-      const live = await loadQuestionsByKey(allQuestions, sql);
+      // SCOPED TO THIS PROJECT (audit A3/F11): a record of another project, a
+      // question its category does not ask, a heading and a retired phase all
+      // come back absent, and absent is refused below. The project is the
+      // request's, which step 1 has just locked.
+      const live = await loadQuestionsByKey(input.projectId, allQuestions, sql);
 
       // Each refusal names the record and the question where they are known.
       // Without them the screen rendered a list of blank bullets, which reads
@@ -195,16 +199,21 @@ export async function POST(request: Request): Promise<Response> {
         recordLabel: string | null;
         prompt: string | null;
         reason: string;
+        gone?: true;
       }[] = [];
       for (const q of allQuestions) {
         const key = questionKey(q.recordId, q.requirementId, 0);
         const question = live.get(key);
         if (!question) {
+          // NAMES NOTHING, deliberately: the key may be another project's
+          // record, and its label and description are exactly what must not
+          // reach this project's screen.
           ineligible.push({
             ...q,
             recordLabel: null,
             prompt: null,
-            reason: "that question no longer exists on this record",
+            reason: "is no longer on this project's records",
+            gone: true,
           });
           continue;
         }
@@ -213,8 +222,9 @@ export async function POST(request: Request): Promise<Response> {
           ineligible.push({ ...named, reason: `is ${question.recordStatus}` });
           continue;
         }
-        // No level, no tier, so the email could not say which half of it holds
-        // up the quote. Blocked on screen too, with a level picker beside it.
+        // No tier, so the email could not say which half of it holds up the
+        // quote: a placeholder category with no level. A matrix category is
+        // tiered without one. Blocked on screen too, with a level picker.
         if (question.tier === null) {
           ineligible.push({
             ...named,
@@ -230,11 +240,7 @@ export async function POST(request: Request): Promise<Response> {
         }
       }
       if (ineligible.length > 0) {
-        throw new DomainConflictError(
-          "questions_ineligible",
-          `${ineligible.length} selected question${ineligible.length === 1 ? " is" : "s are"} no longer outstanding. Reload to see the current picture.`,
-          { diff: ineligible },
-        );
+        throw new DomainConflictError("questions_ineligible", ineligibleMessage(ineligible), { diff: ineligible });
       }
 
       // 7. Supersede the set the caller reviewed. Not deleted: history, and a
@@ -384,5 +390,25 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-
-
+/**
+ * The refusal's one sentence. A question that is GONE (another project's
+ * record, a category that no longer asks it, a heading, a retired phase) is
+ * named apart from one that was answered, because the next step differs:
+ * reload, and what you were looking at is not there any more.
+ */
+function ineligibleMessage(rows: readonly { gone?: true }[]): string {
+  const gone = rows.filter((row) => row.gone).length;
+  const rest = rows.length - gone;
+  const parts: string[] = [];
+  if (gone > 0) {
+    parts.push(`${gone} selected question${gone === 1 ? " is" : "s are"} no longer on this project's records.`);
+  }
+  if (rest > 0) {
+    parts.push(
+      gone > 0
+        ? `${rest} more ${rest === 1 ? "is" : "are"} no longer outstanding.`
+        : `${rest} selected question${rest === 1 ? " is" : "s are"} no longer outstanding.`,
+    );
+  }
+  return `${parts.join(" ")} Reload to see the current picture.`;
+}

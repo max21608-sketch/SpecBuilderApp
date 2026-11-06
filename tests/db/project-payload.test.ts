@@ -100,9 +100,15 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
     );
     contactId = contact.rows[0].id;
 
+    // A PLACEHOLDER category, by construction (audit F1, 2026-11-06). The
+    // level-less bucket below exists only where a level is what the tier
+    // needs; on Matthew's matrix a record with no level is tiered and chased
+    // as it stands. This picked "the first category by id", which happened to
+    // be a placeholder one.
     const category = await client.query(
       `select c.id from item_categories c
          join requirements q on q.category_id = c.id
+        where c.id not in (select item_category_id from spec_matrix_category_map)
         group by c.id having count(q.id) >= 3
         order by c.id limit 1`,
     );
@@ -220,13 +226,46 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
     // would say nobody owns it; dropping it would leave the table short of the
     // project's own total.
     expect(owed.contactsOutstanding.noLevel.records).toBe(1);
-    // Its questions may be TIERED even so: where Matthew's matrix covers the
-    // category it answers without a level, because his matrix carries no level
-    // column. `groupByContact` still holds the record back — the level is what
-    // the BWS boilerplate reads — so the bucket has to count all three columns
-    // rather than assume a level-less record is untiered.
+    // On the placeholder a record with no level has no tier, so every
+    // question in the bucket is untiered. (On Matthew's matrix the same record
+    // would be tiered, and `groupByContact` chases it: audit F1.)
     const bucket = owed.contactsOutstanding.noLevel;
-    expect(bucket.toQuote + bucket.alsoOutstanding + bucket.noTier).toBeGreaterThan(0);
+    expect(bucket.noTier).toBeGreaterThan(0);
+    expect(bucket.toQuote + bucket.alsoOutstanding).toBe(0);
+  });
+
+  // AUDIT F1 + F14 (2026-11-06). A record on Matthew's matrix with no level is
+  // tiered, so it is its designer's debt, not a "no level" one; and what it
+  // owes at TGQ is its itemTgq (gate rows: slots and record columns too), the
+  // number its line shows on the chase and fill-in screens, never only the
+  // questions that happen to be outstanding.
+  it("counts a level-less matrix record under its designer, by itemTgq", async () => {
+    const mapped = (
+      await client.query(`select item_category_id as id from spec_matrix_category_map order by item_category_id limit 1`)
+    ).rows[0].id as string;
+    const before = await readOwed();
+    const record = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, status, category_id, level,
+                                 item_description, designer, created_by, updated_by)
+       values ($1, $2, $3, 'active', $4, null, '__QA Matrix sofa', 'qahay', 'qa', 'qa') returning id`,
+      [projectId, runId, await nextRecordNo(), mapped],
+    );
+    const matrixId = String(record.rows[0].id);
+    try {
+      const owed = await readOwed();
+      // Not in the level-less bucket: that is still the placeholder bench alone.
+      expect(owed.contactsOutstanding.noLevel.records).toBe(before.contactsOutstanding.noLevel.records);
+      const { loadMatrixItemTgq } = await import("@/lib/item-tgq-load");
+      const gate = (await loadMatrixItemTgq([projectId])).get(matrixId);
+      expect(gate?.count).toBeGreaterThan(0);
+      const row = owed.contactsOutstanding.byContact.find((entry) => entry.contactId === contactId);
+      const was = before.contactsOutstanding.byContact.find((entry) => entry.contactId === contactId);
+      // The designer now owes the sofa's whole gate count on top of what they owed.
+      expect((row?.toQuote ?? 0) - (was?.toQuote ?? 0)).toBe(gate?.count);
+    } finally {
+      await client.query(`delete from spec_answers where record_id = $1`, [matrixId]);
+      await client.query(`delete from spec_records where id = $1`, [matrixId]);
+    }
   });
 
   it("names the unlinked finish codes the library page names", async () => {

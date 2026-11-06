@@ -26,6 +26,26 @@ import { numberingFromRow, recordLabel, recordNoLabel, recordShortLabel } from "
 import type { ChaseGroup } from "@/lib/chase-template";
 
 /**
+ * A SPLIT BILL LINE IS A HEADING, in SQL, once.
+ *
+ * `loadExportScope`'s clause: a record with an ACTIVE configuration under it
+ * is a heading whose configurations are the jobs, so nothing about it is
+ * outstanding, chaseable or counted. It is a correlated not-exists on the
+ * live configurations, never a stored has-been-split flag: retire them and
+ * the line is an item again.
+ *
+ * The driver cannot interpolate a SQL fragment (a `${}` is always a bound
+ * parameter), so every chase query writes this text out and
+ * `tests/lib/chase-heading-predicate.test.ts` reads their sources and fails
+ * on one that lacks it. The audit (2026-11-06) counted the clause written out
+ * eleven times and MISSING from three queries, one of them the chase's own
+ * `loadQuestionsByKey`. Compare it whitespace-folded; the queries lay it out
+ * over several lines.
+ */
+export const CHASE_HEADING_PREDICATE =
+  "not exists (select 1 from spec_records v where v.parent_id = r.id and v.status = 'active')";
+
+/**
  * Either driver. `sql` from db.ts (HTTP, one request per call) and the
  * transaction-scoped executor from db-transaction.ts have the same shape, so a
  * loader can serve a screen read and a guarded write without being written
@@ -807,8 +827,31 @@ function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>): Outs
  * only report "questionGone", which is both imprecise and alarming when the
  * real news is good ("they replied"). This loads the covered questions
  * regardless of state so the diff can say `answerSettled` instead.
+ *
+ * ============================================================================
+ * SCOPED TO ONE PROJECT, AND TO WHAT THE RECORD ACTUALLY ASKS (audit A3/F11,
+ * 2026-11-06).
+ *
+ * It read any record id and any requirement id it was handed. There was no
+ * project predicate, and the requirement join was `q.id = any(...)` with no
+ * `q.category_id = r.category_id`, so every requirement paired with every
+ * record and read `missing`. A crafted or stale request to the generate route
+ * could therefore put ANOTHER CLIENT'S item, refs and description into a chase
+ * to this project's designer: an email a person then sends, from this
+ * project's NDA to someone outside it. A stale tab after a category change
+ * chased questions the record no longer asks, and a bill line already split
+ * into configurations (a heading the export never ships) could be chased.
+ *
+ * So it now carries `loadOutstanding`'s scope, clause for clause, minus the
+ * answer-state filter (the reason it exists): this project, an active phase,
+ * not a heading, and only a question the record's category asks. Anything
+ * else is simply ABSENT from the map, which every caller already reads as
+ * `questionGone`. Record STATUS is deliberately not filtered, so a retired
+ * record still reads `recordRetired` rather than vanishing.
+ * ============================================================================
  */
 export async function loadQuestionsByKey(
+  projectId: string,
   keys: { recordId: string; requirementId: string }[],
   // Defaults to the HTTP driver for screen reads. The generate route and the
   // send gate pass their TRANSACTION's executor instead, so the rows they
@@ -871,14 +914,20 @@ export async function loadQuestionsByKey(
       a.value         as current_value
     from spec_records r
     join projects p on p.id = r.project_id
-    -- run_id is not null on spec_records: a record on no run is on no tab and
-    -- in no export scope, so this join can never drop a row.
     join spec_runs run on run.id = r.run_id
-    left join item_categories c on c.id = r.category_id
-    join requirements q on q.id = any(${requirementIds}::uuid[])
+    join item_categories c on c.id = r.category_id
+    -- THE CATEGORY JOIN IS THE PAIRING. Without it every requirement asked of
+    -- the request paired with every record in it, and read missing.
+    join requirements q on q.category_id = r.category_id and q.id = any(${requirementIds}::uuid[])
     left join spec_fields f on f.id = q.spec_field_id
     left join spec_answers a on a.record_id = r.id and a.requirement_id = q.id and a.revision_no = 0
     where r.id = any(${recordIds}::uuid[])
+      and r.project_id = ${projectId}
+      and run.status = 'active'
+      -- A SPLIT BILL LINE IS A HEADING: loadOutstanding's clause, word for
+      -- word (CHASE_HEADING_PREDICATE). No backticks in here: one closes the
+      -- tagged template.
+      and not exists (select 1 from spec_records v where v.parent_id = r.id and v.status = 'active')
   `;
 
   // Same single source for the tier as `loadOutstanding`. A second reading
