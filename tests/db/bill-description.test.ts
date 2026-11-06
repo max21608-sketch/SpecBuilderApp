@@ -23,6 +23,7 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
@@ -161,7 +162,7 @@ describeIfDb("a bill's description cells, read at confirm", () => {
   };
   const confirm = async (runId: string) => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    return POST(post({}), params(runId));
+    return POST(post({ version: await stagedVersion(client, runId) }), params(runId));
   };
   const attributesOf = async (recordId: string) =>
     (

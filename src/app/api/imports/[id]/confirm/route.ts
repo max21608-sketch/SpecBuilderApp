@@ -142,11 +142,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const badId = requireUuid(id);
   if (badId) return badId;
 
-  let raw: unknown = {};
+  // A body that is not JSON is refused, never read as `{}`: an empty request
+  // is a bill confirm with no version, which is the one shape the lock below
+  // cannot hold (audit R2).
+  let raw: unknown;
   try {
     raw = await request.json();
   } catch {
-    raw = {};
+    return json({ ok: false, error: "invalid JSON" }, 400);
   }
   const parsed = ConfirmBody.safeParse(raw);
   if (!parsed.success) {
@@ -165,6 +168,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   try {
     if (run.source_kind === "boq_xlsx") {
+      // THE VERSION IS REQUIRED FOR A BILL (audit R2, 2026-11-06). It is the
+      // only thing that ties the confirm to the bill the reviewer read: every
+      // column mapping, slot pick and category choice moves the run's
+      // version, and the review screen always sends the one it loaded. A
+      // request without one is a hand-made call or a garbled body, and it used
+      // to confirm whatever the staged bill held by then.
+      if (expectedVersion === null) {
+        return json({ ok: false, error: "Reload the bill and check it before confirming." }, 400);
+      }
       const result = await withTransaction((txn) =>
         confirmBoqImport(txn, { runId: id, expectedVersion, actor: user.email }),
       );

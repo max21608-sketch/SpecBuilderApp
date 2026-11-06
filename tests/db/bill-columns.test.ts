@@ -19,6 +19,7 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
@@ -201,7 +202,7 @@ describeIfDb("a bill's own Dims and Finish columns, read at confirm", () => {
     );
 
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    const response = await POST(post({}), params(runId));
+    const response = await POST(post({ version: await stagedVersion(client, runId) }), params(runId));
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ imported: 5 });
 
@@ -377,7 +378,7 @@ describeIfDb("a bill's own Dims and Finish columns, read at confirm", () => {
     expect(after["3"]).toMatchObject({ unitSetOnReview: null, dimensionCell: "W400 x D400 x H450mm" });
 
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    expect((await POST(post({}), params(runId))).status).toBe(200);
+    expect((await POST(post({ version: await stagedVersion(client, runId) }), params(runId))).status).toBe(200);
 
     const table = await recordByCode("ZZ-UNT-01");
     expect(

@@ -19,6 +19,7 @@
 // ============================================================================
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -96,7 +97,7 @@ describeIfDb("A revision and the configurations under its lines", () => {
 
   const confirm = async (importId: string) => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    return POST(request("POST", {}), params(importId));
+    return POST(request("POST", { version: await stagedVersion(client, importId) }), params(importId));
   };
 
   const fresh = async (id: string) => {

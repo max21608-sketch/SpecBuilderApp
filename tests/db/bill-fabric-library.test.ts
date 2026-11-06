@@ -13,6 +13,7 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 import { FABRIC_SWATCH_BOUCLE, fabricSwatchBillWorkbook } from "../fixtures/build-boq";
 import type { TxnSql } from "@/lib/db-transaction";
 import { normaliseFinishCode } from "@/lib/finishes";
@@ -165,7 +166,7 @@ describeIfDb("the bill fills the finishes library", () => {
   }
   const confirm = async (runId: string): Promise<ConfirmBody> => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    const response = await POST(jsonRequest("POST", {}), params(runId));
+    const response = await POST(jsonRequest("POST", { version: await stagedVersion(client, runId) }), params(runId));
     const body = (await response.json()) as ConfirmBody;
     expect(response.status, body.error).toBe(200);
     return body;

@@ -17,6 +17,7 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 import { FINISH_LINES, finishLinesBillWorkbook } from "../fixtures/build-boq";
 
 vi.mock("@/lib/session", () => ({
@@ -174,7 +175,7 @@ describeIfDb("a bill's finish lines, filed by kind", () => {
 
   it("confirms an item with seven finishes: every line kept, each kind in its own fields", { timeout: 60_000 }, async () => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    const response = await POST(jsonRequest("POST", {}), params(runId));
+    const response = await POST(jsonRequest("POST", { version: await stagedVersion(client, runId) }), params(runId));
     const result = (await response.json()) as { ok: boolean; error?: string; fabricSpecs?: number; inHouseFinishes?: number };
     expect(response.status, result.error).toBe(200);
     expect(result.fabricSpecs).toBe(8);
@@ -314,7 +315,7 @@ describeIfDb("a bill's finish lines, filed by kind", () => {
   }
   const confirmRevision = async (revisionId: string) => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    const response = await POST(jsonRequest("POST", {}), params(revisionId));
+    const response = await POST(jsonRequest("POST", { version: await stagedVersion(client, revisionId) }), params(revisionId));
     return { status: response.status, body: (await response.json()) as { error?: string; fabricSpecs?: number } };
   };
 

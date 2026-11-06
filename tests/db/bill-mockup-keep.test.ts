@@ -16,6 +16,7 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 import { codelessBillWorkbook, prototypeBillWorkbook } from "../fixtures/build-boq";
 import { NO_CODES_REVIEW_SENTENCE } from "@/lib/bill-sheet-notices";
 
@@ -145,7 +146,7 @@ describeIfDb("a bill's prototype quantity, its kept columns, and a bill with no 
 
   async function confirm(runId: string) {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    const response = await POST(jsonRequest("POST", {}), params(runId));
+    const response = await POST(jsonRequest("POST", { version: await stagedVersion(client, runId) }), params(runId));
     const body = (await response.json()) as {
       ok: boolean;
       error?: string;

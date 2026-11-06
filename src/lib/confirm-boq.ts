@@ -205,7 +205,7 @@ export type ConfirmMockupResult = {
 
 export async function confirmBoqImport(
   txn: TxnSql,
-  { runId, expectedVersion, actor }: { runId: string; expectedVersion: number | null; actor: string },
+  { runId, expectedVersion, actor }: { runId: string; expectedVersion: number; actor: string },
 ): Promise<ConfirmBoqResult> {
   // 1. The run, locked. Read the staged lines from the LOCKED row.
   const runs = await txn`
@@ -224,7 +224,9 @@ export async function confirmBoqImport(
   if (run.status !== "parsed") {
     throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { noun: "bill" }));
   }
-  if (expectedVersion !== null && Number(run.version) !== expectedVersion) {
+  // Required, never skipped (audit R2): a confirm with no version was a
+  // confirm of whatever the staged bill held by the time it arrived.
+  if (Number(run.version) !== expectedVersion) {
     throw new DomainConflictError(
       "import_version_stale",
       "This bill changed since this screen loaded. Reload and check it before confirming.",

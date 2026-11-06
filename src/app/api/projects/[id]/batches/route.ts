@@ -129,11 +129,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const badId = requireUuid(id);
   if (badId) return badId;
 
-  let raw: unknown = {};
+  // Not read as `{}`: a body nobody could read creates nothing (audit R2).
+  let raw: unknown;
   try {
     raw = await request.json();
   } catch {
-    raw = {};
+    return json({ ok: false, error: "invalid JSON" }, 400);
   }
   const parsed = CreateBatch.safeParse(raw);
   if (!parsed.success) {

@@ -18,8 +18,9 @@
 //     whatever the staged bill holds now;
 //   - a batch is created for a body nobody could read.
 //
-// The two `it.fails` below are the defect, held. Each turns red the day it is
-// fixed, and should then become a plain `it`.
+// Both were held as `it.fails` until 5.4 fixed them: a body that is not JSON
+// is now a 400 on all three routes, and a bill confirm must name the version
+// its screen read.
 // ============================================================================
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
@@ -144,9 +145,21 @@ describeIfDb("a body that is not JSON, with a real id", () => {
     expect(await records()).toBe(0);
   });
 
-  // FOUND BY 5.2 (R2). Today this answers 200 and confirms the bill: the body
-  // is read as `{}`, `version` is optional, and no version skips the lock.
-  it.fails("a bill confirm whose body is not JSON is refused 400, and confirms nothing", async () => {
+  // FOUND BY 5.2 (R2): it answered 200 and confirmed the bill, because the
+  // body was read as `{}`, `version` was optional, and no version skipped the
+  // lock.
+  it("a bill confirm that names no version is refused 400, and confirms nothing", async () => {
+    // A hand-made call, or an old screen. Without a version the confirm has
+    // nothing to hold the staged bill against.
+    const { POST } = await import("@/app/api/imports/[id]/confirm/route");
+    const response = await POST(raw("{}"), params(runId));
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toMatch(/reload/i);
+    expect((await runState()).status).toBe("parsed");
+    expect(await records()).toBe(0);
+  });
+
+  it("a bill confirm whose body is not JSON is refused 400, and confirms nothing", async () => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
     const response = await POST(raw("{not json"), params(runId));
     const confirmed = (await runState()).status;
@@ -156,8 +169,8 @@ describeIfDb("a body that is not JSON, with a real id", () => {
     expect(written).toBe(0);
   });
 
-  // FOUND BY 5.2 (R2). Today this answers 201 and creates a batch.
-  it.fails("a batch is not created from a body that is not JSON", async () => {
+  // FOUND BY 5.2 (R2): it answered 201 and created a batch.
+  it("a batch is not created from a body that is not JSON", async () => {
     const before = Number(
       (await client.query(`select count(*)::int as n from intake_batches where project_id = $1`, [projectId])).rows[0].n,
     );
@@ -169,4 +182,5 @@ describeIfDb("a body that is not JSON, with a real id", () => {
     expect(response.status).toBe(400);
     expect(after).toBe(before);
   });
+
 });

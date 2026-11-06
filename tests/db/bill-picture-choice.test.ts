@@ -14,6 +14,7 @@ import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 import { BILL_PICTURES, fabricSwatchBillWorkbook, picturedBillWorkbook } from "../fixtures/build-boq";
 
 vi.mock("@/lib/session", () => ({
@@ -152,7 +153,7 @@ describeIfDb("a bill row's picture, chosen on the review", () => {
   };
   const confirm = async (runId: string) => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    const response = await POST(jsonRequest("POST", {}), params(runId));
+    const response = await POST(jsonRequest("POST", { version: await stagedVersion(client, runId) }), params(runId));
     const body = (await response.json()) as {
       ok: boolean;
       error?: string;

@@ -19,6 +19,7 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
@@ -107,7 +108,7 @@ describeIfDb("a revision's finish lines, planned once", () => {
   };
   const confirm = async (importId: string) => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    const response = await POST(request("POST", {}), params(importId));
+    const response = await POST(request("POST", { version: await stagedVersion(client, importId) }), params(importId));
     return { status: response.status, body: (await response.json()) as { code?: string; error?: string; fabricSpecs?: number } };
   };
   const fabrics = async () =>

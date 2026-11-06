@@ -22,6 +22,7 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 import { buildPdf } from "../fixtures/build-pdf.mjs";
 import { transcriptionReason } from "@/lib/pdf-bill-checks";
 
@@ -239,7 +240,7 @@ describeIfDb("a bill uploaded as a PDF", () => {
       params(runId),
     );
     const { POST: confirm } = await import("@/app/api/imports/[id]/confirm/route");
-    const confirmed = await confirm(jsonRequest("POST", {}), params(runId));
+    const confirmed = await confirm(jsonRequest("POST", { version: await stagedVersion(client, runId) }), params(runId));
     const confirmedBody = (await confirmed.json()) as { ok: boolean; error?: string };
     expect(confirmed.status, confirmedBody.error).toBe(200);
     const records = (

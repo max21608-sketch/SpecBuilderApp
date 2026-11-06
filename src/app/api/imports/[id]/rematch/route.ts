@@ -54,11 +54,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const badId = requireUuid(id);
 
   if (badId) return badId;
+  // Not read as `{}`: one rule for every write, a body nobody could read
+  // does nothing (audit R2). The screen always sends its version.
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    body = {};
+    return json({ ok: false, error: "invalid JSON" }, 400);
   }
   const parsed = RematchRequest.safeParse(body ?? {});
   if (!parsed.success) return json({ ok: false, error: "invalid request" }, 400);

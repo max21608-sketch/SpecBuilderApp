@@ -579,8 +579,11 @@ const boqRunId = String(boqRun[0]?.id);
   say("bill parsed", `${stagedSheets.length} tabs, ${stagedSheets.reduce((total, sheet) => total + sheet.lines.length, 0)} lines`);
 }
 
+// The version the script itself just staged: a bill confirm always names the
+// one it read (audit R2).
+const stagedVersion = Number((await sql`select version from intake_runs where id = ${boqRunId}`)[0]!.version);
 const confirmed = await withTransaction((txn) =>
-  confirmBoqImport(txn, { runId: boqRunId, expectedVersion: null, actor: ACTOR }),
+  confirmBoqImport(txn, { runId: boqRunId, expectedVersion: stagedVersion, actor: ACTOR }),
 );
 say("bill confirmed", `${confirmed.imported} records across ${confirmed.runIds.length} runs`);
 

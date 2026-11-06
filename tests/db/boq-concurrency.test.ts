@@ -13,6 +13,7 @@
 // connections, started before either finishes, so the database is what decides.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -121,7 +122,7 @@ describeIfDb("BOQ confirm concurrency", () => {
 
   const confirm = async (runId: string) => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    return POST(post({}), params(runId));
+    return POST(post({ version: await stagedVersion(client, runId) }), params(runId));
   };
 
   async function records() {
