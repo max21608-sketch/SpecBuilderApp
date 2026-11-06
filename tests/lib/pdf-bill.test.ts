@@ -309,15 +309,21 @@ describe("the workbook it builds", () => {
     expect(pdfPageOfLine(source, "Another tab", 2)).toBeNull();
   });
 
-  it("writes the quantity as a figure and every other cell as the text it printed", async () => {
+  it("writes a whole quantity as a figure and every other cell as the text it printed", async () => {
     const read = await readPdfBill(twoPageSchedule());
     if (!read.ok) throw new Error(read.detail);
     const book = await pdfBillWorkbook(read);
     const sheets = await readSpreadsheetSheets(book.bytes, "bill.xlsx", "");
     const rows = sheets[0]!.data;
     expect(rows[3]?.[0]).toBe("0012");
-    expect(rows[3]?.[3]).toBe(1200);
-    expect(rows[2]?.[3]).toBe(13.5);
+    expect(rows[1]?.[3]).toBe(9);
+    // THE ONE NUMBER READER (audit C3/C4, 2026-11-06). `1,200` is a thousand in
+    // one convention and a decimal in another, and `13.5` is not a count: each
+    // is written as the PDF printed it, so the bill reader refuses it with the
+    // PDF's own words beside the line rather than taking a number the PDF
+    // never settled. It used to be written as 1200 and 13.5.
+    expect(rows[3]?.[3]).toBe("1,200");
+    expect(rows[2]?.[3]).toBe("13.5");
   });
 
   it("is stored beside the PDF, named after it", () => {

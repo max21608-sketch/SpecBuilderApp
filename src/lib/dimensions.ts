@@ -30,6 +30,7 @@ import {
   type AttributeUnit,
   type DimensionSlot,
 } from "@/lib/spec-vocab";
+import { AMBIGUOUS_GROUP, readPrintedNumber } from "@/lib/printed-number";
 
 /** Multipliers to millimetres. `normaliseUnit` guarantees the key exists. */
 const TO_MM: Record<AttributeUnit, number> = { mm: 1, cm: 10, m: 1000, in: 25.4 };
@@ -222,6 +223,14 @@ export type DimensionFigure = {
    * first. Absent otherwise, so a bare figure's reading is unchanged.
    */
   imperial?: true;
+  /**
+   * Present, and true, where the value is ONE figure printed with a single
+   * thousands-or-decimal group (`1,200`, `1.200`): `readPrintedNumber`'s
+   * `ambiguous_comma`. `figure` is then null, so nothing converts it and
+   * nothing votes with it, and the composer says why in its bracket. Absent
+   * otherwise, so every other reading is unchanged.
+   */
+  ambiguousComma?: true;
 };
 
 /**
@@ -238,6 +247,16 @@ export type DimensionFigure = {
  * figure too, in inches and marked `imperial` — and it never votes, because it
  * has already said what unit it is in.
  */
+/**
+ * What ONE printed figure looks like as a token: digits, and at most one
+ * separator with digits after it. Shared with `spec-dimensions.ts`, which
+ * splits a figure off its unit and its wording, so the two cannot disagree
+ * about where a figure ends. The token says nothing about what the separator
+ * MEANS: that is `readPrintedNumber`'s, below.
+ */
+export const FIGURE_TOKEN = String.raw`[0-9]+(?:[.,][0-9]+)?`;
+const ONE_FIGURE = new RegExp(`^${FIGURE_TOKEN}$`);
+
 export function parseDimensionFigure(value: string | null): DimensionFigure {
   const text = (value ?? "").trim();
   if (text === "") return { figure: null, tbcInline: false };
@@ -248,20 +267,32 @@ export function parseDimensionFigure(value: string | null): DimensionFigure {
   const stripped = withoutTbc(text);
   const tbcInline = stripped !== text;
 
-  if (!/^[0-9]+(?:[.,][0-9]+)?$/.test(stripped)) {
+  if (!ONE_FIGURE.test(stripped)) {
     // ONE MEASUREMENT IN FEET AND INCHES IS ONE FIGURE, read completely or
     // not at all — see `feetAndInches`. Its unit is its own marks.
     const inches = feetAndInches(stripped);
     return inches === null ? { figure: null, tbcInline } : { figure: inches, tbcInline, imperial: true };
   }
-  const figure = Number(stripped.replace(",", "."));
-  return { figure: Number.isFinite(figure) && figure > 0 ? figure : null, tbcInline };
+  // THROUGH THE ONE NUMBER READER, and never `Number(stripped.replace(",",
+  // "."))`, which this was until 2026-11-06 (audit C4): it read every comma
+  // as a decimal point, so `W1,200` composed as `W1mm` in BWS field 3 with
+  // nothing to flag it, and on an unmarked drawing `1,800` voted the page
+  // into centimetres. A three-digit group is a thousand in one convention and
+  // a decimal in another, and it is refused, not guessed; a decimal comma
+  // with one or two digits (`1,5`) is read.
+  const read = readPrintedNumber(stripped);
+  if (read.kind === "ambiguous_comma") return { figure: null, tbcInline, ambiguousComma: true };
+  const figure = read.kind === "whole" || read.kind === "decimal" ? read.value : null;
+  return { figure: figure !== null && figure > 0 ? figure : null, tbcInline };
 }
 
 /** The value without a leading or trailing TBC annotation — the figure as printed. */
 function withoutTbc(text: string): string {
   return text.replace(/^tbc\b[\s:.-]*/i, "").replace(/[\s:.-]*\btbc\.?$/i, "").trim();
 }
+
+/** The diameter signs a page prints in place of `Dia`: Ø, ø and ⌀ (U+2300). */
+const DIAMETER_SIGNS = "\u00d8\u00f8\u2300";
 
 /** A feet mark after a figure, anywhere in a segment: `3'`, `H 2'-5"`, `4 ft`. */
 const FEET_MARK_AFTER_FIGURE = /[0-9]\s*(?:'|\u2032|ft\b|foot\b|feet\b)/i;
@@ -333,7 +364,11 @@ export function parseCombinedDimensions(raw: string): CombinedDimensions {
     }
     // A colon after the prefix is still the page's own label: the Aman
     // tracker prints "W:540 X D:610 X SH :430 mm" (2026-10-05).
-    const prefix = /^([A-Za-z.]+?)\s*(?::\s*)?([0-9].*)$/.exec(body);
+    // `DIAMETER_SIGN` is in the prefix class because a page prints a round
+    // item `Ø600` and `normaliseDimensionSlot` reads Ø, ø and ⌀ as Dia. With
+    // the letters-only class it never got there: `Ø600 x H750mm` placed the
+    // height alone and `Ø 600mm` placed nothing (audit C12, 2026-11-06).
+    const prefix = new RegExp(String.raw`^([A-Za-z.${DIAMETER_SIGNS}]+?)\s*(?::\s*)?([0-9].*)$`).exec(body);
     let slot = prefix ? normaliseDimensionSlot(prefix[1] ?? "") : null;
     let value = prefix && slot ? (prefix[2] ?? body) : body;
     // A label AFTER the figure is the page's own label too: the Aman tracker
@@ -341,7 +376,7 @@ export function parseCombinedDimensions(raw: string): CombinedDimensions {
     // whole-label rule as the prefix — `L` is not a slot and stays unplaced —
     // and only where what precedes it reads as one figure.
     if (!slot) {
-      const suffix = /^(.*?[0-9"'\u2032\u2033])\s*([A-Za-z.]+)$/.exec(body);
+      const suffix = new RegExp(String.raw`^(.*?[0-9"'\u2032\u2033])\s*([A-Za-z.${DIAMETER_SIGNS}]+)$`).exec(body);
       const suffixSlot = suffix ? normaliseDimensionSlot(suffix[2] ?? "") : null;
       if (suffix && suffixSlot && parseDimensionFigure((suffix[1] ?? "").trim()).figure !== null) {
         slot = suffixSlot;
@@ -518,14 +553,22 @@ export function composeDimensionCell(
       // it this app will not guess at, and the action it wants is to re-state
       // it. A compound that DOES read completely never gets here: it converts.
       const compound = imperialCompound(row.value);
+      // A THOUSANDS-OR-DECIMAL GROUP IS NAMED TOO (audit C4, 2026-11-06).
+      // `1,200` is one figure; the app will not say which, and "not a
+      // number" would send a reviewer looking for a typo that is not there.
+      const ambiguous = parseDimensionFigure(row.value).ambiguousComma === true;
       problems.push({
         code: "not_numeric",
         slot,
         message: compound
           ? `${prefix} ${quoted(row.value)} is in feet and inches this app could not read completely, so it is not converted. Record it as one measurement, or in mm or cm.`
-          : `${prefix} ${quoted(row.value)} is not a measurement BWS can take.`,
+          : ambiguous
+            ? `${prefix} ${quoted(row.value)} could be ${ambiguousSpellings(row.value)}, so it is not read. Record it as one of those.`
+            : `${prefix} ${quoted(row.value)} is not a measurement BWS can take.`,
       });
-      trailing.push(`[${prefix} ${quoted(row.value)} — ${compound ? "imperial, not converted" : "not a number"}]`);
+      trailing.push(
+        `[${prefix} ${quoted(row.value)} — ${compound ? "imperial, not converted" : ambiguous ? "thousands or decimal, not read" : "not a number"}]`,
+      );
       continue;
     }
 
@@ -608,9 +651,20 @@ export function composeDimensionCell(
   return screen ? { text: parts.join(" "), problems, fromImperial } : { text: parts.join(" "), problems };
 }
 
-/** A phrase is quoted so it reads as something the document said; a bare figure is not. */
+/**
+ * A phrase is quoted so it reads as something the document said; a bare figure
+ * is not. A thousands-or-decimal group IS quoted: it is the document's words,
+ * and printed bare in a bracket it reads like a number this app took.
+ */
 function quoted(value: string | null): string {
   const text = (value ?? "").trim();
   if (text === "") return '""';
-  return /^[0-9]+(?:[.,][0-9]+)?$/.test(text) ? text : `"${text}"`;
+  return ONE_FIGURE.test(text) && !AMBIGUOUS_GROUP.test(text) ? text : `"${text}"`;
+}
+
+/** The two unambiguous spellings of `1,200`: "1200 or 1.2". */
+function ambiguousSpellings(value: string | null): string {
+  const figure = withoutTbc((value ?? "").trim());
+  const [head = "", tail = ""] = figure.split(/[.,]/);
+  return `${head}${tail} or ${head}.${tail.replace(/0+$/, "") || "0"}`;
 }

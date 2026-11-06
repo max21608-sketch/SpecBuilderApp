@@ -35,6 +35,7 @@ import { ITEM_LEVELS, ITEM_LEVEL_LABELS, isItemLevel } from "@/lib/spec-vocab";
 // Pure and type-only inside: the parser's own wording for what it did with a
 // sheet, so the screen cannot describe the parse differently from the parser.
 import { describeHeader, sheetsAwaitingColumnCheck, sheetsNeedingColumns } from "@/lib/boq-import";
+import { quantityNotGiven } from "@/lib/printed-number";
 import { pdfPageOfLine, type PdfBillSource } from "@/lib/pdf-bill-source";
 import { transcriptionChecks, type LineCheck, type PdfTranscription, type TranscriptionRecord } from "@/lib/pdf-bill-checks";
 import PdfTranscriptionPanel from "@/components/imports/PdfTranscriptionPanel";
@@ -115,6 +116,8 @@ type Line = {
   index: number; lineNo: number; designer: string | null; boqCategory: string | null;
   area: string | null; code: string | null; itemDescription: string; productReference: string | null;
   qty: number | null; qtyUnit: string | null;
+  // The quantity cell as printed, only where it is not a count. See `BoqLine`.
+  qtyRaw?: string;
   // The description cell as printed, where it breaks over lines — see `BoqLine`.
   itemDescriptionRaw?: string;
   // Present only where the bill has the column (v4) — see `BoqLine`.
@@ -2567,11 +2570,26 @@ export default function ReviewImportPage() {
                                 narrow and there are three hundred of them. */}
                             <Td num>
                               {line.qty === null ? (
+                                // WHAT THE BILL PRINTED, where it printed
+                                // something that is not a count (C3,
+                                // 2026-11-06): "TBC", "1.5", "2 x 3". The cell
+                                // says so in its own words; the whole sentence
+                                // is the title, from the one reader that
+                                // refused it.
                                 <span
                                   className="text-[11px] text-amber-800"
-                                  title="The bill gave no quantity for this line. Nothing is assumed."
+                                  title={
+                                    line.qtyRaw
+                                      ? `${quantityNotGiven(line.qtyRaw)}. Nothing is assumed.`
+                                      : "The bill gave no quantity for this line. Nothing is assumed."
+                                  }
                                 >
                                   not given
+                                  {line.qtyRaw && (
+                                    <span className="block max-w-[9rem] truncate text-neutral-500">
+                                      bill says “{line.qtyRaw}”
+                                    </span>
+                                  )}
                                 </span>
                               ) : (
                                 <>

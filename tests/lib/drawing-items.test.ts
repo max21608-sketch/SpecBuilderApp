@@ -330,6 +330,49 @@ describe("a five-configuration sheet", () => {
   });
 });
 
+// ============================================================================
+// AUDIT 2026-11-06, D11 / D10: A FEET UNIT, AND A THOUSANDS-OR-DECIMAL GROUP.
+//
+// The model reports `valueRaw "8"` with `unitRaw "ft"` (or `'`). `normaliseUnit`
+// knows no feet, and only an inch mark was put back on the figure, so a bare 8
+// went to the cm/mm vote and staged as 8 centimetres. The feet mark is now put
+// back before the figure is split, so `feetAndInches` reads it whole.
+// ============================================================================
+describe("a figure the read reports in feet", () => {
+  it("rejoins a feet unit to its figure and reads it as feet, never as centimetres", () => {
+    const staged = one({
+      overall: {
+        ...noOverall,
+        width: fig("8", { unitRaw: "ft" }),
+        depth: fig("3", { unitRaw: "'" }),
+        height: fig("2.5", { unitRaw: "feet" }),
+      },
+    });
+    const slot = (s: string) => staged.observations.find((o) => o.dimensionSlot === s)!;
+    expect([slot("W").value, slot("W").unit, slot("W").unitSource]).toEqual(["8'", "in", "printed"]);
+    expect([slot("D").value, slot("D").unit]).toEqual(["3'", "in"]);
+    expect([slot("H").value, slot("H").unit]).toEqual(["2.5'", "in"]);
+    const read = reduceStagedDrawings({ schemaVersion: 4, kind: "shop_drawings", filename: null, documentNotes: null, items: [staged] });
+    expect(read.items[0]!.overall).toMatchObject({ W: [2438], D: [914], H: [762] });
+  });
+
+  it("does not let a thousands-or-decimal group vote the page's unit", () => {
+    // Unmarked page: 1,800 used to read as 1.8, under the scale boundary,
+    // and vote CENTIMETRES beside 750, which then shipped as 7500mm.
+    const staged = one({
+      overall: { ...noOverall, width: fig("1,800"), height: fig("750") },
+    });
+    const width = staged.observations.find((o) => o.dimensionSlot === "W")!;
+    const height = staged.observations.find((o) => o.dimensionSlot === "H")!;
+    expect(height.unit).toBe("mm");
+    // The width keeps the page's words and composes into a bracket, never a figure.
+    expect(width.value).toBe("1,800");
+    const read = reduceStagedDrawings({ schemaVersion: 4, kind: "shop_drawings", filename: null, documentNotes: null, items: [staged] });
+    expect(read.items[0]!.overall).toMatchObject({ H: [750] });
+    expect(read.items[0]!.overall.W ?? []).toEqual([]);
+  });
+});
+
 describe("an imperial sheet whose plan and elevation disagree", () => {
   const item = () =>
     one({

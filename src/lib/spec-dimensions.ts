@@ -47,7 +47,7 @@
 //   the figure and unit are taken out is handed back for the caller to keep as
 //   a note.
 // ============================================================================
-import { feetAndInches, imperialCompound, parseCombinedDimensions, parseDimensionFigure } from "@/lib/dimensions";
+import { FIGURE_TOKEN, feetAndInches, imperialCompound, parseCombinedDimensions, parseDimensionFigure } from "@/lib/dimensions";
 import {
   containsPhrase,
   normaliseDimensionSlot,
@@ -174,7 +174,10 @@ function splitFigure(raw: string): { figure: string | null; unit: AttributeUnit 
       ? { figure: raw.trim(), unit: "in", rest: "" }
       : { figure: null, unit: null, rest: raw.trim() };
   }
-  const match = /^\s*([0-9]+(?:[.,][0-9]+)?)\s*([A-Za-z"']+\.?)?\s*([\s\S]*)$/.exec(raw);
+  // The figure TOKEN is the one `parseDimensionFigure` reads (`FIGURE_TOKEN`).
+  // What the token MEANS is not decided here: `1,800` is kept as printed and
+  // the one number reader refuses it later, in words, where it is composed.
+  const match = new RegExp(String.raw`^\s*(${FIGURE_TOKEN})\s*([A-Za-z"']+\.?)?\s*([\s\S]*)$`).exec(raw);
   if (!match || !match[1]) return { figure: null, unit: null, rest: raw.trim() };
 
   const figure = match[1];
@@ -374,9 +377,15 @@ function figureWithUnit(value: string): { figure: string; unit: AttributeUnit | 
   if (imperialCompoundAnywhere(value)) {
     return feetAndInches(value) !== null ? { figure: value.trim(), unit: "in" } : null;
   }
-  const match = /^([0-9]+(?:[.,][0-9]+)?)\s*([A-Za-z"]+)?\.?$/.exec(value.trim());
+  const match = new RegExp(String.raw`^(${FIGURE_TOKEN})\s*([A-Za-z"]+)?\.?$`).exec(value.trim());
   if (!match?.[1]) return null;
-  if (parseDimensionFigure(match[1]).figure === null) return null;
+  // A THOUSANDS-OR-DECIMAL GROUP IS STILL ONE FIGURE IN ITS SLOT (audit C4,
+  // 2026-11-06). It is kept as the document wrote it, exactly as a labelled
+  // slot's is by `splitFigure`, and `composeDimensionCell` refuses to read it
+  // in words. Dropping it into the qualifier would lose the slot the page
+  // printed for it, for a reason the composer already says.
+  const read = parseDimensionFigure(match[1]);
+  if (read.figure === null && !read.ambiguousComma) return null;
   const unitWord = match[2] ?? null;
   if (!unitWord) return { figure: match[1], unit: null };
   const unit = normaliseUnit(unitWord);

@@ -279,3 +279,37 @@ describe("readDimension — a bill's size line", () => {
     expect(readDimension("Width", "24% PC, 20% WV, 56% CO")).toBeNull();
   });
 });
+
+// ============================================================================
+// AUDIT 2026-11-06, C4 / D10: A THOUSANDS-OR-DECIMAL GROUP IN PROSE.
+//
+// An email or a schedule writes "1,800 mm". The slot is plain from the label;
+// the FIGURE is a thousand in one convention and a decimal in another. The
+// reading keeps the document's words in its slot, so the composer can say why
+// it will not read them, and a person corrects one value on the record. It is
+// never 1.8 and never dropped into a note because the figure was awkward.
+// ============================================================================
+describe("readDimension and a thousands-or-decimal group", () => {
+  it("keeps a labelled slot's ambiguous figure as the document wrote it", () => {
+    const reading = readDimension("Width", "1,800 mm");
+    expect(reading?.parts).toEqual([{ slot: "W", figure: "1,800", slotSuggested: false }]);
+    expect(reading?.unit).toBe("mm");
+    expect(reading?.qualifier).toBeNull();
+  });
+
+  it("places a lettered ambiguous figure on an overall line in its slot, like a labelled one", () => {
+    const reading = readDimension("Overall", "W 1,800 x D 600 x H 750 mm");
+    expect(reading?.parts).toEqual([
+      { slot: "W", figure: "1,800", slotSuggested: false },
+      { slot: "D", figure: "600", slotSuggested: false },
+      { slot: "H", figure: "750", slotSuggested: false },
+    ]);
+    expect(reading?.qualifier).toBeNull();
+  });
+
+  it("reads a decimal comma's figure", () => {
+    const reading = readDimension("Seat height", "44,5 cm");
+    expect(reading?.parts).toEqual([{ slot: "SH", figure: "44,5", slotSuggested: false }]);
+    expect(reading?.unit).toBe("cm");
+  });
+});

@@ -162,6 +162,86 @@ describe("parseCombinedDimensions", () => {
   });
 });
 
+// ============================================================================
+// AUDIT 2026-11-06, C4 / C12: THE COMMA, AND THE DIAMETER SIGN.
+//
+// `Number(text.replace(",", "."))` read every comma as a decimal point, so
+// `W1,200 x D600 x H750mm` composed as `W1 x D600 x H750mm` in BWS field 3
+// with no flag. A three-digit group is now REFUSED into the bracket (Max,
+// 2026-11-06: a thousand in one convention, a decimal in another), and a
+// decimal comma with one or two digits is READ.
+// ============================================================================
+describe("a comma in a dimension figure", () => {
+  it("refuses a thousands-or-decimal group rather than reading it either way", () => {
+    expect(parseDimensionFigure("1,200")).toEqual({ figure: null, tbcInline: false, ambiguousComma: true });
+    expect(parseDimensionFigure("1.200")).toEqual({ figure: null, tbcInline: false, ambiguousComma: true });
+    expect(parseDimensionFigure("1,200 TBC")).toEqual({ figure: null, tbcInline: true, ambiguousComma: true });
+    expect(toMillimetres("1,200", "mm")).toEqual({ ok: false, reason: "not_numeric" });
+  });
+
+  it("reads a decimal comma with one or two digits", () => {
+    expect(parseDimensionFigure("1,5")).toEqual({ figure: 1.5, tbcInline: false });
+    expect(parseDimensionFigure("1,20")).toEqual({ figure: 1.2, tbcInline: false });
+    expect(parseDimensionFigure("0,750")).toEqual({ figure: 0.75, tbcInline: false });
+    expect(parseDimensionFigure("72.5")).toEqual({ figure: 72.5, tbcInline: false });
+  });
+
+  it("composes a bracketed W with the reason, never W1mm", () => {
+    const composed = cell([row("W", "1,200"), row("D", "600"), row("H", "750")]);
+    expect(composed.text).toBe('D600 x H750mm [W "1,200" — thousands or decimal, not read]');
+    expect(composed.text).not.toContain("W1mm");
+    expect(composed.problems).toEqual([
+      {
+        code: "not_numeric",
+        slot: "W",
+        message: 'W "1,200" could be 1200 or 1.2, so it is not read. Record it as one of those.',
+      },
+    ]);
+  });
+
+  it("composes W1,200 the same through the combined-line reader", () => {
+    const parsed = parseCombinedDimensions("W1,200 x D600 x H750mm");
+    expect(parsed.parts.map((p) => [p.slot, p.value])).toEqual([
+      ["W", "1,200"],
+      ["D", "600"],
+      ["H", "750"],
+    ]);
+  });
+
+  it("keeps what the composer does with a decimal comma's sub-millimetre figure", () => {
+    // 1,5 is 1.5mm, rounded once, by `toMillimetres`, exactly as 1.5 is.
+    expect(cell([row("W", "1,5")]).text).toBe("W2mm");
+    expect(cell([row("W", "1.5")]).text).toBe("W2mm");
+  });
+});
+
+describe("a diameter sign on a combined line", () => {
+  it("reaches the slot normaliser from a prefix", () => {
+    expect(parseCombinedDimensions("Ø600 x H750mm").parts.map((p) => [p.slot, p.value])).toEqual([
+      ["DIA", "600"],
+      ["H", "750"],
+    ]);
+    expect(parseCombinedDimensions("ø 600 x H 750 mm").parts.map((p) => [p.slot, p.value])).toEqual([
+      ["DIA", "600"],
+      ["H", "750"],
+    ]);
+  });
+
+  it("reads one diameter alone, with its unit", () => {
+    const parsed = parseCombinedDimensions("⌀ 600mm");
+    expect(parsed.unitRaw).toBe("mm");
+    expect(parsed.parts.map((p) => [p.slot, p.value])).toEqual([["DIA", "600"]]);
+    expect(parseCombinedDimensions("Ø 600mm").parts.map((p) => p.slot)).toEqual(["DIA"]);
+  });
+
+  it("reads a diameter sign printed after the figure", () => {
+    expect(parseCombinedDimensions("750 H x 600 Ø").parts.map((p) => [p.slot, p.value])).toEqual([
+      ["H", "750"],
+      ["DIA", "600"],
+    ]);
+  });
+});
+
 describe("toMillimetres", () => {
   it("converts each unit in the vocabulary", () => {
     expect(toMillimetres("1900", "mm")).toEqual({ ok: true, mm: 1900 });

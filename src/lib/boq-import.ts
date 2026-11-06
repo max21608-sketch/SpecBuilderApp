@@ -57,6 +57,7 @@
 //     a wrong column nobody can correct.
 // ============================================================================
 import type { SheetData } from "read-excel-file/node";
+import { readQuantity } from "@/lib/printed-number";
 import type { DimensionSlot, ItemLevel } from "@/lib/spec-vocab";
 import type { NonFurnitureGuess } from "@/lib/non-furniture-guess";
 import type { BillPictureOverride, BoqRowImages } from "@/lib/bill-row-image";
@@ -112,6 +113,19 @@ export type BoqLine = {
   itemDescriptionRaw?: string;
   productReference: string | null;
   qty: number | null;
+  /**
+   * THE QUANTITY CELL AS PRINTED, present only where the bill printed
+   * something that is not a count (audit 2026-11-06, C3): `TBC`, `As req'd`,
+   * `2 x 3`, `1.5`, `1,200`. `qty` is then null, and the review prints
+   * `quantityNotGiven(qtyRaw)`, "quantity not given (the bill says “TBC”)",
+   * so a person sees why, not just that.
+   *
+   * ABSENT on a count and on a blank cell, so every line that read before
+   * stages byte for byte as it did, and on every bill staged before this
+   * existed. The reason is NOT stored: `quantityNotGiven` recomputes it from
+   * the text, through the same reader that refused it.
+   */
+  qtyRaw?: string;
   /** The unit of measure as written ("pcs"). Written to `spec_records.qty_unit` since 0040. */
   qtyUnit: string | null;
   /**
@@ -658,10 +672,26 @@ function rawCell(value: unknown): string | null {
   return (value instanceof Date ? sheetDate(value) : String(value)).replace(/\r\n?/g, "\n").trim();
 }
 
-function quantity(value: unknown): number | null {
-  if (!isPrintable(value) || value === "") return null;
-  const n = typeof value === "number" ? value : Number(String(value).replace(/[^0-9.-]/g, ""));
-  return Number.isFinite(n) ? n : null;
+/**
+ * The quantity cell, through THE one number reader (`readQuantity`): a whole
+ * count the integer column holds, or null with the cell as printed.
+ *
+ * THE TRAP THIS REPLACED. It stripped every non-digit and called `Number`:
+ * `Number("")` is 0, so `TBC` and `N/A` were a quantity of NOTHING rather
+ * than no quantity, and the tab's "the bill gave none" sentence could never
+ * fire; `2 x 3` read 23 and `12 (6+6)` read 1266; `1.5` and anything past
+ * int4 reached `spec_records.qty integer` and the confirm refused the WHOLE
+ * bill with "Nothing was written". Each of those is now null, said in words.
+ *
+ * A Date cell reads as the date it printed, never as a number. Its text is
+ * the sheet's own (`sheetDate`), the same day the rest of this reader shows.
+ */
+function quantity(value: unknown): { qty: number | null; qtyRaw?: string } {
+  if (!isPrintable(value)) return { qty: null };
+  const reading = readQuantity(value);
+  if (reading.ok) return { qty: reading.qty };
+  if (reading.raw === null) return { qty: null };
+  return { qty: null, qtyRaw: value instanceof Date ? sheetDate(value) : reading.raw };
 }
 
 /**
@@ -1323,7 +1353,7 @@ function readRows(
         ? { itemDescriptionRaw: descriptionCell }
         : {}),
       productReference: text(at(row, "productReference")),
-      qty: quantity(at(row, "qty")),
+      ...quantity(at(row, "qty")),
       qtyUnit: text(at(row, "qtyUnit")),
       ...optional(row),
     });
@@ -1401,7 +1431,7 @@ export function describeHeader(sheet: {
   headerRow?: number;
   headerRows?: number;
   skippedRows?: number;
-  lines?: readonly { lineNo?: number; qty?: number | null }[];
+  lines?: readonly { lineNo?: number; qty?: number | null; qtyRaw?: string }[];
 }): string {
   const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
   const sentences: string[] = [];
@@ -1461,7 +1491,15 @@ export function describeHeader(sheet: {
    * those is how this sentence would come to be wrong about a real sheet.
    */
   if (lines.length > 0 && lines.every((line) => line.qty === null)) {
-    sentences.push("No line here carries a quantity — the bill gave none, so none is written.");
+    // Where the bill PRINTED something in the column that is not a count
+    // (`TBC` on every line, say), "the bill gave none" is not true, and the
+    // sentence quotes the first such cell instead (C3, 2026-11-06).
+    const printed = lines.find((line) => line.qtyRaw?.trim())?.qtyRaw;
+    sentences.push(
+      printed
+        ? `No line here carries a quantity it could read as a count. The bill prints words such as “${printed}”, so none is written.`
+        : "No line here carries a quantity — the bill gave none, so none is written.",
+    );
   }
 
   const skipped = Number.isFinite(sheet.skippedRows) ? Number(sheet.skippedRows) : 0;

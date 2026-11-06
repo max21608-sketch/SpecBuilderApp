@@ -64,7 +64,7 @@ import {
   type StagedDrawings,
   type UnitSuggestion,
 } from "@/lib/drawing-document";
-import { parseCombinedDimensions, parseDimensionFigure, toMillimetres } from "@/lib/dimensions";
+import { FIGURE_TOKEN, parseCombinedDimensions, parseDimensionFigure, toMillimetres } from "@/lib/dimensions";
 import { readCandidateLine } from "@/lib/slot-swap";
 import { DIMENSION_SLOT_LABELS, normaliseDimensionSlot, normaliseUnit, type AttributeState, type AttributeUnit, type DimensionSlot } from "@/lib/spec-vocab";
 import { normaliseRef } from "@/lib/record-refs";
@@ -80,9 +80,30 @@ import {
 /** The shape a version 4 staging produces. */
 export const ITEMS_SCHEMA_VERSION = 4 as const;
 
+/** A FEET unit as the read reports one beside a figure: `ft`, `feet`, `foot`, `'`, `′`. */
+const FEET_UNIT = /^(?:ft\.?|feet|foot|'|\u2032)$/i;
+
+/**
+ * `8` with `ft` (or `'`) reported as its unit is `8'` split in two, and it is
+ * put back before anything reads it (audit D11, 2026-11-06).
+ *
+ * THE TRAP. `normaliseUnit` holds no feet (there is no `ft` unit; a foot
+ * figure is stored in inches by its own marks) and `rejoinInchMark` puts back
+ * an INCH mark only, so a bare `8` reached the page's cm/mm vote as 8 and
+ * staged as 8 centimetres: a measurement that looks exactly like a real one.
+ * Rejoined, `feetAndInches` reads `8'` as 96 inches, or refuses it whole.
+ * Only a value that is ONE bare figure is rejoined; anything else already
+ * says what it is, or is not one figure and votes for nothing.
+ */
+function rejoinFeetMark(valueRaw: string | null, unitRaw: string | null): string | null {
+  if (valueRaw === null || !FEET_UNIT.test((unitRaw ?? "").trim())) return valueRaw;
+  const figure = valueRaw.trim();
+  return new RegExp(`^${FIGURE_TOKEN}$`).test(figure) ? `${figure}'` : valueRaw;
+}
+
 /** A figure as staged: the value and the unit the page printed, split and rejoined as version 3 does it. */
 function stagedFigure(valueRaw: string | null, unitRaw: string | null): { value: string | null; printed: AttributeUnit | null } {
-  const split = splitFigureAndUnit(rejoinInchMark(valueRaw, unitRaw));
+  const split = splitFigureAndUnit(rejoinInchMark(rejoinFeetMark(valueRaw, unitRaw), unitRaw));
   return { value: split.value, printed: normaliseUnit(unitRaw) ?? split.unit ?? printedImperialUnit(split.value) };
 }
 

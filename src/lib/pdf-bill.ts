@@ -42,6 +42,7 @@
 import ExcelJS from "exceljs";
 import { foldHeading } from "@/lib/boq-roles";
 import { REFERENCE_BOQ_ALIASES, type BoqAlias } from "@/lib/boq-import";
+import { readPrintedNumber } from "@/lib/printed-number";
 
 import { type PdfBillFailureCode } from "@/lib/pdf-bill-source";
 
@@ -416,9 +417,17 @@ export async function readPdfBill(bytes: Uint8Array, options: { aliases?: readon
 
 /**
  * The read put back into a workbook: the header on row 1, a line per row
- * under it. The QUANTITY cell is written as a number — it is a figure the PDF
- * printed, commas taken out — and every other cell as the text it printed, so
- * a code such as `0012` keeps its zeros.
+ * under it. Every cell is written as the text it printed, so a code such as
+ * `0012` keeps its zeros, EXCEPT a QUANTITY cell that `readPrintedNumber`
+ * reads as one whole number, which is written as that number.
+ *
+ * NOT `Number(cell.replace(/,/g, ""))`, which it was until 2026-11-06 (audit
+ * C3/C4): that turned `1,200` into twelve hundred without asking which
+ * convention the PDF was printed in, and wrote `13.5` as a figure an integer
+ * column would refuse at confirm. Written as printed instead, the bill reader
+ * refuses them with the PDF's own words beside the line, through the same
+ * reader. The `QUANTITY` pattern above still decides which text items ANCHOR
+ * a row: that is geometry (audit C10), not a value, and is left alone.
  */
 export async function pdfBillWorkbook(
   read: Extract<PdfBillRead, { ok: true }>,
@@ -431,8 +440,9 @@ export async function pdfBillWorkbook(
     sheet.addRow(
       row.cells.map((cell, index) => {
         if (!cell) return null;
-        if (index === read.quantityColumn && QUANTITY.test(cell)) return Number(cell.replace(/,/g, ""));
-        return cell;
+        if (index !== read.quantityColumn) return cell;
+        const printed = readPrintedNumber(cell);
+        return printed.kind === "whole" ? printed.value : cell;
       }),
     );
   }

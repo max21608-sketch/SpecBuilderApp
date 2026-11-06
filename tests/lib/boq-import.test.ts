@@ -472,6 +472,61 @@ describe("a bill with no quantity column", () => {
 });
 
 // ============================================================================
+// AUDIT 2026-11-06 C3: THE QUANTITY CELL IS READ BY THE ONE NUMBER READER.
+//
+// The old reader stripped every non-digit and called `Number` on what was
+// left: `TBC` became 0 (never "not given"), `2 x 3` became 23, and `1.5`
+// reached the INTEGER column and failed the whole confirm with "Nothing was
+// written". A refused cell is now `qty: null` with the cell as printed beside
+// it, so the review can say what the bill said instead of a bare "not given".
+// ============================================================================
+describe("a quantity cell that is not a count", () => {
+  const bill = (cells: unknown[]): SheetData => [
+    ["Code", "Item Description", "Qty"],
+    ...cells.map((cell, index) => [`EX-${index + 1}`, "Chair", cell as SheetData[number][number]]),
+  ];
+
+  it("stages words as no quantity, keeping what the bill printed", () => {
+    const lines = one(parseBoqSheets(sheet(bill(["TBC", "As req'd", "N/A"])))).lines;
+    expect(lines.map((line) => line.qty)).toEqual([null, null, null]);
+    expect(lines.map((line) => line.qtyRaw)).toEqual(["TBC", "As req'd", "N/A"]);
+  });
+
+  it("never joins the digits of several figures into one", () => {
+    const lines = one(parseBoqSheets(sheet(bill(["2 x 3", "12 (6+6)"])))).lines;
+    expect(lines.map((line) => line.qty)).toEqual([null, null]);
+    expect(lines.map((line) => line.qtyRaw)).toEqual(["2 x 3", "12 (6+6)"]);
+  });
+
+  it("refuses a fractional quantity at staging, not at the confirm", () => {
+    const lines = one(parseBoqSheets(sheet(bill([1.5, "3,6", 2147483648])))).lines;
+    expect(lines.map((line) => line.qty)).toEqual([null, null, null]);
+    expect(lines.map((line) => line.qtyRaw)).toEqual(["1.5", "3,6", "2147483648"]);
+  });
+
+  it("reads a count with its unit word, and leaves a plain count's line as it always was", () => {
+    const lines = one(parseBoqSheets(sheet(bill(["2 nr", "12 No.", 4, "", null])))).lines;
+    expect(lines.map((line) => line.qty)).toEqual([2, 12, 4, null, null]);
+    // Only a REFUSED cell carries its text: a count, or a blank, stages the
+    // line byte for byte as before.
+    expect(lines.map((line) => "qtyRaw" in line)).toEqual([false, false, false, false, false]);
+  });
+
+  it("does not read a date cell as a number", () => {
+    const lines = one(parseBoqSheets(sheet(bill([dateCell(new Date(Date.UTC(2026, 10, 6)))])))).lines;
+    expect(lines[0]?.qty).toBeNull();
+    expect(lines[0]?.qtyRaw).toBe("2026-11-06");
+  });
+
+  it("says on the tab that the bill printed words where it gave no count", () => {
+    const header = describeHeader(one(parseBoqSheets(sheet(bill(["TBC", "TBC"])))));
+    expect(header).toContain("No line here carries a quantity");
+    expect(header).toContain("“TBC”");
+    expect(header).not.toContain("the bill gave none");
+  });
+});
+
+// ============================================================================
 // VARIANCE MATRIX §6.10.a ROW 3 — MERGED CELLS / A TWO-ROW HEADER.
 //
 // EXPECTED: PROCEEDS where the second row completes the first; otherwise
