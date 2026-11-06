@@ -18,6 +18,7 @@
 // the first one already took.
 import { json } from "@/lib/db";
 import { sweepExpiredReads } from "@/lib/extraction-sweep";
+import { cronAuthorised } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -29,9 +30,8 @@ export const maxDuration = 60;
 const ACTOR = "system:read-sweeper";
 
 function authorised(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  return request.headers.get("authorization") === `Bearer ${secret}`;
+  // Constant time, and closed when CRON_SECRET is unset (audit A14).
+  return cronAuthorised(request);
 }
 
 export async function GET(request: Request): Promise<Response> {
