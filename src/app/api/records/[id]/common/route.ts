@@ -125,8 +125,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     );
   }
 
+  // N/A CARRIES NO VALUE, and the database says so with a CHECK
+  // (`spec_answers_na_has_no_value`) whose violation reached the screen as a
+  // 500 reading "Nothing was written". The single answer route has always
+  // said it first; this is that sentence, for the answer given once for every
+  // configuration (audit E8). A value of only spaces is no value.
+  const edit = parsed.data;
+  if (edit.op === "answer" && edit.state === "na") {
+    if (edit.value?.trim()) {
+      return json({ ok: false, error: "N/A cannot carry a value. Clear the value, or record it as TBC or confirmed.", field: "value" }, 400);
+    }
+    edit.value = null;
+  }
+
   try {
-    const result = await withTransaction((txn) => editCommonSpec(txn, { lineId: id, edit: parsed.data, actor: user.email }));
+    const result = await withTransaction((txn) => editCommonSpec(txn, { lineId: id, edit, actor: user.email }));
     return json({ ok: true, ...result });
   } catch (cause) {
     return transactionErrorResponse(cause);
