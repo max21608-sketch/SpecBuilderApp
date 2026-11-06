@@ -111,9 +111,16 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 //                       notification can at worst ask us to re-read an id that
 //                       does not exist. The route answers 404 entirely when
 //                       MAIL_INGESTION_MODE is not 'enabled'.
+// EVERY EXCEPTION IS ANCHORED (audit A13, 2026-11-06). Inside the lookahead
+// a bare word is a PREFIX: `login` also exempted `/login-as`, `api/cron` an
+// `/api/cronjobs`, and `api/graph/notifications` the admin route the paragraph
+// above promises stays protected. A path that is one route ends in `$`; a
+// family of routes ends in `/`. `tests/lib/middleware-matcher.test.ts` runs a
+// table of both through Next's own matcher compiler.
+//
 // Anything added to this list is a deliberate decision to expose a route.
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|login|api/auth/login|api/queues|api/cron|api/graph/notifications).*)",
+    "/((?!_next/static/|_next/image$|favicon\\.ico$|login$|api/auth/login$|api/queues/|api/cron/|api/graph/notifications$).*)",
   ],
 };
