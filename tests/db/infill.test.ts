@@ -7,9 +7,12 @@
 // a fact about the database:
 //
 //   * A MEETING IS ONE ENTRY IN THE TRAIL. Twelve values recorded while a
-//     change is open belong to that change and give each record ONE version —
-//     not twelve rows reading "update", which is the state that made people
-//     stop opening a change at all.
+//     change is open belong to that change — not twelve rows reading
+//     "update", which is the state that made people stop opening a change at
+//     all. Each value is its own transaction and so its own VERSION of the
+//     record (0052, audit B1): this test used to assert ONE version per record,
+//     and that one version held the first value only, the other five landing
+//     in whatever change touched the record next.
 //   * A DIMENSION IS NOT AN ANSWER. The row writes an attribute with a slot,
 //     and the composed cell that appears in the checklist is
 //     `composeDimensionCell` over the record's attributes — the same
@@ -96,7 +99,7 @@ describeIfDb("the infill screen's writes", () => {
     await client.end();
   }, SLOW);
 
-  it("records twelve values under ONE open change, with one version per record", async () => {
+  it("records twelve values under ONE open change, a version per edit, the last holding all six", async () => {
     const outstanding = await loadOutstanding(projectId);
     const first = outstanding.filter((q) => q.recordId === recordIds[0] && q.answerId).slice(0, 6);
     const second = outstanding.filter((q) => q.recordId === recordIds[1] && q.answerId).slice(0, 6);
@@ -140,14 +143,27 @@ describeIfDb("the infill screen's writes", () => {
     expect(changes.rows).toHaveLength(1);
     expect(changes.rows[0].id).toBe(changeSetId);
 
-    // ONE version per record touched, not one per value.
+    // One version per EDIT, all under the one change (0052): each value was
+    // its own transaction. The newest version of each record holds all six,
+    // which is the state the change leaves it in.
     const snapshots = await client.query(
       `select record_id, count(*)::int as n from record_snapshots
         where change_set_id = $1 group by record_id`,
       [changeSetId],
     );
     expect(snapshots.rows).toHaveLength(2);
-    for (const row of snapshots.rows) expect(row.n).toBe(1);
+    for (const row of snapshots.rows) expect(row.n).toBe(6);
+    const newest = await client.query(
+      `select distinct on (record_id) record_id, atoms from record_snapshots
+        where change_set_id = $1 order by record_id, snapshot_no desc`,
+      [changeSetId],
+    );
+    for (const row of newest.rows) {
+      const confirmed = (row.atoms.answers as { state: string; value: string | null }[]).filter((a) =>
+        a.value?.startsWith("__QA "),
+      );
+      expect(confirmed).toHaveLength(6);
+    }
 
     // Every answer is the person's now, and out of reach of any later document.
     const answers = await client.query(

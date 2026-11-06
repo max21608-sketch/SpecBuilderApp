@@ -20,6 +20,30 @@
 // `cells` is stored as NAMED columns rather than 109 positional strings: BWS
 // inserts a column occasionally, every letter after it shifts, and a version
 // written before that would then be read against the wrong headings.
+//
+// ---- ONE VERSION PER TRANSACTION, NOT PER CHANGE (audit B1, 0052) ----------
+//
+// The insert used to say `on conflict (record_id, change_set_id) do nothing`,
+// written for a confirm: one change, one transaction, a record touched twice.
+// An OPEN change is many transactions -- every edit a person makes after
+// "Start a change" attaches to it -- so the clause kept the FIRST edit's state
+// as the change's version of the record and silently dropped every later one.
+// The width was v1; the depth typed a minute later had no version; it showed
+// up in the next change's diff, under that change's reason.
+//
+// The property the clause protected is about a TRANSACTION, so that is where
+// it is kept now: the records versioned so far are remembered in a setting
+// local to the transaction (`app.snapshotted_records`), and a second call in
+// the same transaction skips them. A transaction-local setting ends with the
+// transaction and rolls back with a savepoint, which is exactly the lifetime
+// of the rows it describes. A JavaScript Set would outlive both, and a
+// transaction id is what 0012 refuses to rely on.
+//
+// The first call in a transaction wins. A caller that writes more to a record
+// AFTER versioning it in the same transaction gets a version without those
+// writes, so the callers that fan out (`configuration-family.ts`, the
+// project-wide and apply routes) pass `snapshot: false` and version once, at
+// the end. That has been the rule since 0012 and nothing here changes it.
 // ============================================================================
 import type { TxnSql } from "@/lib/db-transaction";
 import { composeRowCells, BWS_EXPORT_COLUMNS, COMPOSER_VERSION } from "@/lib/bws-export";
@@ -94,9 +118,21 @@ export async function snapshotRecords(
     for update
   `;
 
-  const atoms = await loadRecordAtoms(txn, ordered);
+  // What this transaction has already versioned. Keyed on the change as well
+  // as the record, so a transaction that (unusually) works under two changes
+  // still gives each its version, as the old unique did.
+  const already = await txn`select current_setting('app.snapshotted_records', true) as seen`;
+  const seen = new Set(
+    String(already[0]?.seen ?? "")
+      .split(",")
+      .filter(Boolean),
+  );
+  const pending = ordered.filter((recordId) => !seen.has(`${changeSetId}:${recordId}`));
+  if (pending.length === 0) return written;
 
-  for (const recordId of ordered) {
+  const atoms = await loadRecordAtoms(txn, pending);
+
+  for (const recordId of pending) {
     const record = atoms.get(recordId);
     // A record deleted inside this transaction has no state to record. Nothing
     // in the app deletes one — retiring is a status — so this is defensive.
@@ -107,21 +143,23 @@ export async function snapshotRecords(
     `;
     const next = Number(numbers[0]?.last ?? 0) + 1;
 
-    // `on conflict do nothing` on (record_id, change_set_id): a transaction
-    // that touches a record twice — a drawing confirm that writes attributes
-    // and then promotes answers — still produces ONE version of it, which is
-    // what a reader expects from one change.
     const inserted = await txn`
       insert into record_snapshots
         (record_id, change_set_id, snapshot_no, schema_version, composer_version, atoms, cells)
       values
         (${recordId}, ${changeSetId}, ${next}, ${RECORD_ATOMS_SCHEMA_VERSION}, ${COMPOSER_VERSION},
          ${JSON.stringify(record)}::jsonb, ${JSON.stringify(composeStoredCells(record))}::jsonb)
-      on conflict (record_id, change_set_id) do nothing
       returning snapshot_no
     `;
-    if (inserted[0]) written.set(recordId, Number(inserted[0].snapshot_no));
+    if (inserted[0]) {
+      written.set(recordId, Number(inserted[0].snapshot_no));
+      seen.add(`${changeSetId}:${recordId}`);
+    }
   }
+
+  // Published once, after the loop: the list only ever grows inside one
+  // transaction, and `is_local = true` ends it with the transaction.
+  await txn`select set_config('app.snapshotted_records', ${[...seen].join(",")}, true)`;
 
   return written;
 }

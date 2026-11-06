@@ -16,8 +16,13 @@ import { requireScriptEnvironment } from "../db/script-env.mjs";
 const scrypt = promisify(_scrypt);
 
 // Must match users_role_check in db/migrations/0001_foundation.sql and
-// WRITER_ROLES in src/middleware.ts. All three are checked by
+// WRITER_ROLES in src/lib/roles.ts. All three are checked by
 // tests/db/foundation.test.ts.
+//
+// RE-RUNNING THIS FOR AN EXISTING EMAIL ENDS THEIR SESSIONS (0053): it is how
+// a password is reset and a role changed, and a reset that left a stolen
+// cookie working would not be a reset. The token version moves on, and every
+// session the user holds is refused at its next request.
 const ROLES = ["admin", "editor", "viewer"];
 
 const [, , email, name, role, password] = process.argv;
@@ -47,7 +52,8 @@ try {
     `insert into users (email, name, role, password_hash)
      values ($1, $2, $3, $4)
      on conflict (email) do update set
-       name = excluded.name, role = excluded.role, password_hash = excluded.password_hash
+       name = excluded.name, role = excluded.role, password_hash = excluded.password_hash,
+       token_version = users.token_version + 1
      returning id, email, name, role`,
     [email, name, role, passwordHash],
   );

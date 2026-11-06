@@ -97,5 +97,6 @@ export async function POST(req: Request): Promise<Response> {
 
   const token = await makeSessionToken(user);
   await setSessionCookie(token);
-  return json({ ok: true, user });
+  // The token version is the session's own bookkeeping, not the screen's.
+  return json({ ok: true, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
 }

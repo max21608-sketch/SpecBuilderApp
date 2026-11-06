@@ -38,11 +38,20 @@ type UserRow = {
   role: string;
   password_hash: string;
   active: boolean;
+  token_version: number;
 };
 
-export async function verifyCredentials(email: string, password: string): Promise<SessionUser | null> {
+/**
+ * The account a password opens, with the token version a new session carries
+ * (0053): the session is valid until that version moves, which signing out
+ * does for every session the user holds.
+ */
+export async function verifyCredentials(
+  email: string,
+  password: string,
+): Promise<(SessionUser & { tokenVersion: number }) | null> {
   const rows = (await sql`
-    select id, email, name, role, password_hash, active
+    select id, email, name, role, password_hash, active, token_version
     from users where lower(email) = lower(${email})
   `) as UserRow[];
   const user = rows[0];
@@ -50,5 +59,5 @@ export async function verifyCredentials(email: string, password: string): Promis
   // judged after it: the time a refusal takes must not depend on the account.
   const matches = await verifyScrypt(password, user?.active ? user.password_hash : NO_ACCOUNT_HASH);
   if (!user || !user.active || !matches) return null;
-  return { id: user.id, email: user.email, name: user.name, role: user.role };
+  return { id: user.id, email: user.email, name: user.name, role: user.role, tokenVersion: Number(user.token_version) };
 }

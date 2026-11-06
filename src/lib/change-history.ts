@@ -174,14 +174,23 @@ export async function loadProjectHistory(
   if (rows.length === 0) return [];
 
   const ids = rows.map((row) => String(row.change_set_id));
+  // ONE ROW PER RECORD PER CHANGE, at the newest version the change took of
+  // it. Since 0052 an open change may hold several versions of one record (one
+  // per transaction, audit B1), and listing each would count one item edited
+  // twice as two items fixed at this point. The newest is the one the change
+  // leaves the record at.
   const touched = await exec`
-    select s.change_set_id, s.record_id, s.snapshot_no, r.record_no, p.bws_project_number,
-           r.variant_ordinal, (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no
-    from record_snapshots s
-    join spec_records r on r.id = s.record_id
-    join projects p on p.id = r.project_id
-    where s.change_set_id = any(${ids}::uuid[])
-    order by coalesce((select p2.record_no from spec_records p2 where p2.id = r.parent_id), r.record_no), r.variant_ordinal nulls first, r.record_no
+    select * from (
+      select distinct on (s.change_set_id, s.record_id)
+             s.change_set_id, s.record_id, s.snapshot_no, r.record_no, p.bws_project_number,
+             r.variant_ordinal, (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no
+      from record_snapshots s
+      join spec_records r on r.id = s.record_id
+      join projects p on p.id = r.project_id
+      where s.change_set_id = any(${ids}::uuid[])
+      order by s.change_set_id, s.record_id, s.snapshot_no desc
+    ) latest
+    order by coalesce(parent_record_no, record_no), variant_ordinal nulls first, record_no
   `;
   const byChange = new Map<string, ProjectChange["records"]>();
   for (const row of touched) {
