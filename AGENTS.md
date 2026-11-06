@@ -2462,6 +2462,32 @@ Five things here are load-bearing.
   ("Hayley's email of the 14th"), attaches the email, and every edit after that
   attaches to it — at most one open change per actor per project, by partial
   unique index.
+- **One version per TRANSACTION, not per change** (0052, audit B1, Max
+  2026-11-06). `snapshotRecords` inserted `on conflict (record_id,
+  change_set_id) do nothing`, written for a confirm (one change, one
+  transaction), and an open change spans many: the first edit kept the
+  change's version and every later one took none, so D surfaced in the NEXT
+  change's diff under that change's reason and evidence, and a baseline
+  between them froze a state the record had left. The unique is gone;
+  `snapshotRecords` remembers the records it versioned in a
+  transaction-local setting (`app.snapshotted_records`, `set_config(…, true)`,
+  undone by a savepoint rollback) and skips them on a second call, so one act
+  is still one version. The first call in a transaction wins, which is why
+  fan-outs pass `snapshot: false`. The trail names a record once per change
+  at its newest version; the open-change count is `distinct record_id`; and
+  the coverage assertion in `tests/db/change-history.test.ts` is per RECORD —
+  every record a change wrote spec content to has a version under that
+  change (121 change sets, 1,537 pairs, 0 gaps on the local stack).
+- **The diff pairs supersessions** (atoms schema 9, audit E6). Since 0033
+  nothing is corrected in place, so keying on the row id read every
+  correction as removed + added. Each attribute in a version carries
+  `supersedes`, its retired lineage — on the SUCCESSOR, because the older
+  version never knew — and `pairSupersessions` re-keys a retired row onto its
+  single successor: one changed line, the page kept, across a skipped middle
+  correction too. One-to-one only (a Dia that replaced W and D stays one add
+  and two removes). `qualifier` is named on `AtomAnswer` and diffed on both
+  lists; Zod strips what it does not name, which is how an answer's placement
+  vanished from every diff. Versions before schema 9 carry no lineage.
 
 **Append-only means refuse the rewrite, allow the cascade.** 0013, 0014 and
 0015 each correct the same misreading: a version could not be deleted with its
@@ -4073,8 +4099,8 @@ rule below is a trap rather than a preference.
   (a COM field has no BWS palette); never an "Other…" — it is BW's own range.
   One act recomposes and versions every record carrying the code
   (`carryFinishToItems`, shared with `editFinish`). Snapshots carry it (atoms
-  schema 8); versions from before 0045 show the item's own standard, because
-  that is what shipped then.
+  schema 9 since 2026-11-06, 8 before); versions from before 0045 show the
+  item's own standard, because that is what shipped then.
 - **Slots are unchanged**: two timber or metal codes on one item fill Main,
   then 2, then 3, in the order the bill lists them (Max, same day).
 
@@ -4774,6 +4800,23 @@ their responsibilities elsewhere without a deliberate architecture decision.
   is passed as a column, never as connection session state: Neon's HTTP driver
   kills `SET LOCAL`, which is why `write_audit()` falls back to
   `to_jsonb(new)->>'updated_by'`.
+- `src/lib/auth.ts`, `src/lib/session.ts` — a session can be ENDED (0053,
+  audit A4, 2026-11-06). Role and `active` lived in a 7-day JWT read by nothing
+  but the matcher, so a demotion or a deactivation took effect a week later and
+  a stolen cookie survived logout. A token carries `aud = APP_ENV` (a staging
+  token is refused on pilot), `iss = "spec-builder"` and `tv =
+  users.token_version`, lives 24 h and is renewed past half-life or when the
+  row's role, name or email disagrees. `getSessionUser` reads the user's row on
+  EVERY request, uncached on purpose (a cache is the seven-day window again),
+  refuses an inactive user or a moved version, and returns the ROW's role, so
+  a demotion is the next request through `requireWriter`. The middleware reads
+  the token's role only, as a first line, because the edge cannot reach the
+  database. Signing out increments `token_version`, ending every session the
+  user holds; `tools/create-user.mjs` re-run for an existing email does the
+  same. **Deploying this code signs every user out once**, because older
+  tokens carry no version or audience, and against a database without 0053 it
+  fails every session read. `tests/lib/session-boundary.test.ts` drives the
+  real middleware with real tokens for `viewer`, `Viewer` and `editor`.
 - `src/lib/bws-export.ts` — the 109-column BWS layout as a static constant, and
   the composer. A test asserts its 56 spec ids equal the seeded `json_id`s,
   which is what catches a BWS column insertion: every letter after it shifts
@@ -4925,10 +4968,13 @@ boundary, the chase respects the matrix (0051), reads that cost what they
 should, refusals written for people, the category as a suggestion. Stage 3
 (before Graph) is landed: re-assignment works, a daily cap on automatic
 reads, only stamped evidence auto-assigns, one row per email. Stage 4 (the
-boundary and the trail) is landing: the write boundary in every handler,
+boundary and the trail) is landed: the write boundary in every handler,
 locks before occupancy, the category guard, a deletable project and a trail
-that keeps only what it should (0054–0057); sessions and versions (0052,
-0053) follow. The sections above carry each rule
+that keeps only what it should (0054–0057), one version per transaction and
+the diff pairing supersessions (0052), sessions that can be ended (0053).
+Stage 5 (shape) is in progress: CI runs the database tier (and its first
+fresh-database run found two tests that passed only on the shared
+database's history, which 0058 and a fixture fix close). The sections above carry each rule
 under its own heading, dated 2026-11-06; §4 of the audit places the open items
 of the 12 Oct, 23 Oct and 15 Oct plans against it. Pilot needs 0050 and the
 provenance backfill before this code (the promotion notes are in
