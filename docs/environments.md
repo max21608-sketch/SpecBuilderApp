@@ -224,6 +224,20 @@ setting is what would actually stop a breach:
   The same first two (no force push, no deletion) are worth having on
   `staging`, which every pilot commit must come from.
 
+**Node.** `package.json` declares `"engines": { "node": "22.x" }`, the
+version both CI jobs run (`actions/setup-node`, `node-version: 22`). Max's
+Mac runs Node 24, which is newer and runs everything here; npm only warns
+about the mismatch (`engine-strict` is off), and the warning is the reminder
+that what CI proves is Node 22.
+
+**Vercel reads that field too, and it wins over the project setting.** A
+Vercel project builds and runs with the Node major `engines.node` names,
+whatever its *Node.js Version* setting says. Neither project's setting is
+recorded in this repo, so the first staging deployment after the field landed
+is the check: its build log prints the Node version, and it should read 22.
+If a project had been on 24, this field moved it to 22, which is the version
+CI proves.
+
 ## Creating the pilot environment
 
 Once, by Max, at the consoles. Nothing in the repo can do any of it.
