@@ -79,7 +79,7 @@ import BillPicturePanelRow from "@/components/imports/BillPicturePanel";
 import type { FabricLinePlan } from "@/lib/bill-fabric-filing";
 // Pure: the area a record will carry (a Sub-Area composed in), the same
 // function the confirm writes it with, so the table shows what will be written.
-import { configurationRange, effectiveArea } from "@/lib/boq-reconcile";
+import { effectiveArea } from "@/lib/boq-reconcile";
 import {
   BOQ_ROLE_LABELS,
   BOQ_MAPPING_SOURCE_LABELS,
@@ -104,6 +104,7 @@ import { clampText } from "@/lib/shout";
 import PageBody from "@/components/ui/PageBody";
 import Tabs from "@/components/ui/Tabs";
 import { useBoqImport, type Line, type StructureReadState } from "@/components/imports/use-boq-import";
+import RevisionPanel, { PairingCell } from "@/components/imports/RevisionPanel";
 
 
 /**
@@ -534,13 +535,6 @@ function LevelCell({
       )}
     </>
   );
-}
-
-
-/** "and its 5 configurations (12.1–12.5)" — what a line takes with it. */
-function configurationsClause(labels: readonly string[] | undefined): string {
-  if (!labels || labels.length === 0) return "";
-  return ` and its ${labels.length === 1 ? "configuration" : `${labels.length} configurations`} (${configurationRange(labels)})`;
 }
 
 /** A claim this old is a request that died, and the screen stops waiting on it. */
@@ -1589,84 +1583,12 @@ export default function ReviewImportPage() {
               )}
 
               {reconciliation && (
-                <Note
-                  tone="info"
-                  title={`${reconciliation.counts.changed} changed`}
-                  className="mt-4"
-                >
-                  · {reconciliation.counts.paired - reconciliation.counts.changed} unchanged ·{" "}
-                  {reconciliation.counts.new} new · {reconciliation.counts.missing} no longer listed
-                  {(reconciliation.counts.restored ?? 0) > 0 && <> · {reconciliation.counts.restored} brought back</>}
-                  {reconciliation.counts.ambiguous > 0 && (
-                    <> · <b>{reconciliation.counts.ambiguous} to pair by hand</b></>
-                  )}
-                  {/* A SUGGESTION IS NOT A PAIRING until it is accepted: the
-                      confirm writes only what is stored, so an unaccepted one
-                      confirms as a new item and retires its record. */}
-                  {(reconciliation.counts.suggested ?? 0) > 0 && run.status === "parsed" && (
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                      <SuggestButton
-                        size="sm"
-                        value={`Pair the ${reconciliation.counts.suggested} suggested`}
-                        evidence="each line's code is on exactly one item of the phase"
-                        disabled={busy}
-                        onAccept={() =>
-                          void acceptAllPairings(
-                            sheetIndex,
-                            reconciliation.lines.flatMap((entry) => {
-                              if (entry.status !== "paired" || entry.accepted !== false || !entry.suggestedRecordId) return [];
-                              const record = reconciliation.records.find((row) => row.id === entry.suggestedRecordId);
-                              return record ? [{ index: entry.index, recordId: record.id, recordVersion: record.version }] : [];
-                            }),
-                          )
-                        }
-                      />
-                      <span className="text-amber-800">Until they are paired, those lines confirm as new items.</span>
-                    </div>
-                  )}
-                  <p className="mt-0.5">
-                    Items carried forward keep their record — and with it their drawings, their specs, their picture
-                    and their answers. Only the bill&rsquo;s own columns are written over.
-                  </p>
-                  {reconciliation.missing.some((missing) => missing.suggestedFor === undefined) && (
-                    <>
-                      <p className="mt-1.5 font-semibold">Not in this revision — these will be retired, not deleted:</p>
-                      <ul className="mt-1 space-y-0.5">
-                        {reconciliation.missing.filter((missing) => missing.suggestedFor === undefined).map((missing) => (
-                          <li key={missing.recordId}>
-                            <span className="font-mono">{missing.label}</span> {missing.itemDescription}
-                            {missing.codes.length > 0 && <span> · {missing.codes.join(", ")}</span>}
-                            {/* A configuration follows its line (C1): retired
-                                with it here, in the same change. */}
-                            {(missing.configurations?.length ?? 0) > 0 && (
-                              <span>{configurationsClause(missing.configurations)}</span>
-                            )}
-                            {/* Named, not counted. A record with 14 specs and a
-                                picture is somebody's afternoon, and pairing it
-                                is usually what was meant. */}
-                            {(missing.attributeCount > 0 || missing.hasImage || missing.settledAnswers > 0) && (
-                              <span className="text-amber-800">
-                                {" — carries "}
-                                {[
-                                  missing.attributeCount > 0
-                                    ? `${missing.attributeCount} spec${missing.attributeCount === 1 ? "" : "s"}`
-                                    : null,
-                                  missing.settledAnswers > 0
-                                    ? `${missing.settledAnswers} answer${missing.settledAnswers === 1 ? "" : "s"}`
-                                    : null,
-                                  missing.hasImage ? "a picture" : null,
-                                ]
-                                  .filter(Boolean)
-                                  .join(", ")}
-                                . Pair it with a line above, or it stops being live.
-                              </span>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                </Note>
+                <RevisionPanel
+                  reconciliation={reconciliation}
+                  status={run.status}
+                  busy={busy}
+                  onAcceptPairings={(pairs) => acceptAllPairings(sheetIndex, pairs)}
+                />
               )}
 
               {/* THE REVIEW IS THE GATE FOR WHAT THE DESCRIPTIONS SAY: the
@@ -2176,148 +2098,14 @@ export default function ReviewImportPage() {
                             )}
                             {reconciliation && (
                               <Td>
-                                {(() => {
-                                  const pairing = pairingFor(line.index);
-                                  if (!pairing || line.ignored) return <span className="text-neutral-400">—</span>;
-                                  const retiredById = new Map((reconciliation.retired ?? []).map((row) => [row.id, row]));
-                                  // A LINE AN EARLIER REVISION RETIRED, BROUGHT BACK (C14).
-                                  // Only ever the reviewer's choice; one press undoes it.
-                                  if (pairing.status === "restore") {
-                                    const back = retiredById.get(pairing.suggestedRecordId ?? "");
-                                    return (
-                                      <div className="text-xs">
-                                        <p>
-                                          Brings back <span className="font-mono">{back?.label ?? "a retired record"}</span>
-                                          {configurationsClause(back?.configurations)}, with its specs and picture.
-                                        </p>
-                                        {pairing.deltas.length > 0 && (
-                                          <ul className="mt-0.5 text-neutral-600">
-                                            {pairing.deltas.map((delta) => (
-                                              <li key={delta.field}>
-                                                {delta.label}:{" "}
-                                                <span className="text-neutral-400 line-through">{delta.was ?? "—"}</span>{" "}
-                                                → <span className="text-neutral-900">{delta.now ?? "—"}</span>
-                                              </li>
-                                            ))}
-                                          </ul>
-                                        )}
-                                        <Button
-                                          size="sm"
-                                          variant="quiet"
-                                          className="mt-1"
-                                          disabled={run.status !== "parsed" || busy}
-                                          onClick={() => void setLine(sheetIndex, line.index, { replaces: null })}
-                                        >
-                                          Make it a new item instead
-                                        </Button>
-                                      </div>
-                                    );
-                                  }
-                                  const pairedRecord = reconciliation.records.find(
-                                    (row) => row.id === (line.replaces?.recordId ?? pairing.suggestedRecordId),
-                                  );
-                                  return (
-                                    <div>
-                                      <select
-                                        // THE STORED DECISION ONLY. A select
-                                        // showing the suggestion as chosen
-                                        // fires no change when somebody agrees
-                                        // with it, and the confirm then wrote
-                                        // the line as new (found 2026-11-06).
-                                        value={line.replaces?.recordId ?? ""}
-                                        disabled={run.status !== "parsed" || busy}
-                                        onChange={(event) => {
-                                          const recordId = event.target.value;
-                                          const record = reconciliation.records.find((row) => row.id === recordId);
-                                          void setLine(sheetIndex, line.index, {
-                                            // The VERSION the reviewer is
-                                            // looking at travels with the
-                                            // pairing, so a record edited since
-                                            // refuses the confirm rather than
-                                            // being quietly overwritten.
-                                            replaces: record
-                                              ? { recordId: record.id, recordVersion: record.version }
-                                              : null,
-                                          });
-                                        }}
-                                        className={`max-w-[13rem] rounded border px-2 py-1 text-xs disabled:opacity-50 ${
-                                          pairing.status === "ambiguous" && !line.replaces
-                                            ? "border-amber-400 bg-amber-50"
-                                            : "border-neutral-300"
-                                        }`}
-                                      >
-                                        <option value="">new item</option>
-                                        {reconciliation.records.map((record) => (
-                                          <option key={record.id} value={record.id}>
-                                            {record.label} · {record.itemDescription.slice(0, 32)}
-                                          </option>
-                                        ))}
-                                      </select>
-                                      {pairing.status === "paired" && !line.replaces && pairedRecord && (
-                                        <SuggestButton
-                                          className="mt-1"
-                                          value={`Pair with ${pairedRecord.label}`}
-                                          evidence="the same code, on one item of the phase"
-                                          disabled={run.status !== "parsed" || busy}
-                                          onAccept={() =>
-                                            void setLine(sheetIndex, line.index, {
-                                              replaces: { recordId: pairedRecord.id, recordVersion: pairedRecord.version },
-                                            })
-                                          }
-                                        />
-                                      )}
-                                      {pairing.status === "ambiguous" && !line.replaces && (
-                                        <p className="mt-0.5 text-xs text-amber-800">
-                                          This code is on {pairing.candidates.length} records. Choose which one, or
-                                          leave it as a new item.
-                                        </p>
-                                      )}
-                                      {pairing.deltas.length > 0 && (
-                                        <ul className="mt-0.5 text-xs text-neutral-600">
-                                          {pairing.deltas.map((delta) => (
-                                            <li key={delta.field}>
-                                              {delta.label}:{" "}
-                                              <span className="text-neutral-400 line-through">{delta.was ?? "—"}</span>{" "}
-                                              → <span className="text-neutral-900">{delta.now ?? "—"}</span>
-                                            </li>
-                                          ))}
-                                        </ul>
-                                      )}
-                                      {pairing.status === "paired" && pairing.deltas.length === 0 && (
-                                        <p className="mt-0.5 text-xs text-neutral-500">unchanged</p>
-                                      )}
-                                      {/* ITS CONFIGURATIONS FOLLOW IT (C1): carried with it, never
-                                          a line of their own to pair. */}
-                                      {pairing.status === "paired" && (pairedRecord?.configurations?.length ?? 0) > 0 && (
-                                        <p className="mt-0.5 text-xs text-neutral-600">
-                                          {configurationRange(pairedRecord?.configurations ?? [])}{" "}
-                                          {line.replaces ? "follow it" : "follow it once it is paired"}
-                                        </p>
-                                      )}
-                                      {/* A RETIRED LINE WITH THIS CODE, OFFERED BACK (C14) —
-                                          never chosen for the reviewer, however many. */}
-                                      {pairing.status === "new" &&
-                                        (pairing.restoreCandidates ?? []).map((candidateId) => {
-                                          const candidate = retiredById.get(candidateId);
-                                          if (!candidate) return null;
-                                          return (
-                                            <SuggestButton
-                                              key={candidateId}
-                                              className="mt-1"
-                                              value={`Bring back ${candidate.label}`}
-                                              evidence={`retired by an earlier revision, same code${configurationsClause(candidate.configurations)}`}
-                                              disabled={run.status !== "parsed" || busy}
-                                              onAccept={() =>
-                                                void setLine(sheetIndex, line.index, {
-                                                  replaces: { recordId: candidate.id, recordVersion: candidate.version, restore: true },
-                                                })
-                                              }
-                                            />
-                                          );
-                                        })}
-                                    </div>
-                                  );
-                                })()}
+                                <PairingCell
+                                  line={line}
+                                  pairing={pairingFor(line.index)}
+                                  reconciliation={reconciliation}
+                                  status={run.status}
+                                  busy={busy}
+                                  onSet={(patch) => setLine(sheetIndex, line.index, patch)}
+                                />
                               </Td>
                             )}
                             {/* Category and level: a record's, so a fabric
