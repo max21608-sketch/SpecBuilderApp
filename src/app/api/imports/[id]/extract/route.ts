@@ -161,9 +161,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       // Minting a fresh id there instead would charge twice for one press.
       // The press already happened; it is answered with what it did, and a
       // person who wants another read presses again, which mints a new id.
-      // (Every screen does mint one per press; this is the resent request.)
+      // (Every screen does mint one per press; this is the resent request.
+      // `retry-dispatch`, answered above, re-sends an attempt on purpose.)
       // ======================================================================
-      if (action !== "retry-dispatch" && currentAttempt === requestId) {
+      if (currentAttempt === requestId) {
         return { attemptId: currentAttempt, alreadyDispatched: true, status };
       }
 
