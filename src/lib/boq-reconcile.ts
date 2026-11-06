@@ -133,6 +133,13 @@ export type LineReconciliation = {
    *   retired. Only ever the reviewer's choice.
    */
   status: "paired" | "new" | "ambiguous" | "restore";
+  /**
+   * True where the pairing (or restore) is the reviewer's STORED `replaces`.
+   * A `paired` line that is not accepted is a suggestion: the confirm writes
+   * only what is stored, so until somebody accepts it the line is a new item
+   * and its record is retired. Shown as a suggestion, never as chosen.
+   */
+  accepted: boolean;
   suggestedRecordId: string | null;
   candidates: string[];
   /**
@@ -154,12 +161,30 @@ export type MissingRecord = {
   settledAnswers: number;
   /** The configurations retired with it, by short label. */
   configurations: string[];
+  /**
+   * The line a SUGGESTED pairing offers this record to, where one does. It is
+   * still retired unless that suggestion is accepted, so it stays listed.
+   */
+  suggestedFor?: number;
 };
 
 export type SheetReconciliation = {
   lines: LineReconciliation[];
   missing: MissingRecord[];
-  counts: { paired: number; changed: number; new: number; ambiguous: number; missing: number; restored: number };
+  /**
+   * `missing` counts records no line names at all; `suggested`, pairings
+   * offered and not yet accepted (whose records are in `missing` too, with
+   * `suggestedFor`, because the confirm retires them until accepted).
+   */
+  counts: {
+    paired: number;
+    changed: number;
+    new: number;
+    ambiguous: number;
+    missing: number;
+    restored: number;
+    suggested: number;
+  };
 };
 
 /**
@@ -258,7 +283,10 @@ export function reconcileSheet(
   }
 
   const byId = new Map(records.map((record) => [record.id, record]));
+  /** Records a reviewer's stored pairing claims: these are carried forward. */
   const claimed = new Set<string>();
+  /** Records a suggestion offers, by line: carried only once accepted. */
+  const suggestedFor = new Map<string, number>();
   const out: LineReconciliation[] = [];
 
   for (const line of live) {
@@ -270,6 +298,7 @@ export function reconcileSheet(
         lineNo: line.lineNo,
         code: line.code,
         status: "restore",
+        accepted: true,
         suggestedRecordId: line.replaces.recordId,
         candidates: [],
         restoreCandidates: [],
@@ -286,6 +315,7 @@ export function reconcileSheet(
         lineNo: line.lineNo,
         code: line.code,
         status: "paired",
+        accepted: true,
         suggestedRecordId: line.replaces.recordId,
         candidates: [],
         restoreCandidates: [],
@@ -300,12 +330,13 @@ export function reconcileSheet(
 
     if (matches.length === 1 && linesWithCode === 1) {
       const record = matches[0] as ExistingRecord;
-      claimed.add(record.id);
+      suggestedFor.set(record.id, line.lineNo);
       out.push({
         index: line.index,
         lineNo: line.lineNo,
         code: line.code,
         status: "paired",
+        accepted: false,
         suggestedRecordId: record.id,
         candidates: [],
         restoreCandidates: [],
@@ -321,6 +352,7 @@ export function reconcileSheet(
         lineNo: line.lineNo,
         code: line.code,
         status: "ambiguous",
+        accepted: false,
         suggestedRecordId: null,
         candidates: matches.map((record) => record.id),
         restoreCandidates: [],
@@ -334,6 +366,7 @@ export function reconcileSheet(
       lineNo: line.lineNo,
       code: line.code,
       status: "new",
+      accepted: false,
       suggestedRecordId: null,
       candidates: [],
       restoreCandidates: key ? (retiredByCode.get(key) ?? []).map((record) => record.id) : [],
@@ -352,6 +385,7 @@ export function reconcileSheet(
       hasImage: record.hasImage,
       settledAnswers: record.settledAnswers,
       configurations: record.configurations ?? [],
+      ...(suggestedFor.has(record.id) ? { suggestedFor: suggestedFor.get(record.id) } : {}),
     }));
 
   return {
@@ -362,8 +396,9 @@ export function reconcileSheet(
       changed: out.filter((line) => line.status === "paired" && line.deltas.length > 0).length,
       new: out.filter((line) => line.status === "new").length,
       ambiguous: out.filter((line) => line.status === "ambiguous").length,
-      missing: missing.length,
+      missing: missing.filter((record) => record.suggestedFor === undefined).length,
       restored: out.filter((line) => line.status === "restore").length,
+      suggested: out.filter((line) => line.status === "paired" && !line.accepted).length,
     },
   };
 }

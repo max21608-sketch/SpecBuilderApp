@@ -611,6 +611,8 @@ type Reconciliation = {
   lines: {
     index: number; lineNo: number; code: string | null;
     status: "paired" | "new" | "ambiguous" | "restore";
+    /** The reviewer's stored decision; a `paired` line that is not accepted is only a suggestion. */
+    accepted?: boolean;
     suggestedRecordId: string | null;
     candidates: string[];
     /** Retired lines of the phase carrying this line's code, offered back. */
@@ -621,8 +623,13 @@ type Reconciliation = {
     recordId: string; label: string; itemDescription: string; codes: string[];
     attributeCount: number; hasImage: boolean; settledAnswers: number;
     configurations?: string[];
+    /** The line a suggested pairing offers it to; still retired until accepted. */
+    suggestedFor?: number;
   }[];
-  counts: { paired: number; changed: number; new: number; ambiguous: number; missing: number; restored?: number };
+  counts: {
+    paired: number; changed: number; new: number; ambiguous: number; missing: number;
+    restored?: number; suggested?: number;
+  };
   records: ReconciledRecord[];
   /** The phase's lines an earlier revision retired (audit 2026-11-06, C14). */
   retired?: ReconciledRecord[];
@@ -965,6 +972,44 @@ export default function ReviewImportPage() {
           `Also filled in on ${carried} line${carried === 1 ? "" : "s"} on the other phases carrying the same client ` +
             `refs. Each says where it came from and can be changed there.`,
         );
+      }
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Accept every SUGGESTED pairing on one tab: each line whose code is on
+   * exactly one record of the phase it revises.
+   *
+   * A suggestion is not a pairing until it is stored. The confirm writes only
+   * what is stored (`replaces`), and a select pre-filled with the suggestion
+   * fired no change when somebody "agreed" with it, so the line confirmed as a
+   * NEW item and the record the screen said it continued was retired (found
+   * 2026-11-06 building audit 1.2). Every pairing it stores carries the
+   * version shown, as a hand pairing does; one reload at the end, for
+   * `acceptAllLevels`' reason.
+   */
+  async function acceptAllPairings(sheetIndex: number, pairs: { index: number; recordId: string; recordVersion: number }[]) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      for (const pair of pairs) {
+        const res = await apiFetch(`/api/imports/${id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sheetIndex,
+            index: pair.index,
+            replaces: { recordId: pair.recordId, recordVersion: pair.recordVersion },
+          }),
+        });
+        if (!res.ok) {
+          setError(res.error);
+          break;
+        }
       }
       await load();
     } finally {
@@ -2116,15 +2161,39 @@ export default function ReviewImportPage() {
                   {reconciliation.counts.ambiguous > 0 && (
                     <> · <b>{reconciliation.counts.ambiguous} to pair by hand</b></>
                   )}
+                  {/* A SUGGESTION IS NOT A PAIRING until it is accepted: the
+                      confirm writes only what is stored, so an unaccepted one
+                      confirms as a new item and retires its record. */}
+                  {(reconciliation.counts.suggested ?? 0) > 0 && run.status === "parsed" && (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                      <SuggestButton
+                        size="sm"
+                        value={`Pair the ${reconciliation.counts.suggested} suggested`}
+                        evidence="each line's code is on exactly one item of the phase"
+                        disabled={busy}
+                        onAccept={() =>
+                          void acceptAllPairings(
+                            sheetIndex,
+                            reconciliation.lines.flatMap((entry) => {
+                              if (entry.status !== "paired" || entry.accepted !== false || !entry.suggestedRecordId) return [];
+                              const record = reconciliation.records.find((row) => row.id === entry.suggestedRecordId);
+                              return record ? [{ index: entry.index, recordId: record.id, recordVersion: record.version }] : [];
+                            }),
+                          )
+                        }
+                      />
+                      <span className="text-amber-800">Until they are paired, those lines confirm as new items.</span>
+                    </div>
+                  )}
                   <p className="mt-0.5">
                     Items carried forward keep their record — and with it their drawings, their specs, their picture
                     and their answers. Only the bill&rsquo;s own columns are written over.
                   </p>
-                  {reconciliation.missing.length > 0 && (
+                  {reconciliation.missing.some((missing) => missing.suggestedFor === undefined) && (
                     <>
                       <p className="mt-1.5 font-semibold">Not in this revision — these will be retired, not deleted:</p>
                       <ul className="mt-1 space-y-0.5">
-                        {reconciliation.missing.map((missing) => (
+                        {reconciliation.missing.filter((missing) => missing.suggestedFor === undefined).map((missing) => (
                           <li key={missing.recordId}>
                             <span className="font-mono">{missing.label}</span> {missing.itemDescription}
                             {missing.codes.length > 0 && <span> · {missing.codes.join(", ")}</span>}
@@ -2681,10 +2750,12 @@ export default function ReviewImportPage() {
                                   return (
                                     <div>
                                       <select
-                                        value={
-                                          line.replaces?.recordId ??
-                                          (pairing.status === "paired" ? (pairing.suggestedRecordId ?? "") : "")
-                                        }
+                                        // THE STORED DECISION ONLY. A select
+                                        // showing the suggestion as chosen
+                                        // fires no change when somebody agrees
+                                        // with it, and the confirm then wrote
+                                        // the line as new (found 2026-11-06).
+                                        value={line.replaces?.recordId ?? ""}
                                         disabled={run.status !== "parsed" || busy}
                                         onChange={(event) => {
                                           const recordId = event.target.value;
@@ -2713,6 +2784,19 @@ export default function ReviewImportPage() {
                                           </option>
                                         ))}
                                       </select>
+                                      {pairing.status === "paired" && !line.replaces && pairedRecord && (
+                                        <SuggestButton
+                                          className="mt-1"
+                                          value={`Pair with ${pairedRecord.label}`}
+                                          evidence="the same code, on one item of the phase"
+                                          disabled={run.status !== "parsed" || busy}
+                                          onAccept={() =>
+                                            void setLine(sheetIndex, line.index, {
+                                              replaces: { recordId: pairedRecord.id, recordVersion: pairedRecord.version },
+                                            })
+                                          }
+                                        />
+                                      )}
                                       {pairing.status === "ambiguous" && !line.replaces && (
                                         <p className="mt-0.5 text-xs text-amber-800">
                                           This code is on {pairing.candidates.length} records. Choose which one, or
@@ -2737,7 +2821,8 @@ export default function ReviewImportPage() {
                                           a line of their own to pair. */}
                                       {pairing.status === "paired" && (pairedRecord?.configurations?.length ?? 0) > 0 && (
                                         <p className="mt-0.5 text-xs text-neutral-600">
-                                          {configurationRange(pairedRecord?.configurations ?? [])} follow it
+                                          {configurationRange(pairedRecord?.configurations ?? [])}{" "}
+                                          {line.replaces ? "follow it" : "follow it once it is paired"}
                                         </p>
                                       )}
                                       {/* A RETIRED LINE WITH THIS CODE, OFFERED BACK (C14) —

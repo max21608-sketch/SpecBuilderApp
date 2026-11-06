@@ -123,6 +123,26 @@ describe("reconcileSheet", () => {
   });
 });
 
+// ---- found 2026-11-06 while building 1.2: a SUGGESTED pairing is not a
+// pairing until somebody accepts it. The confirm writes only the stored
+// `replaces`; a suggestion shown as already chosen made the line new and
+// retired the record the screen said it continued.
+describe("reconcileSheet — a suggestion is not a decision", () => {
+  it("says a suggested pairing is not accepted, and that its record is retired until it is", () => {
+    const result = reconcileSheet([line()], [record()]);
+    expect(result.lines[0]!.accepted).toBe(false);
+    expect(result.missing).toEqual([expect.objectContaining({ recordId: "rec-1", suggestedFor: 7 })]);
+    expect(result.counts).toMatchObject({ suggested: 1, missing: 0 });
+  });
+
+  it("calls a stored pairing accepted, and its record is not at risk", () => {
+    const result = reconcileSheet([line({ replaces: { recordId: "rec-1", recordVersion: 1 } })], [record()]);
+    expect(result.lines[0]!.accepted).toBe(true);
+    expect(result.missing).toEqual([]);
+    expect(result.counts).toMatchObject({ suggested: 0, paired: 1 });
+  });
+});
+
 // ---- audit 2026-11-06, 1.2: a configuration follows its line (C1), and a
 // retired record whose code comes back is offered, never paired (C14).
 describe("reconcileSheet — configurations and retired records", () => {
