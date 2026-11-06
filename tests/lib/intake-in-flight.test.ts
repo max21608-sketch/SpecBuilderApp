@@ -33,9 +33,38 @@ describe("the waiting-for-a-slot expression", () => {
     "src/app/api/projects/[id]/route.ts",
     "src/app/api/projects/[id]/batches/route.ts",
     "src/lib/drawing-resolution.ts",
+    "src/lib/project-summary.ts",
   ]) {
     it(`is the same in ${file}`, () => {
       expect(fold(readFileSync(file, "utf8"))).toContain(expression);
     });
   }
+});
+
+describe("the overview's 'Reading N documents' count", () => {
+  // `project-summary.ts` counts in SQL what `isIntakeRunInFlight` decides in
+  // TypeScript. It counted `pending` and `parsing` (audit 2026-11-06, F9): a
+  // document nobody had asked to read held the next step at "Reading 1
+  // document…" for ever, and `queued` -- what dispatch writes -- was missed.
+  // The db tier proves the number; this holds the predicate's SHAPE, so the
+  // SQL and the function cannot drift apart again without a red test.
+  const fold = (text: string) => text.replace(/\s+/g, " ");
+  const source = fold(readFileSync("src/lib/project-summary.ts", "utf8"));
+
+  it("is the in-flight predicate: being read, or waiting for a slot", () => {
+    expect(source).toContain(
+      "where r.status in ('queued', 'parsing') or (r.status = 'pending' and r.attempt_id is null and r.attempt_deadline_at > now()) )::int as documents_reading",
+    );
+  });
+
+  it("agrees with isIntakeRunInFlight on every status", () => {
+    // The SQL's two halves, read back as the function reads a run.
+    const sqlInFlight = (status: string, waiting: boolean) =>
+      ["queued", "parsing"].includes(status) || (status === "pending" && waiting);
+    for (const status of ["pending", "queued", "parsing", "parsed", "confirmed", "failed"]) {
+      for (const waiting of [false, true]) {
+        expect(sqlInFlight(status, waiting)).toBe(isIntakeRunInFlight({ status, waitingForSlot: waiting }));
+      }
+    }
+  });
 });

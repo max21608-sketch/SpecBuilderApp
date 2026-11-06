@@ -145,6 +145,7 @@ describeIfDb("project summary", () => {
     await client.query(`delete from spec_records where project_id = $1 and parent_id is not null`, [projectId]);
     await client.query(`delete from spec_records where project_id = $1`, [projectId]);
     await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
+    await client.query(`delete from intake_runs where project_id = $1`, [projectId]);
     await client.query(`delete from projects where id = $1`, [projectId]);
     await client.end();
   });
@@ -301,6 +302,54 @@ describeIfDb("project summary", () => {
       );
     } finally {
       await client.query(`delete from spec_records where id = $1`, [extra.rows[0].id]);
+    }
+  });
+
+  // "READING N DOCUMENTS…" COUNTS WHAT IS IN FLIGHT, AND NOTHING ELSE (audit
+  // 2026-11-06, F9). It counted `pending` and `parsing`: a document nobody had
+  // asked to read pinned the overview's next step at "Reading 1 document…"
+  // with nothing to press, and `queued` -- what dispatch writes -- was not
+  // counted at all. The predicate is `isIntakeRunInFlight`'s, in SQL.
+  it("documentsReading counts queued, parsing and waiting-for-a-slot, never a plain pending", async () => {
+    const insert = (status: string) =>
+      client.query(
+        `insert into intake_runs (project_id, source_kind, document_kind, status, created_by, updated_by)
+         values ($1, 'spec_document', 'ffe_schedule', $2, 'qa', 'qa')`,
+        [projectId, status],
+      );
+    try {
+      await insert("pending"); // nobody asked: not in flight
+      await insert("pending"); // twice, so the old predicate counts a different total
+      // Waiting for a slot: no attempt, a live deadline -- the pair only the
+      // cap writes (extraction-slots.ts).
+      await client.query(
+        `insert into intake_runs (project_id, source_kind, document_kind, status, attempt_deadline_at, created_by, updated_by)
+         values ($1, 'spec_document', 'ffe_schedule', 'pending', now() + interval '1 hour', 'qa', 'qa')`,
+        [projectId],
+      );
+      await client.query(
+        `insert into intake_runs (project_id, source_kind, document_kind, status, attempt_id, queued_at, created_by, updated_by)
+         values ($1, 'spec_document', 'ffe_schedule', 'queued', gen_random_uuid(), now(), 'qa', 'qa')`,
+        [projectId],
+      );
+      await client.query(
+        `insert into intake_runs (project_id, source_kind, document_kind, status, attempt_id, claim_token,
+                                  processing_started_at, created_by, updated_by)
+         values ($1, 'spec_document', 'ffe_schedule', 'parsing', gen_random_uuid(), gen_random_uuid(), now(), 'qa', 'qa')`,
+        [projectId],
+      );
+      await insert("parsed"); // settled: not in flight
+      expect((await summary()).documentsReading).toBe(3);
+
+      // A deferred read whose promise has lapsed is not waiting any more.
+      await client.query(
+        `update intake_runs set attempt_deadline_at = now() - interval '1 minute'
+          where project_id = $1 and status = 'pending' and attempt_deadline_at is not null`,
+        [projectId],
+      );
+      expect((await summary()).documentsReading).toBe(2);
+    } finally {
+      await client.query(`delete from intake_runs where project_id = $1`, [projectId]);
     }
   });
 
