@@ -35,6 +35,7 @@ import {
   millimetresBeside,
 } from "@/lib/slot-swap";
 import { observationRowId } from "@/lib/needs-you";
+import { typedDraft, type ObservationDrafts } from "@/lib/observation-drafts";
 import {
   ATTRIBUTE_UNITS,
   DIMENSION_SLOTS,
@@ -104,10 +105,8 @@ export type DrawingSizeProps = {
     fileText: string;
     problems: string[];
   };
-  drafts: Record<string, Partial<DrawingObservation>>;
-  setDrafts: React.Dispatch<
-    React.SetStateAction<Record<string, Partial<DrawingObservation>>>
-  >;
+  drafts: ObservationDrafts;
+  setDrafts: React.Dispatch<React.SetStateAction<ObservationDrafts>>;
   busy: boolean;
   showMm: boolean;
   /** The folded rows are open. Owned by the card, so a "needs you" link can open it. */
@@ -333,10 +332,7 @@ function FigureRows({
               aria-label="The figure"
               autoFocus
               onChange={(event) =>
-                setDrafts((all) => ({
-                  ...all,
-                  [row.id]: { ...draft, value: event.target.value },
-                }))
+                setDrafts((all) => typedDraft(all, row.id, event.target.value))
               }
               onBlur={(event) => {
                 if (event.target.value !== (row.value ?? ""))
@@ -384,6 +380,13 @@ function FigureRows({
               </span>
             );
           })()}
+          {/* A figure the server refused (audit G10): the box shows the
+              server's, and this says what was typed and why it did not land. */}
+          {draft.refused && (
+            <p className="text-xs text-amber-800" role="status">
+              {draft.refused}
+            </p>
+          )}
           <p className="text-xs text-neutral-500">{whereOf(row)}</p>
           {row.valueRaw !== null && row.valueRaw !== row.value && (
             <p className="text-xs text-neutral-400">

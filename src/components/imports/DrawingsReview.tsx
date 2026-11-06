@@ -25,6 +25,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { attributeDisplayLabel } from "@/lib/attribute-label";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
+import { VersionLedger, type WrittenVersions } from "@/lib/acked-versions";
+import { draftAfterSave, type ObservationDrafts } from "@/lib/observation-drafts";
 import { buttonClass } from "@/components/ui/Button";
 import { upload } from "@vercel/blob/client";
 import { projectUploadPrefix } from "@/lib/blob-source";
@@ -236,11 +238,19 @@ export default function DrawingsReview({
 
   // Server-acked state is held separately from what the reviewer is typing, so
   // a reload cannot wipe an unsaved edit and an autosave cannot fight the input.
-  const [drafts, setDrafts] = useState<Record<string, Partial<DrawingObservation>>>({});
+  // A draft ends with its save (audit G10, `observation-drafts.ts`): cleared
+  // when it lands, and replaced by the server's value and one sentence when it
+  // is refused, so the box never shows words the server does not hold.
+  const [drafts, setDrafts] = useState<ObservationDrafts>({});
   // An action that succeeded and changed nothing yet — a read the cap deferred.
   // Held apart from `error` so that reads blue and a refusal reads red.
   const [notice, setNotice] = useState<string | null>(null);
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  // THE VERSIONS THE SERVER ACKNOWLEDGED (audit G1). A closure's version is the
+  // version of its render: every request below reads this ledger at the moment
+  // it is built, after the saves it waited for, never the `version` on the
+  // item or row it was handed. See `acked-versions.ts`.
+  const versions = useRef(new VersionLedger()).current;
 
   const load = useCallback(async () => {
     const res = await apiFetch<{
@@ -353,17 +363,25 @@ export default function DrawingsReview({
 
   async function saveObservation(item: DrawingItem, observation: DrawingObservation, changes: Record<string, unknown>) {
     await queueSave(async () => {
-      const res = await apiFetch(`/api/imports/${importId}`, {
+      const res = await apiFetch<{ versions?: WrittenVersions }>(`/api/imports/${importId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           itemId: item.id,
           observationId: observation.id,
-          expectedVersion: observation.version,
+          // Read HERE, inside the chain: a save queued behind another one from
+          // the same render must send the version the first one produced.
+          expectedVersion: versions.row(observation.id, observation.version),
           changes,
         }),
       });
+      if (res.ok) versions.record(res.data.versions);
       await reloadThen(res.ok ? null : res.error);
+      // After the reload, so a refused row shows the server's value under its
+      // sentence rather than flashing the typed words back.
+      setDrafts((current) =>
+        draftAfterSave(current, observation.id, changes, res.ok ? { ok: true } : { ok: false, error: res.error }),
+      );
     });
   }
 
@@ -382,30 +400,46 @@ export default function DrawingsReview({
     if (edits.length === 0) return;
     await queueSave(async () => {
       const failures: string[] = [];
+      const outcomes: { id: string; changes: Record<string, unknown>; error: string | null }[] = [];
       for (const edit of edits) {
-        const res = await apiFetch(`/api/imports/${importId}`, {
+        const res = await apiFetch<{ versions?: WrittenVersions }>(`/api/imports/${importId}`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             itemId: edit.item.id,
             observationId: edit.observation.id,
-            expectedVersion: edit.observation.version,
+            expectedVersion: versions.row(edit.observation.id, edit.observation.version),
             changes: edit.changes,
           }),
         });
-        if (!res.ok) failures.push(res.error);
+        if (res.ok) versions.record(res.data.versions);
+        else failures.push(res.error);
+        outcomes.push({ id: edit.observation.id, changes: edit.changes, error: res.ok ? null : res.error });
       }
       await reloadThen(failures.length > 0 ? failures[0]! : null);
+      setDrafts((current) =>
+        outcomes.reduce(
+          (all, outcome) =>
+            draftAfterSave(
+              all,
+              outcome.id,
+              outcome.changes,
+              outcome.error === null ? { ok: true } : { ok: false, error: outcome.error },
+            ),
+          current,
+        ),
+      );
     });
   }
 
   async function setBulkUnit(scope: "item" | "run", unit: BulkUnitChoice, itemId?: string) {
     await queueSave(async () => {
-      const res = await apiFetch(`/api/imports/${importId}`, {
+      const res = await apiFetch<{ versions?: WrittenVersions }>(`/api/imports/${importId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ bulkUnit: { scope, unit, ...(itemId ? { itemId } : {}) } }),
       });
+      if (res.ok) versions.record(res.data.versions);
       await reloadThen(res.ok ? null : res.error);
     });
   }
@@ -417,11 +451,12 @@ export default function DrawingsReview({
   /** Any change to a staged ITEM (its phases, a configuration acknowledgement). */
   async function saveItem(item: DrawingItem, changes: Record<string, unknown>) {
     await queueSave(async () => {
-      const res = await apiFetch(`/api/imports/${importId}`, {
+      const res = await apiFetch<{ versions?: WrittenVersions }>(`/api/imports/${importId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ itemId: item.id, expectedVersion: item.version, changes }),
+        body: JSON.stringify({ itemId: item.id, expectedVersion: versions.item(item.id, item.version), changes }),
       });
+      if (res.ok) versions.record(res.data.versions);
       await reloadThen(res.ok ? null : res.error);
     });
   }
@@ -464,7 +499,7 @@ export default function DrawingsReview({
         itemId: item.id,
         ...(action === "confirm"
           ? {
-              itemVersion: item.version,
+              itemVersion: versions.item(item.id, item.version),
               // THE RECORDS THIS CARD SHOWED (audit D3), exactly as the review
               // GET resolved them for this render. The confirm refuses on any
               // difference from its live resolution, so a record that
@@ -474,7 +509,12 @@ export default function DrawingsReview({
               ...(swatchList.length > 0 ? { swatches: swatchList } : {}),
             }
           : {}),
-        observations: observations.map((observation) => ({ id: observation.id, version: observation.version })),
+        // The SET is the one the card showed; each VERSION is the ledger's,
+        // read now that the saves this press waited for have landed (G1).
+        observations: observations.map((observation) => ({
+          id: observation.id,
+          version: versions.row(observation.id, observation.version),
+        })),
       }),
     });
     // A BILL'S PICTURE KEPT OVER THE CROP is not a failure and not silent:
@@ -491,8 +531,9 @@ export default function DrawingsReview({
   }
 
   async function review(item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") {
-    // Every queued edit lands before the commit, or the versions sent will be
-    // the ones the screen had before the last keystroke.
+    // Every queued edit lands before the commit. That alone was not enough:
+    // `observations` here are the click's render, so `confirmItem` reads each
+    // version from the ledger the saves updated, not from these (audit G1).
     await saveChain.current;
     setBusy(item.id);
     setError(null);

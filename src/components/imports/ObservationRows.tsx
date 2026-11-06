@@ -66,6 +66,7 @@ import type { FinishFilingView } from "@/lib/drawing-resolution";
 import Button from "@/components/ui/Button";
 import { Th } from "@/components/ui/Table";
 import type { CroppedImage } from "@/lib/pdf-crop";
+import { typedDraft, type ObservationDrafts } from "@/lib/observation-drafts";
 
 /**
  * One record a card resolves to, as the screen needs it.
@@ -776,8 +777,8 @@ export function ObservationRow({
   itemPages?: readonly number[];
   importId: string;
   specFields: SpecField[];
-  drafts: Record<string, Partial<DrawingObservation>>;
-  setDrafts: React.Dispatch<React.SetStateAction<Record<string, Partial<DrawingObservation>>>>;
+  drafts: ObservationDrafts;
+  setDrafts: React.Dispatch<React.SetStateAction<ObservationDrafts>>;
   busy: boolean;
   blocked: boolean;
   guessWhy: string | undefined;
@@ -872,7 +873,7 @@ export function ObservationRow({
             value={value ?? ""}
             rows={Math.min(12, (value ?? "").split("\n").length + 1)}
             onChange={(event) =>
-              setDrafts((current) => ({ ...current, [observation.id]: { ...draft, value: event.target.value } }))
+              setDrafts((current) => typedDraft(current, observation.id, event.target.value))
             }
             onBlur={(event) => {
               if (event.target.value === (observation.value ?? "")) return;
@@ -885,7 +886,7 @@ export function ObservationRow({
             <input
               value={value ?? ""}
               onChange={(event) =>
-                setDrafts((current) => ({ ...current, [observation.id]: { ...draft, value: event.target.value } }))
+                setDrafts((current) => typedDraft(current, observation.id, event.target.value))
               }
               onBlur={(event) => {
                 if (event.target.value === (observation.value ?? "")) return;
@@ -911,6 +912,13 @@ export function ObservationRow({
                 );
               })()}
           </div>
+        )}
+        {/* A VALUE THE SERVER REFUSED (audit G10): the box shows what the
+            server holds, and this says what was typed and why it did not land. */}
+        {draft.refused && (
+          <p className="mt-0.5 text-xs text-amber-800" role="status">
+            {draft.refused}
+          </p>
         )}
         {/* THE UNIT, BESIDE THE FIGURE IT BELONGS TO. See the head above for
             why it is no longer a column of its own.
