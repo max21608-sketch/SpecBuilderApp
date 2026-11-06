@@ -7,7 +7,7 @@
 // and an ambiguous match offers candidates rather than picking one. A line the
 // matcher could not resolve stays blank — a plausible guess in a field a human
 // skims past is worse than an obvious gap.
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
@@ -36,7 +36,6 @@ import { sheetsAwaitingColumnCheck, sheetsNeedingColumns } from "@/lib/boq-impor
 import { pdfPageOfLine } from "@/lib/pdf-bill-source";
 import { transcriptionChecks, type LineCheck } from "@/lib/pdf-bill-checks";
 import PdfTranscriptionPanel from "@/components/imports/PdfTranscriptionPanel";
-import { sheetWantsStructureRead } from "@/lib/boq-structure-wanted";
 // Pure: the one rule about what a row is, what stops a fabric line, and what
 // the Confirm button says it will write — the same functions the confirm runs.
 import {
@@ -51,7 +50,6 @@ import {
 import { groupBillLines } from "@/lib/bill-review-groups";
 import { BillUnitAll } from "@/components/imports/BillDescription";
 import { columnsAwaitingALook } from "@/lib/boq-roles";
-import BoqColumnsPanel from "@/components/imports/BoqColumnsPanel";
 // Pure: the "this may not be furniture" question, and the set the batch action
 // acts on. The page NEVER decides either for itself — one function behind the
 // count on the button and the loop behind it.
@@ -65,18 +63,11 @@ import { duplicateGroups } from "@/lib/boq-carry";
 import { formatDay } from "@/lib/format-day";
 import PageBody from "@/components/ui/PageBody";
 import Tabs from "@/components/ui/Tabs";
-import { useBoqImport, type Line, type StructureReadState } from "@/components/imports/use-boq-import";
+import { useBoqImport, type Line } from "@/components/imports/use-boq-import";
 import RevisionPanel from "@/components/imports/RevisionPanel";
 import SheetHeader from "@/components/imports/SheetHeader";
+import { SheetColumns, StructureReadNotes, structurePending, useStructureRead } from "@/components/imports/StructureRead";
 import BillLineRow, { FamilyHeading, GroupGap, listOf, type BillLinePlace } from "@/components/imports/BillLineRow";
-
-/** A claim this old is a request that died, and the screen stops waiting on it. */
-const STRUCTURE_CLAIM_MS = 330_000;
-
-function structurePending(state: StructureReadState | undefined): boolean {
-  const pending = state?.pending;
-  return Boolean(pending && Date.now() - new Date(pending.at).getTime() < STRUCTURE_CLAIM_MS);
-}
 
 /** A reason sentence joined into another, without its own full stop. */
 function asClause(text: string): string {
@@ -130,16 +121,6 @@ export default function ReviewImportPage() {
    * which is the way back either way.
    */
   const [pack, setPack] = useState<{ id: string; created_at: string; drawings: number } | null>(null);
-  /**
-   * THE MODEL IS READING THIS BILL'S COLUMNS, from this tab — `all` for the
-   * automatic read, or the sheet a panel's button asked about. A read another
-   * tab started shows the same sentence, from the server's own claim.
-   */
-  const [asking, setAsking] = useState<"all" | number | null>(null);
-  /** Why the last structure read did not land, with the retry beside it. */
-  const [structureError, setStructureError] = useState<string | null>(null);
-  /** Once per visit: the automatic read never fires twice from one screen. */
-  const autoAsked = useRef(false);
   /** Lines whose description panel is open, as `sheet:index`. */
   const [openDescriptions, setOpenDescriptions] = useState<Set<string>>(() => new Set());
   const toggleDescription = (key: string) =>
@@ -210,81 +191,7 @@ export default function ReviewImportPage() {
     });
   }
 
-  /**
-   * ASK THE MODEL TO READ THE COLUMNS — one small read, charged. `sheetIndex`
-   * absent is the automatic read of every live sheet nobody could map. A
-   * request id per press, so a retried request is answered from the record
-   * rather than read (and charged) again. Reload first, then report.
-   */
-  const askModel = useCallback(
-    async (sheetIndex?: number) => {
-      if (!data) return;
-      setAsking(sheetIndex ?? "all");
-      setStructureError(null);
-      setNotice(null);
-      try {
-        const requestId =
-          typeof crypto !== "undefined" && "randomUUID" in crypto
-            ? crypto.randomUUID()
-            : `00000000-0000-4000-8000-${String(Date.now()).padStart(12, "0").slice(-12)}`;
-        const res = await apiFetch<{ nothing?: boolean; charged?: number }>(`/api/imports/${id}/suggest-columns`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            version: data.import.version,
-            requestId,
-            ...(sheetIndex === undefined ? {} : { sheetIndex }),
-          }),
-        });
-        await load(true);
-        if (!res.ok) {
-          const code = (res.data as { code?: string } | null)?.code;
-          // Another tab's read is not a failure: this screen waits for it.
-          if (code === "structure_read_running") setNotice(res.error);
-          else setStructureError(res.error);
-          return;
-        }
-        // No notice on success: the yellow banner that the reload brings up
-        // says the same thing, on every sheet the model read, until the
-        // reviewer checks it — two banners for one fact is one to ignore.
-      } finally {
-        setAsking(null);
-      }
-    },
-    [data, id, load, setNotice],
-  );
-
-  /**
-   * THE AUTOMATIC READ: once, the first time this screen opens a bill with a
-   * live sheet nobody could map — or one the known headings mapped with no
-   * quantity column (`sheetWantsStructureRead`) — and no structure read on
-   * record. Never on a
-   * bill whose original was not kept (there is nothing to re-read with the
-   * answer), never while another tab's read is in flight, and never twice
-   * from one visit.
-   */
-  useEffect(() => {
-    if (!data || autoAsked.current) return;
-    const bill = data.import;
-    if (bill.source_kind !== "boq_xlsx" || bill.status !== "parsed" || bill.has_source === false) return;
-    if (bill.parsed?.sourcePreserved === false) return;
-    const state = bill.model_metadata?.structureRead;
-    if (structurePending(state)) return;
-    const wanted = (bill.parsed?.sheets ?? []).some((sheet) =>
-      sheetWantsStructureRead(sheet, Boolean(state?.sheets?.[sheet.sheetName])),
-    );
-    if (!wanted) return;
-    autoAsked.current = true;
-    void askModel();
-  }, [data, askModel]);
-
-  /** Another tab is reading: look again quietly until its claim clears. */
-  const otherTabReading = asking === null && structurePending(data?.import.model_metadata?.structureRead);
-  useEffect(() => {
-    if (!otherTabReading) return;
-    const timer = setInterval(() => void load(true), 4000);
-    return () => clearInterval(timer);
-  }, [otherTabReading, load]);
+  const { asking, structureError, askModel } = useStructureRead({ id, data, load, setNotice });
 
   if (error && !data) return <p className="text-sm text-red-700">{error}</p>;
   if (!data) return <Spinner label="Loading import" />;
@@ -722,49 +629,15 @@ export default function ReviewImportPage() {
           </Note>
         )}
 
-        {/* THE MODEL IS READING THE COLUMNS — said before it answers, with the
-            charge, because the screen is otherwise a panel nobody should start
-            filling in while the reading is about to replace it. */}
-        {reading && (
-          <Note tone="info" title="Reading the columns…">
-            One small read, charged. The model reads the layout — the header, what each column is and which rows
-            are finish lines, sections or subtotals — and code then reads every cell from the stored spreadsheet.
-            {asking === null && " It was started from another tab or a moment ago; this screen shows the result when it lands."}
-          </Note>
-        )}
-        {structureError && !reading && (
-          <Note
-            tone="warn"
-            title="The model did not read the columns."
-            actions={
-              canAsk ? (
-                <Button size="sm" onClick={() => void askModel()}>
-                  Ask again
-                </Button>
-              ) : undefined
-            }
-          >
-            {structureError} The Columns panel still works by hand, and that is free.
-          </Note>
-        )}
-        {/* A MODEL'S COLUMNS, NOT YET AGREED TO. Yellow, because it is a guess
-            until a person has looked; the confirm refuses until they say so. */}
-        {run.status === "parsed" && unchecked.length > 0 && (
-          <Note tone="guess" title="Columns and row kinds read by the model — check them.">
-            {unchecked.length === 1 ? (
-              <>
-                On <span className="font-mono">{unchecked[0]?.sheetName}</span>, check each column on the panel and
-                the Kind of each line, then press <b>The columns are right</b>.
-              </>
-            ) : (
-              <>
-                On {unchecked.map((sheet) => sheet.sheetName).join(", ")}, check each column and the Kind of each line,
-                then press <b>The columns are right</b> on each.
-              </>
-            )}{" "}
-            The model never typed a value: every code, description and quantity below was read by code.
-          </Note>
-        )}
+        <StructureReadNotes
+          reading={reading}
+          asking={asking}
+          structureError={structureError}
+          canAsk={canAsk}
+          onAskAgain={() => void askModel()}
+          status={run.status}
+          unchecked={unchecked}
+        />
         {/* THE SENTENCES THAT WERE TWO AMBER BANNERS HERE — a finish line
             with no item, a sheet nobody has mapped — are each item's "Why" on
             the list above, one click away and never deleted. */}
@@ -961,38 +834,19 @@ export default function ReviewImportPage() {
                 onSetSheet={(patch) => setSheet(sheetIndex, patch)}
               />
 
-              {/* Where a "needs you" link about this sheet's columns lands. */}
-              <div id={sheetColumnsId(sheetIndex)} className="rounded-[10px]">
-              {panelOpen && (
-                <BoqColumnsPanel
-                  // Re-mounted when what was READ changes, so a successful read
-                  // shows the new mapping — and NOT on every autosave, which
-                  // bumps the version and would throw away half-set selects.
-                  key={`${sheetIndex}:${sheet.headerRow}:${sheet.headerRows ?? 1}:${JSON.stringify(sheet.columns ?? {})}`}
-                  importId={run.id}
-                  sheetIndex={sheetIndex}
-                  sheet={sheet}
-                  version={run.version}
-                  editable={run.status === "parsed"}
-                  sourceKept={run.parsed?.sourcePreserved !== false && run.has_source !== false}
-                  onRead={(message) => afterColumns(sheetIndex, message)}
-                  onClose={sheet.needsColumns ? undefined : () => setPanel(false)}
-                  onIgnoreSheet={() => {
-                    setPanel(false);
-                    void setSheet(sheetIndex, { ignored: true });
-                  }}
-                  onAsk={canAsk ? () => void askModel(sheetIndex) : undefined}
-                  asking={reading}
-                />
-              )}
-              </div>
-              {panelOpen && (sheet.preview?.length ?? 0) === 0 && run.status === "parsed" && run.has_source && (
-                <div className="mt-2">
-                  <Button size="sm" disabled={busy} onClick={() => void readAgain()}>
-                    {busy ? "Reading…" : "Read the whole bill again"}
-                  </Button>
-                </div>
-              )}
+              <SheetColumns
+                run={run}
+                sheet={sheet}
+                sheetIndex={sheetIndex}
+                open={panelOpen}
+                busy={busy}
+                reading={reading}
+                setPanel={setPanel}
+                onRead={(message) => afterColumns(sheetIndex, message)}
+                onSetSheet={(patch) => setSheet(sheetIndex, patch)}
+                onAsk={canAsk ? () => void askModel(sheetIndex) : undefined}
+                onReadAgain={readAgain}
+              />
 
               {reconciliation && (
                 <RevisionPanel
