@@ -21,6 +21,26 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-11-06 (night) — The audit build, Stage 3 landed on `audit-int`
+
+- **Landed (Stage 3, before Graph):** an email taken off a project can be
+  put on another (the replay key names the project; "Put it back" reads
+  nothing, any other project is a new charged read and the button says so);
+  a per-project daily cap on automatic reads (20, `AUTO_READ_DAILY_CAP`),
+  held over it, never a person's press; only Exchange-stamped evidence
+  auto-assigns (a forged `X-Forwarded-To` or a Bcc'd To line is held with
+  the project named); the same email twice is one row (Message-ID, then
+  bytes); `GRAPH_CLIENT_STATE` documented and `docs/integration.md` gains
+  "The spend guards", six checks with real messages before ingestion is left
+  on. The auto-assign db test uses `qaNumber()` (H2). A1, A5, A8, B8, H2, H8.
+- **No migration.** `AUTO_READ_DAILY_CAP` optional; `GRAPH_CLIENT_STATE`
+  must be set before `MAIL_INGESTION_MODE=enabled`.
+- **Open, by design:** a person's upload is not capped (the upload screen
+  is the decision); whether Exchange stamps `AutoForwarded` and
+  `Recipient-P2-Type` on this organisation's real shapes is measured by the
+  spend guards, and absent stamps hold mail; a read in flight when a message
+  is unassigned finishes on the old project, billed.
+
 ## 2026-11-06 (night) — The audit build, Stage 2 landed on `audit-int`
 
 - **Landed (Stage 2):** the click's version (`VersionLedger`; G1, G10); the

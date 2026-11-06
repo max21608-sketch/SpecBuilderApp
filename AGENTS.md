@@ -116,7 +116,23 @@ A human confirms each of these, and nothing else may write it:
   the inbox says so in words with Unassign beside it, under the actor
   `system:router`. A subject reference or a known sender is HELD for a
   person; an ambiguous outcome is always held; nothing is ever auto-assigned
-  from one. Every automatic read counts against the per-project cap.
+  from one. Every automatic read counts against a per-project DAILY cap:
+  runs a `system:` actor created on the project since midnight UTC, at most
+  `AUTO_READ_DAILY_CAP` (default **20**, Max 2026-11-06); over it the message
+  is HELD with "The automatic-read cap for this project (20 a day) is
+  reached; a person starts this read", never refused or dropped, and a
+  person's Assign is never capped (`src/lib/auto-read-cap.ts`, audit A5 —
+  until then the only cap was three reads IN FLIGHT, and this sentence
+  described a cap that did not exist). **Only STAMPED evidence auto-assigns**
+  (audit A8): a forward needs `X-MS-Exchange-Organization-AutoForwarded:
+  true`, and a recipient must be among the `toRecipients`/`ccRecipients`
+  Graph REPORTS with no `X-MS-Exchange-Organization-Recipient-P2-Type: Bcc`
+  stamp; `Resent-*`, `X-Original-To`, `Delivered-To`, `X-Forwarded-To` and the
+  MIME's own To/Cc are headers any outside sender can write, so a message
+  naming a project inbox only through them is HELD with the project named.
+  Whether Exchange stamps these on this organisation's real shapes is
+  UNKNOWN: `docs/integration.md` "The spend guards" measures it on the first
+  real messages, and absent stamps hold mail, which is the safe direction.
   (Amended by Max, 2026-09-21 — "yes, amend" — Stage 2 item 2.11.)
   **An automatic assignment opens NO `change_sets` row, and that is decided,
   not overlooked** (3c.4, 2026-09-22; the reasoning in full at the head of
@@ -1910,8 +1926,25 @@ Five things are load-bearing:
   are no registers to resolve it against. `assignMessage` is the ONLY thing that
   puts a message on a project, because it is also what opens the attempt and
   dispatches the charged read, and two places doing that is two places to forget
-  one half. `registration_request_id` is `email:<messageId>`, so a replay
-  returns the run it already made. **Since 2.11 (2026-09-21) the Graph
+  one half. `registration_request_id` is `email:<messageId>:<projectId>`
+  (audit A1, 2026-11-06 — it was `email:<messageId>`, so a message taken off
+  the wrong project and assigned to the right one found the OLD project's run
+  by the key, linked it, never set `project_id`, and read nothing: the only
+  remedy the gate promises did not work). Assigning a message to a project it
+  already has a run on RE-LINKS that run and reads nothing (a run that
+  unassign settled goes back to `parsed`, or to `failed` with the reason if it
+  was never read); any other project is a new run, a new copy of the `.eml`
+  under that project (an upload is copied from the project it was uploaded
+  to, and only that one), and a new charged read, which the inbox's button
+  says before the click ("Put it back" / "Reading it again on P… is a charged
+  read", `email-assign-cost.ts`, the route's `read_on`). `unassignMessage`
+  clears `mime_attachment_id`. Keys stored in the old form are read only on
+  their own run's project. **The same email twice is one row** (audit B8):
+  every arrival writes `mime_sha256`; before recording, the inbox is asked by
+  Message-ID and then by bytes under advisory locks
+  (`recordMessageUnlessKnown`, `findDuplicateMessage`); an upload answers 200
+  with `duplicateOf`, and the Graph path deletes its own stub. **Since 2.11
+  (2026-09-21) the Graph
   ingestion path assigns automatically on `autoAssignDecision`** — a pure
   function in `email-routing.ts` that says yes ONLY for `forwarded_from_inbox`
   and `recipient_is_inbox`, under actor `system:router`; `sender_is_contact`
@@ -4662,7 +4695,9 @@ follow their line, the one number reader, the replace tick follows its row,
 the finish planner, the gate slot rule. Stage 2 (what a person hits) is
 landed: the click's version, the checklist keeps what is typed, an error
 boundary, the chase respects the matrix (0051), reads that cost what they
-should, refusals written for people, the category as a suggestion. The sections above carry each rule
+should, refusals written for people, the category as a suggestion. Stage 3
+(before Graph) is landed: re-assignment works, a daily cap on automatic
+reads, only stamped evidence auto-assigns, one row per email. The sections above carry each rule
 under its own heading, dated 2026-11-06; §4 of the audit places the open items
 of the 12 Oct, 23 Oct and 15 Oct plans against it. Pilot needs 0050 and the
 provenance backfill before this code (the promotion notes are in
@@ -5399,10 +5434,16 @@ check, every disabled path. One defect the disabled path was hiding has been
 FIXED (2026-09-17): a message stored under the mailbox prefix could not be read
 once assigned, so every Graph-ingested email would have failed its first read.
 See the copy rule in the email section above. The subscription lifecycle, the
-delta semantics and the message shape Graph really sends are NOT. Turning it on is five environment
-variables and a redeploy, and the first real message is the test that matters:
+delta semantics and the message shape Graph really sends are NOT. Turning it on
+is six environment variables (`GRAPH_CLIENT_STATE` was required and documented
+nowhere until audit H8, 2026-11-06; `AUTO_READ_DAILY_CAP` is optional) and a
+redeploy, and the first real message is the test that matters:
 `docs/integration.md` carries the checklist, including the access-policy check
-that must pass in BOTH directions.
+that must pass in BOTH directions and "The spend guards", six checks with real
+messages (a forged forwarding header held, a real forward stamped, a To line
+delivered elsewhere held, the cap holding, one email by three routes making
+one row, a move between projects and back) that must be walked before
+ingestion is left on.
 
 **The chase screen is grouped by furniture line (2026-09-17).** One row per
 BOQ item, collapsed, in a table, with its finish options nested under it and a

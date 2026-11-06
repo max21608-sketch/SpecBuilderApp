@@ -82,7 +82,7 @@ the one the awaited save produced. Audit G1.
 
 `RecordChecklist.tsx:796` keys every input on `reloadKey`. Audit G2.
 
-### An email taken off the wrong project cannot be put on the right one — OPEN
+### An email taken off the wrong project cannot be put on the right one — FIXED 2026-11-06 (`2c72eef`: the replay key names the project)
 
 `email-registration.ts:182-207`, `:364-410`. The replay key is the message
 alone. Audit A1.
