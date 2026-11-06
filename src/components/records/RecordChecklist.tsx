@@ -175,7 +175,7 @@ export default function RecordChecklist({
   attributes,
   readiness,
   savingId,
-  reloadKey,
+  refusals,
   dimensionNote,
   onSave,
   onRecordDimension,
@@ -214,7 +214,11 @@ export default function RecordChecklist({
     noLevel: boolean;
   };
   savingId: string | null;
-  reloadKey: number;
+  /**
+   * Per answer, how many of its saves were refused. Part of the box's key, so
+   * a refused box shows the server's value again, and no other box remounts.
+   */
+  refusals: Record<string, number>;
   /** 0034's one qualifier for the whole cell, composed IN and never beside. */
   dimensionNote: string | null;
   onSave: (answer: ChecklistAnswer, value: string, state: AnswerState) => void;
@@ -786,14 +790,18 @@ export default function RecordChecklist({
                         {/* A DROPDOWN ONLY WHERE THIS APP HOLDS THE LIST. Five of
                             Matthew's eleven palettes are BWS-owned and we have none
                             of them; those stay free text and say so in one line,
-                            because an empty select reads as broken. The control is
-                            re-keyed on every reload so it always shows what the
-                            SERVER holds. */}
+                            because an empty select reads as broken.
+
+                            KEYED ON THIS ANSWER ONLY (audit G2): its version, and
+                            its own refused saves. It was keyed on the page's
+                            reload counter too, so a save of one question
+                            remounted every box and wiped what was being typed
+                            into the next. */}
                         <AnswerValue
                           palette={paletteFor(answer)}
                           value={answer.value}
                           disabled={savingId === answer.answer_id}
-                          inputKey={`${answer.answer_id}:${answer.version}:${reloadKey}`}
+                          inputKey={`${answer.answer_id}:${answer.version}:${refusals[answer.answer_id ?? ""] ?? 0}`}
                           onCommit={(next) => onSave(answer, next, next ? "confirmed" : "missing")}
                         />
                       </>
