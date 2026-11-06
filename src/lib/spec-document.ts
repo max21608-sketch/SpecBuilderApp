@@ -346,6 +346,13 @@ export type HeldTarget = {
    * comparison with a value that is not there any more decides nothing.
    */
   moved?: boolean;
+  /**
+   * The row was FREE when the document was read and another document has
+   * filled it since (audit E2). The held value is the one there now, but
+   * nobody has compared this row with it: a blocker, for `moved`'s reason,
+   * named apart so the row can say what happened in its own words.
+   */
+  appeared?: boolean;
 };
 
 /** The held target, with every live fact the comparison reads. */
@@ -1494,8 +1501,17 @@ function agreesWithHeld(proposal: Proposal, held: HeldTarget): boolean {
 export function annotateHeld(lines: Proposal[], live: readonly AttributeEntry[]): Proposal[] {
   const byId = new Map(live.map((attribute) => [attribute.id, attribute]));
   return lines.map((line) => {
+    if (line.reviewStatus !== "pending") return line;
     const held = line.attributeTarget;
-    if (!held || line.reviewStatus !== "pending") return line;
+    if (!held) {
+      // A row that was FREE when read, re-read too. Two documents read in
+      // parallel can both find a slot empty; once the first is confirmed the
+      // second's insert would hit the partial unique index and reach the
+      // reviewer as a 500. The confirm asks the same question after its record
+      // lock (`occupantSince`), so the screen and the confirm agree.
+      const occupant = occupantSince(line, live);
+      return occupant ? { ...line, attributeTarget: { ...heldTargetOf(occupant), appeared: true } } : line;
+    }
     const now = byId.get(held.attributeId);
     if (!now || now.version !== held.attributeVersion) {
       return { ...line, attributeTarget: { ...held, fromBill: undefined, moved: true } };
@@ -1505,6 +1521,38 @@ export function annotateHeld(lines: Proposal[], live: readonly AttributeEntry[])
     return { ...line, attributeTarget: { ...rest, ...heldTargetOf(now) } };
   });
 }
+
+/**
+ * The ACTIVE attribute now standing where a proposal staged as FREE would
+ * write, or null. Only the two places a database index makes exclusive count:
+ * a dimension's slot on its record (0011), and a finish's BWS field on its
+ * record (0007). A note shares nothing with another note, and a finish with no
+ * field writes beside whatever is there.
+ */
+export function occupantSince(proposal: Proposal, live: readonly AttributeEntry[]): AttributeEntry | null {
+  if (proposal.attributeTarget || !proposal.recordId) return null;
+  const slot = proposal.dimension?.slot ?? null;
+  if (slot) {
+    return (
+      live.find(
+        (attribute) => attribute.recordId === proposal.recordId && attribute.attrGroup === "dimension" && attribute.slot === slot,
+      ) ?? null
+    );
+  }
+  const field = proposal.finish?.specFieldId ?? null;
+  if (field) {
+    return (
+      live.find(
+        (attribute) =>
+          attribute.recordId === proposal.recordId && attribute.attrGroup !== "dimension" && attribute.specFieldId === field,
+      ) ?? null
+    );
+  }
+  return null;
+}
+
+/** What a reviewer reads, first, on a row whose free slot another document filled. */
+export const SLOT_FILLED_MESSAGE = "Another document now holds this slot. Re-match (free) to see it.";
 
 // ---- blockers and sections -------------------------------------------------
 
@@ -1526,6 +1574,13 @@ export function proposalBlockers(proposal: Proposal, all: Proposal[]): Blocker[]
   if (proposal.dimension || proposal.finish || proposal.note) {
     if (!proposal.recordId) {
       blockers.push({ code: "unassigned", message: "Choose which record this belongs to." });
+      return blockers;
+    }
+
+    // Free when read, and filled by another document since: nobody has
+    // compared this row with what is there now.
+    if (proposal.attributeTarget?.appeared) {
+      blockers.push({ code: "slot_filled", message: SLOT_FILLED_MESSAGE });
       return blockers;
     }
 

@@ -768,8 +768,14 @@ function note(statement: BillStatement, why: string | null, state: "confirmed" |
   };
 }
 
-/** The words after a code: "GR-TIM-10 - Lime Washed Oak" → "Lime Washed Oak". Whitespace folded. */
-function wordsBeside(value: string, code: string | null): string | null {
+/**
+ * The words after a code: "GR-TIM-10 - Lime Washed Oak" → "Lime Washed Oak".
+ * Whitespace folded. A value that does not carry the code is its own words.
+ * Exported for `confirm-spec-document.ts` and `manual-capture.ts`, which ask
+ * the finishes library the same question about a finish read off a schedule
+ * or typed by a person.
+ */
+export function wordsBeside(value: string, code: string | null): string | null {
   if (!code) return null;
   const at = value.indexOf(code);
   const rest = at >= 0 ? value.slice(at + code.length) : value;

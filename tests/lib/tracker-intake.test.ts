@@ -264,6 +264,38 @@ describe("agrees or disagrees with the BILL", () => {
     expect(live?.attributeTarget?.fromBill).toBe(false);
     expect(heldReading(live!)).toBe("replace");
   });
+
+  it("notices a FREE slot that another document has filled since, and says so on the row (audit E2)", () => {
+    // Staged while nothing held W, so the row carries no held target. Two
+    // documents read in parallel both propose W; the first is confirmed. The
+    // second used to reach the confirm as "free", insert, and die on the
+    // partial unique index: a 500 saying nothing was written.
+    const seat = resolveProposals([observation({ refRaw: "GR-FUR-04" })], regs(), ids).find(
+      (proposal) => proposal.dimension?.slot === "SH",
+    );
+    expect(seat?.attributeTarget ?? null).toBeNull();
+    const filled: AttributeEntry = {
+      id: "other-doc-sh",
+      recordId: "rec-gr04",
+      attrGroup: "dimension",
+      slot: "SH",
+      specFieldId: null,
+      label: "Seat height",
+      value: "440",
+      unit: "mm",
+      state: "confirmed",
+      version: 1,
+      fromBill: false,
+      sourceRunId: "other-run",
+    };
+    const [now] = annotateHeld([seat!], [filled]);
+    expect(now?.attributeTarget?.appeared).toBe(true);
+    expect(proposalBlockers(now!, [now!]).map((blocker) => blocker.code)).toEqual(["slot_filled"]);
+
+    // Another RECORD's W, or a note, is not in this row's way.
+    const elsewhere = annotateHeld([seat!], [{ ...filled, recordId: "rec-pl04" }, { ...filled, id: "n", slot: null, attrGroup: "note" }]);
+    expect(elsewhere[0]?.attributeTarget ?? null).toBeNull();
+  });
 });
 
 describe("a statement no question matches is kept as a note", () => {

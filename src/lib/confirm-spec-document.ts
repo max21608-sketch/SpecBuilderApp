@@ -31,11 +31,16 @@ import {
   annotateHeld,
   hasPendingProposals,
   heldReading,
+  occupantSince,
   proposalBlockers,
+  SLOT_FILLED_MESSAGE,
   type AttributeEntry,
   type Proposal,
   type StagedSpecDocument,
 } from "@/lib/spec-document";
+import { resolveFinishCode } from "@/lib/finishes";
+import { loadFinishLibrary } from "@/lib/bill-fabric-load";
+import { wordsBeside } from "@/lib/bill-description";
 import { loadBillHeldIds } from "@/lib/attribute-from-bill";
 import { recordDisagreement, type DisagreementStatement } from "@/lib/disagreement-record";
 import { isDimensionSlot, normaliseUnit, type AttributeGroup, type AttributeState, type DimensionSlot } from "@/lib/spec-vocab";
@@ -359,6 +364,42 @@ export async function confirmSpecDocumentRecord(
     throw new DomainConflictError("record_inactive", "That spec record is no longer active.");
   }
 
+  // A SLOT THAT WAS FREE WHEN THE DOCUMENT WAS READ, AND IS NOT NOW (audit E2).
+  // Read after the record lock, so nothing can fill it between this read and
+  // the insert below. Two documents read in parallel can both find the seat
+  // height free; once the first is confirmed, the second's insert hit the
+  // partial unique index (0011 for a slot, 0007 for a field) and reached the
+  // reviewer as a 500 saying "Nothing was written. Check the logs." Refused
+  // here in words instead, by the function the review screen's `annotateHeld`
+  // calls, so the screen has already said the same thing on the row.
+  const freeRows = chosen.filter((proposal) => !proposal.attributeTarget && (proposal.dimension || proposal.finish?.specFieldId));
+  if (freeRows.length > 0) {
+    const occupants = await txn`
+      select id, record_id, attr_group, dimension_slot, spec_field_id, label, value, unit, state, version
+      from record_attributes
+      where record_id = ${recordId} and status = 'active'
+        and (dimension_slot is not null or spec_field_id is not null)
+    `;
+    const live: AttributeEntry[] = occupants.map((row) => ({
+      id: String(row.id),
+      recordId: String(row.record_id),
+      attrGroup: String(row.attr_group) as AttributeGroup,
+      slot: isDimensionSlot(row.dimension_slot) ? (String(row.dimension_slot) as DimensionSlot) : null,
+      specFieldId: row.spec_field_id ? String(row.spec_field_id) : null,
+      label: String(row.label),
+      value: row.value === null || row.value === undefined ? null : String(row.value),
+      unit: normaliseUnit(row.unit),
+      state: String(row.state) as AttributeState,
+      version: Number(row.version),
+    }));
+    const filled = freeRows.find((proposal) => occupantSince(proposal, live));
+    if (filled) {
+      throw new DomainConflictError("slot_filled", `${SLOT_FILLED_MESSAGE} Nothing was written.`, {
+        diff: { proposalId: filled.id },
+      });
+    }
+  }
+
   // Opened before the first answer is written: write_audit() reads the change
   // from the transaction, so one created afterwards would leave every row it
   // covers belonging to nothing.
@@ -397,6 +438,33 @@ export async function confirmSpecDocumentRecord(
   // attributes alone and would silently wipe what this email contributed.
   const attributeWrites = chosen.filter((proposal) => proposal.dimension || proposal.finish || proposal.note);
   let wroteAttributes = false;
+
+  // ---- the finishes library, for the codes this card carries (audit E3) ----
+  //
+  // The drawings confirm and the bill confirm link a finish to the project's
+  // library by its code; this one inserted `material_code` and nothing else,
+  // so an email's, a schedule's or the tracker's finish never linked. Editing
+  // the code "on N items" never reached it, and BW's own finish for the code
+  // never shipped on it. The SAME `resolveFinishCode` they call, and its
+  // CONFLICT rule: a code the library has committed to other words links
+  // nothing. A code the library has never seen links nothing either and
+  // creates nothing: filing a new code is the drawings card's and the finishes
+  // schedule's job, both of which show it to the reviewer first. This screen
+  // does not.
+  const library = attributeWrites.some((proposal) => proposal.finish?.codeRaw)
+    ? await loadFinishLibrary(txn, run.projectId)
+    : [];
+  const finishIdFor = (proposal: Proposal): string | null => {
+    const finish = proposal.finish;
+    if (!finish?.codeRaw) return null;
+    // The WORDS beside the code, as the bill's description reader asks it: a
+    // schedule's value leads with its code ("UPH-07 Velvet Rose"), and the
+    // whole value compared with the library's description is a conflict on
+    // every described code.
+    const resolution = resolveFinishCode(finish.codeRaw, wordsBeside(finish.value ?? "", finish.codeRaw), library);
+    return resolution.status === "matched" ? resolution.finish.id : null;
+  };
+
   if (attributeWrites.length > 0) {
     // Newest last, so `sort_order` reads in the order the reviewer saw.
     let sortOrder = Number(
@@ -465,6 +533,8 @@ export async function confirmSpecDocumentRecord(
       // A note read as FREE (it only points at a drawing, or it holds the
       // bill's words and more) is written BESIDE the bill's note, never over
       // it: nothing is retired.
+      // The row this one replaces, set below to point at its replacement.
+      let retiredId: string | null = null;
       if (proposal.attributeTarget && reading !== "free") {
         const retired = await txn`
           update record_attributes
@@ -481,6 +551,7 @@ export async function confirmSpecDocumentRecord(
             `The ${dimension?.slot ?? fieldDisplayName(finish?.specFieldName) ?? note?.label ?? "spec"} this would replace has changed since you looked at it. Nothing was written — reload and check what is there now.`,
           );
         }
+        retiredId = String(retired[0].id);
       }
 
       const label = statement.label;
@@ -493,13 +564,14 @@ export async function confirmSpecDocumentRecord(
       // against page 9 (null for a spreadsheet, which has none).
       const inserted = await txn`
         insert into record_attributes
-          (record_id, attr_group, dimension_slot, spec_field_id, material_code, label, value, unit, state,
+          (record_id, attr_group, dimension_slot, spec_field_id, material_code, finish_id, label, value, unit, state,
            source_run_id, source_page, sort_order, created_by, updated_by)
         values
           (${recordId}, ${statement.attrGroup},
            ${statement.dimensionSlot},
            ${statement.specFieldId},
            ${statement.materialCode},
+           ${finishIdFor(proposal)},
            ${label},
            ${statement.value},
            ${statement.unit},
@@ -509,6 +581,20 @@ export async function confirmSpecDocumentRecord(
       `;
       const attributeId = String(inserted[0]?.id ?? "");
       if (!attributeId) throw new Error(`dimension ${proposal.id} was not inserted`);
+
+      // THE RETIRED ROW POINTS AT ITS REPLACEMENT (audit E4), as it does on
+      // every other retire-then-insert path (`attribute-correct.ts`,
+      // `confirm-drawings.ts`, `disagreement-resolve.ts`). Without it the
+      // history read a value an email replaced as "taken off this item", and
+      // offered to put it back. Set after the insert, because 0016's check
+      // allows a pointer only on a row already retired, and the row it points
+      // at must exist.
+      if (retiredId) {
+        await txn`
+          update record_attributes set superseded_by_id = ${attributeId}, updated_by = ${actor}
+          where id = ${retiredId} and status = 'retired'
+        `;
+      }
 
       // The wording the figure was read from. "445mm (measured to top of
       // cushion, compressed)" — the figure is the derived reading and this is

@@ -36,6 +36,7 @@ import { recomposeAnswers, retireAttribute } from "@/lib/attribute-retire";
 import { correctAttribute } from "@/lib/attribute-correct";
 import { createFinish, editFinish } from "@/lib/finish-edit";
 import { setRecordCategory } from "@/lib/record-category";
+import { createAttribute } from "@/lib/manual-capture";
 import { DIMENSIONS_JSON_ID } from "@/lib/promote-answers";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -412,6 +413,43 @@ describeIfDb("an answer composed from the bill follows the bill's specs", () => 
     const after = await answerFor(recordId, 1);
     expect(after?.value).toBe("__QA Reviewer cloth");
     expect(after?.source_kind).toBe("document");
+  });
+
+  it("links a typed finish to the library by its code, and a contradicting one to nothing (E3)", async () => {
+    // `createAttribute` inserted the code and no `finish_id`, so a fabric a
+    // person typed against a code the library holds never followed an edit to
+    // that code, and BW's finish for it never shipped on the item.
+    const finishId = await withTransaction((txn) =>
+      createFinish(txn, {
+        projectId,
+        fields: { code: "__QA-FAB-03", description: "__QA Wool Heather", state: "confirmed" },
+        actor: "qa",
+      }),
+    );
+    const typed = async (value: string) => {
+      const recordId = await billLine([]);
+      const result = await withTransaction((txn) =>
+        createAttribute(txn, {
+          recordId,
+          attrGroup: "material",
+          label: "Fabric",
+          value,
+          materialCode: "__QA-FAB-03",
+          specFieldId: com1FieldId,
+          state: "confirmed",
+          actor: "qa",
+        }),
+      );
+      const row = await client.query(`select finish_id from record_attributes where id = $1`, [result.attributeId]);
+      return { recordId, finishId: row.rows[0]?.finish_id ?? null };
+    };
+
+    const agreeing = await typed("__QA Wool Heather");
+    expect(agreeing.finishId).toBe(finishId);
+    expect((await answerFor(agreeing.recordId, 1))?.value).toContain("__QA Wool Heather");
+
+    // The CONFLICT rule: the library has committed to other words.
+    expect((await typed("__QA Wool Charcoal")).finishId).toBeNull();
   });
 
   it("fills a record's answers from its bill specs the moment it is categorised (E5)", async () => {
