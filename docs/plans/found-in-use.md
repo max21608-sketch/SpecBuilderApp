@@ -73,12 +73,12 @@ P16717 and any revision confirmed before this should be checked for records
 retired this way** (a retired record whose code is live on a newer record of
 the same phase).
 
-### Confirm within a second of typing reads "edited in another tab" — OPEN
+### Confirm within a second of typing reads "edited in another tab" — FIXED 2026-11-06 (`2783912`, the `VersionLedger`)
 
 The three review components send the version from the click's render, not
 the one the awaited save produced. Audit G1.
 
-### Typing in a second checklist question is lost when the first saves — OPEN
+### Typing in a second checklist question is lost when the first saves — FIXED 2026-11-06 (`64e4583`)
 
 `RecordChecklist.tsx:796` keys every input on `reloadKey`. Audit G2.
 

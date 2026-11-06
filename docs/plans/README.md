@@ -21,6 +21,33 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-11-06 (night) — The audit build, Stage 2 landed on `audit-int`
+
+- **Landed (Stage 2):** the click's version (`VersionLedger`; G1, G10); the
+  checklist keeps what is typed, `ProjectDetailsCard`, the record view keyed
+  by id, the qualifier through the reason box (G2, G3, G6, G9); an error
+  boundary per segment, a 2xx that is not JSON refused, a 401 with a sign-in
+  link, the browser never imports the database driver or the Blob SDK (G4,
+  G5, G11); the chase respects the matrix and asks only this project's
+  questions, staleness ignores the record version, 0051 keeps a suggestion
+  from bumping the version, every total counts every matrix record (F1, F7,
+  F10, D4, A3/F11); a timed-out read is terminal once with the paid answer
+  kept, a busy redelivery waits the claim out, Restart never over a live
+  claim, the claim window from the constant, the timing table covers every
+  route (D1, D7, D8, D9, C15, D11); refusals written for people and a guard
+  that reads them, the next step refreshes, the bill category is a
+  suggestion, "Reading N documents" counts in-flight documents (G15, G7, G8,
+  F9).
+- **Checks:** the integration branch after 2.1–2.4: 3,885 tests, build
+  clean; a further run with 2.5 and 2.6 is recorded below when it lands.
+- **Pilot, in order:** 0051 before this code (a trigger, no lock to speak
+  of). A drawings confirm from a tab opened before the deploy gets one 400
+  asking for a reload (D3). Bills reviewed on pilot after this deploy need
+  their suggested categories ACCEPTED (one button per tab) or the records
+  confirm uncategorised, as Max ruled.
+- **Decisions this stage leaves Max:** whether the bill's Confirm button
+  should also say "n lines have suggested categories nobody accepted".
+
 ## 2026-11-06 (evening) — The audit build, Stage 1 landed on `audit-int`
 
 Max: "run all the stages… use your best judgment… go with the proposed".
