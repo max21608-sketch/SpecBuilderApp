@@ -25,12 +25,16 @@
 // given. One project's user cannot register another project's document, and a
 // pathname outside the prefix is not a blob this app ever wrote.
 // ============================================================================
+// SERVER ONLY (audit G5): this module holds the store's server SDK and the
+// helpers that read with the store's credential. The browser builds upload
+// pathnames with `upload-paths.ts`, never with this.
+import "server-only";
 import { get, head } from "@vercel/blob";
+import { projectUploadPrefix } from "./upload-paths";
 
-/** Everything this app uploads lives under its project. Nothing else is readable. */
-export function projectUploadPrefix(projectId: string): string {
-  return `projects/${projectId}/`;
-}
+// Re-exported so the server routes that already read the prefix from here keep
+// one import; there is still ONE definition, in `upload-paths.ts`.
+export { projectUploadPrefix };
 
 export class UntrustedBlobError extends Error {
   constructor(message: string) {

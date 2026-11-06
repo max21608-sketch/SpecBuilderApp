@@ -29,7 +29,7 @@ import { VersionLedger, type WrittenVersions } from "@/lib/acked-versions";
 import { draftAfterSave, type ObservationDrafts } from "@/lib/observation-drafts";
 import { buttonClass } from "@/components/ui/Button";
 import { upload } from "@vercel/blob/client";
-import { projectUploadPrefix } from "@/lib/blob-source";
+import { projectUploadPrefix } from "@/lib/upload-paths";
 import type { CroppedImage } from "@/lib/pdf-crop";
 
 import { usePoll } from "@/lib/use-poll";

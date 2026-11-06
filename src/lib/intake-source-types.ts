@@ -1,3 +1,5 @@
+import { projectUploadPrefix } from "./upload-paths";
+
 export const INTAKE_UPLOAD_ACCEPT = [
   ".pdf",
   ".xlsx",
@@ -56,7 +58,7 @@ export function isEvidenceFilename(filename: string): boolean {
 
 /** Where an item image lives, under the project's own prefix. */
 export function itemImagePath(projectId: string, recordScopedName: string): string {
-  return `projects/${projectId}/item-images/${recordScopedName}.png`;
+  return `${projectUploadPrefix(projectId)}item-images/${recordScopedName}.png`;
 }
 
 export type IntakeSourceKind = "pdf" | "xlsx" | "csv" | "tsv" | "eml" | "unsupported";

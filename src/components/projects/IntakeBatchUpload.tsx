@@ -55,7 +55,7 @@ import { upload } from "@vercel/blob/client";
 import { apiFetch } from "@/lib/api-fetch";
 import { INTAKE_UPLOAD_ACCEPT, SPREADSHEET_EXTENSIONS, unreadableUploadAdvice } from "@/lib/intake-source-types";
 import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
-import { projectUploadPrefix } from "@/lib/blob-source";
+import { projectUploadPrefix } from "@/lib/upload-paths";
 import { guessKindFromName } from "@/lib/document-name-guess";
 import SuggestButton from "@/components/ui/SuggestButton";
 import Button from "@/components/ui/Button";

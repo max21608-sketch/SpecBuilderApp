@@ -58,6 +58,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // `import "server-only"` (audit G5) is resolved by Next's own bundler,
+      // which maps it to an empty module on the server and to a throw in a
+      // client bundle; the package is not installed on its own. Vitest has no
+      // Next pipeline, so it gets the server half, as Next's docs describe.
+      "server-only": path.resolve(__dirname, "node_modules/next/dist/compiled/server-only/empty.js"),
     },
   },
 });

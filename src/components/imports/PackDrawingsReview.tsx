@@ -19,7 +19,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { VersionLedger, type WrittenVersions } from "@/lib/acked-versions";
 import { draftAfterSave, type ObservationDrafts } from "@/lib/observation-drafts";
 import { upload } from "@vercel/blob/client";
-import { projectUploadPrefix } from "@/lib/blob-source";
+import { projectUploadPrefix } from "@/lib/upload-paths";
 import type { CroppedImage } from "@/lib/pdf-crop";
 import { formatDay } from "@/lib/format-day";
 

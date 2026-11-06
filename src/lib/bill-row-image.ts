@@ -11,6 +11,8 @@
 // PLACES IN A CELL is invisible to both and is read off the workbook's own
 // parts (`bill-cell-pictures.ts`, 2026-10-06) into the same per-row shape.
 
+import { projectUploadPrefix } from "./upload-paths";
+
 /** One row's picture, as stored at staging. */
 export type BillRowImage = {
   /**
@@ -91,7 +93,7 @@ export type BillPictureOverride = BillPictureCrop | { none: true };
 
 /** Where a run's row pictures and their crops are stored. The one place the prefix is spelt. */
 export function billPicturePrefix(projectId: string, runId: string): string {
-  return `projects/${projectId}/bill-images/${runId}/`;
+  return `${projectUploadPrefix(projectId)}bill-images/${runId}/`;
 }
 
 /** Whether an override is "no picture". Data from the past: read defensively. */

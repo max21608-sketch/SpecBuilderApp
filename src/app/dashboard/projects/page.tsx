@@ -11,8 +11,8 @@ import {
   PROJECT_STATE_TONE,
   type ProjectCompletion,
   type ProjectState,
-} from "@/lib/project-completion";
-import { EMPTY_SUMMARY, type ProjectSummary } from "@/lib/project-summary";
+} from "@/lib/project-summary-shape";
+import { EMPTY_SUMMARY, type ProjectSummary } from "@/lib/project-summary-shape";
 import { daysUntilSpecsAgreed, todayLocal } from "@/lib/project-programme";
 import Tip from "@/components/ui/Tip";
 import Pill from "@/components/ui/Pill";

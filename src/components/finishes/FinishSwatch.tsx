@@ -14,7 +14,7 @@
 // deleting it, because a version may point at it.
 import { useState } from "react";
 import { upload } from "@vercel/blob/client";
-import { projectUploadPrefix } from "@/lib/blob-source";
+import { projectUploadPrefix } from "@/lib/upload-paths";
 import { apiFetch } from "@/lib/api-fetch";
 
 function Swatch({ finishId, hasSwatch }: { finishId: string; hasSwatch: boolean }) {

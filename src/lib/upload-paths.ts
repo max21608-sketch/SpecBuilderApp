@@ -1,0 +1,16 @@
+// ============================================================================
+// WHERE AN UPLOAD LIVES, AND NOTHING ELSE (audit G5, 2026-11-06).
+//
+// The browser builds every upload pathname with `projectUploadPrefix`, and the
+// server checks it against the same prefix in `blob-source.ts`. It lived in
+// `blob-source.ts`, so seven upload components imported the module that holds
+// the store's server SDK (`@vercel/blob`) and its read-with-credential helpers
+// into the browser, kept from crashing only by lazy initialisation. A leaf
+// with no imports is the one definition both sides read; `blob-source.ts`
+// imports it from here, and is now `server-only`.
+// ============================================================================
+
+/** Everything this app uploads lives under its project. Nothing else is readable. */
+export function projectUploadPrefix(projectId: string): string {
+  return `projects/${projectId}/`;
+}

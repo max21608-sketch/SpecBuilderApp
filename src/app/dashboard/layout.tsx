@@ -6,7 +6,15 @@
 // a client-side fetch would fail toward hiding it.
 import NavShell from "@/components/ui/NavShell";
 import EnvironmentChip from "@/components/layout/EnvironmentChip";
+import SessionExpiredNote from "@/components/layout/SessionExpiredNote";
 
+// `SessionExpiredNote` shows nothing until a request finds the session gone
+// (audit G11), then the one link back in, above whatever screen asked.
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  return <NavShell envChip={<EnvironmentChip />}>{children}</NavShell>;
+  return (
+    <NavShell envChip={<EnvironmentChip />}>
+      <SessionExpiredNote />
+      {children}
+    </NavShell>
+  );
 }
