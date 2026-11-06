@@ -145,7 +145,12 @@ export default function PackDrawingsReview({
 }) {
   const [data, setData] = useState<Payload | null>(null);
   /** What the project needs next — see the note in `DrawingsReview`. */
-  const step = useNextStep(projectId);
+  // Every document's status and version, so the step refreshes after a
+  // confirm that stays on this page (audit G7, 2026-11-06).
+  const step = useNextStep(
+    projectId,
+    data ? data.runs.map((r) => `${r.importId}:${r.status}:${r.version}`).join("|") : null,
+  );
   const [error, setError] = useState<string | null>(null);
   /**
    * What an action DID, where that is not a failure.

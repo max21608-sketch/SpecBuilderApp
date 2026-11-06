@@ -109,7 +109,9 @@ export default function DrawingsReview({
    * only once the document has loaded; it reads the SAME endpoint the project
    * overview reads, and a failure costs the emphasis and never the route.
    */
-  const nextAction = useNextStep(run?.project_id ?? null);
+  // The token is the document's status and version, so the step refreshes
+  // after a confirm that stays on this page (audit G7, 2026-11-06).
+  const nextAction = useNextStep(run?.project_id ?? null, run ? `${run.status}:${run.version}` : null);
   const [resolution, setResolution] = useState<ItemResolution[]>([]);
   const [specFields, setSpecFields] = useState<SpecField[]>([]);
   const [records, setRecords] = useState<RecordChoice[]>([]);
