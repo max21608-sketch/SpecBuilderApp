@@ -109,6 +109,30 @@ export type AnswerFill = {
 };
 
 /**
+ * Whether a dimension attribute is part of the composed Dimensions cell.
+ *
+ * THE SAME SET THE BWS CELL IS COMPOSED FROM, with one exception. The export
+ * (`composeDimensions` in bws-export.ts) hands `composeDimensionCell` every
+ * slotted row. This used to drop every row with no value before composing,
+ * and `allConfirmed` was then judged over what was left: a width recorded TBC
+ * with no figure, beside a confirmed depth and height, gave a CONFIRMED answer
+ * "D790 x H720mm" while the file shipped "W TBC x D790 x H720mm" (audit F6,
+ * 2026-11-06). A gate read the width as settled over a client who had not
+ * decided it.
+ *
+ * A TBC row with no figure is therefore IN: it composes to "W TBC", which is
+ * an answer (somebody asked and the client has not decided), and it makes the
+ * whole answer TBC. The exception is a CONFIRMED row with a blank value, which
+ * `record_attributes_confirmed_has_value` refuses for null and only an empty
+ * string can reach: `composeDimensionCell` renders it `[W "" — not a number]`,
+ * which belongs beside the row on a review screen and nowhere near an answer.
+ */
+export function composesIntoCell(attribute: PromotableAttribute): boolean {
+  if (attribute.attrGroup !== "dimension" || !isDimensionSlot(attribute.dimensionSlot ?? "")) return false;
+  return (attribute.value ?? "").trim() !== "" || attribute.state === "tbc";
+}
+
+/**
  * What a record's attributes say its checklist answers should be.
  *
  * Pure, and deliberately so: the confirm route and any screen that wants to
@@ -125,15 +149,7 @@ export function planAnswerFills(attributes: PromotableAttribute[], dimensionNote
   const fills: AnswerFill[] = [];
 
   // ---- the composed dimensions cell ---------------------------------------
-  // A slot with no value at all contributes nothing: composeDimensionCell
-  // renders it as [W "" — not a number], which is the right thing to show a
-  // reviewer beside the row and pure noise inside an answer.
-  const dimensions = attributes.filter(
-    (attribute) =>
-      attribute.attrGroup === "dimension" &&
-      isDimensionSlot(attribute.dimensionSlot ?? "") &&
-      (attribute.value ?? "").trim() !== "",
-  );
+  const dimensions = attributes.filter(composesIntoCell);
   if (dimensions.length > 0) {
     const rows: DimensionRow[] = dimensions.map((attribute) => ({
       slot: attribute.dimensionSlot as DimensionSlot,
@@ -422,12 +438,7 @@ export function planAnswerRetractions(attributes: PromotableAttribute[]): { spec
   // The composed cell stands as long as ANY slot still does. Retiring the
   // width off a record that still has a depth and a height recomposes rather
   // than retracts — which is planAnswerFills' job, not this one's.
-  const hasDimension = attributes.some(
-    (attribute) =>
-      attribute.attrGroup === "dimension" &&
-      isDimensionSlot(attribute.dimensionSlot ?? "") &&
-      (attribute.value ?? "").trim() !== "",
-  );
+  const hasDimension = attributes.some(composesIntoCell);
   if (!hasDimension) out.push({ specFieldId: null, jsonId: DIMENSIONS_JSON_ID });
 
   return out;
