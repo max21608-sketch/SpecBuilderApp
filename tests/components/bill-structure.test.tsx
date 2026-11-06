@@ -47,9 +47,20 @@ vi.mock("@/lib/api-fetch", () => ({
   },
 }));
 
+// The automatic read's own decision, watched rather than replaced: the screen
+// calls it only from the effect that decides whether to ask, so a call is the
+// sentinel that the effect has run for the bill on screen.
+const wantsRead = vi.hoisted(() => ({ fn: null as unknown as ReturnType<typeof vi.fn> }));
+vi.mock("@/lib/boq-structure-wanted", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/boq-structure-wanted")>();
+  wantsRead.fn = vi.fn(actual.sheetWantsStructureRead);
+  return { ...actual, sheetWantsStructureRead: wantsRead.fn };
+});
+
 beforeEach(() => {
   routes.current = {};
   routes.calls.length = 0;
+  wantsRead.fn?.mockClear();
 });
 
 import ReviewImportPage from "@/app/dashboard/imports/[id]/page";
@@ -138,6 +149,7 @@ function mountReview(over: Record<string, unknown>, sheets: unknown[]) {
 }
 
 const structureCalls = () => routes.calls.filter((call) => call.url === `/api/imports/${IMPORT}/suggest-columns`);
+const billLoads = () => routes.calls.filter((call) => call.method === "GET" && call.url === `/api/imports/${IMPORT}`).length;
 
 describe("the automatic structure read", () => {
   it("asks the model ONCE when the review first opens a bill nobody could map", async () => {
@@ -152,8 +164,17 @@ describe("the automatic structure read", () => {
     // over a model's columns — and not through a second notice; it is not a
     // failure either.
     await waitFor(() => expect(screen.queryByRole("button", { name: /Ask again/ })).toBeNull());
-    // Reloads do not ask again.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // RELOADS DO NOT ASK AGAIN, asserted once the reload has LANDED rather
+    // than after a fixed sleep (audit H6): a 50 ms pause passed whether or not
+    // the guard held, because nothing said the reload had been drawn by then.
+    // The read reloads (a second GET), and only after that reload resolves
+    // does the panel's button stop saying "Reading the columns…"; the effect
+    // that would ask again runs in the commit that draws the reloaded bill,
+    // and it calls the route synchronously. So by the time the button is
+    // back, a second ask would already be counted.
+    await waitFor(() => expect(billLoads()).toBe(2));
+    expect((await screen.findAllByRole("button", { name: "Ask the model to read the columns" })).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Reading the columns…" })).toBeNull();
     expect(structureCalls()).toHaveLength(1);
   });
 
@@ -172,7 +193,12 @@ describe("the automatic structure read", () => {
       unreadSheets(),
     );
     expect(await screen.findByRole("region", { name: "Columns of CASEGOODS+SEATING+TABLES" })).toBeInTheDocument();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // NOT A FIXED SLEEP (audit H6). The automatic read decides in an effect,
+    // by asking `sheetWantsStructureRead` of each sheet, and when it decides
+    // yes it calls the route in the same tick. So: wait until it HAS decided
+    // (both sheets asked, each already read), then the count is the answer.
+    await waitFor(() => expect(wantsRead.fn).toHaveBeenCalledWith(expect.objectContaining({ sheetName: "LOGISTICS" }), true));
+    expect(wantsRead.fn).not.toHaveBeenCalledWith(expect.anything(), false);
     expect(structureCalls()).toHaveLength(0);
   });
 

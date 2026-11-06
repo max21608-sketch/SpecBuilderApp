@@ -30,6 +30,7 @@ import { stageDrawingsV4 } from "@/lib/drawing-items";
 import { DrawingsItemsOutput } from "@/lib/extraction-schema";
 import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
 import { confirmingAsShown } from "./shown-targets";
+import { normaliseFinishCode } from "@/lib/finishes";
 
 // The drawings confirm requires the records the card showed (audit D3).
 const confirmRoute = confirmingAsShown(confirmPost);
@@ -242,8 +243,8 @@ describeIfDb("confirming an item the drawings read returned whole", () => {
         (
           await client.query(
             `insert into project_finishes (project_id, code, code_norm, code_origin, kind, description, state, created_by, updated_by)
-             values ($1, $2, $2, 'client', 'timber', 'Invented oak, natural', 'confirmed', 'qa', 'qa') returning id`,
-            [projectId, finishCode],
+             values ($1, $2, $3, 'client', 'timber', 'Invented oak, natural', 'confirmed', 'qa', 'qa') returning id`,
+            [projectId, finishCode, normaliseFinishCode(finishCode)],
           )
         ).rows[0].id,
       );

@@ -29,6 +29,7 @@ import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { withTransaction } from "@/lib/db-transaction";
 import { createFinish, mintInternalFinishCode } from "@/lib/finish-edit";
+import { normaliseFinishCode } from "@/lib/finishes";
 import { stageDrawings, type SpecFieldEntry } from "@/lib/drawing-document";
 import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
 import { confirmingAsShown } from "./shown-targets";
@@ -318,7 +319,7 @@ describeIfDb("a finish the client gave no code for", () => {
 
     it("files the CLIENT's own code where the reviewer types one, as a client code", async () => {
       const record = await makeRecord("__QA4A1-4", "__QA Sofa, coded by hand");
-      const staged = await stagePage({ code: "__QA4A1-4", fabric: "__QA Yarn Tessarae" });
+      const staged = await stagePage({ code: "__QA4A1-4", fabric: "__QA Yarn Harbour" });
       expect((await press(staged, { materialCode: "__QA CH-77" })).status).toBe(200);
       const { response } = await confirmCard(staged, true);
       expect(response.status).toBe(200);
@@ -429,8 +430,8 @@ describeIfDb("a finish the client gave no code for", () => {
       await expect(
         client.query(
           `insert into project_finishes (project_id, code, code_norm, code_origin, state, created_by, updated_by)
-           values ($1, '__QA BAD', '__QA BAD', 'invented', 'tbc', 'qa', 'qa')`,
-          [projectId],
+           values ($1, '__QA BAD', $2, 'invented', 'tbc', 'qa', 'qa')`,
+          [projectId, normaliseFinishCode("__QA BAD")],
         ),
       ).rejects.toThrow(/project_finishes_code_origin_check/);
     });
@@ -438,8 +439,8 @@ describeIfDb("a finish the client gave no code for", () => {
     it("defaults to `client`, which is what every row on record already was", async () => {
       const row = await client.query(
         `insert into project_finishes (project_id, code, code_norm, state, created_by, updated_by)
-         values ($1, '__QA DEF-1', '__QA DEF-1', 'tbc', 'qa', 'qa') returning code_origin`,
-        [projectId],
+         values ($1, '__QA DEF-1', $2, 'tbc', 'qa', 'qa') returning code_origin`,
+        [projectId, normaliseFinishCode("__QA DEF-1")],
       );
       expect(row.rows[0].code_origin).toBe("client");
     });
