@@ -661,6 +661,16 @@ ever wrote it false**: the case it described — recording a send whose coverage
 was already stale — is refused outright by the gate. The predicate is gone; the
 column goes in a destructive migration once the screen has been accepted.
 
+**Staleness never reads the record's version** (audit F10, 2026-11-06).
+`bump_version` fires on every `spec_records` update, an internal note
+included, and comparing `recordVersion` dropped every question on the record
+out of Waiting and refused an unsent draft at confirm-sent with nothing the
+email printed having moved: the `chased_at` trap in reverse. The context
+snapshot carries every field the email prints, and a category that no longer
+asks the question reads `questionGone` through `loadQuestionsByKey`'s
+category join. `record_version` is still written on coverage rows and decides
+nothing (`coverageStaleReasons`).
+
 ### A quote is blocked by SOME of the questions, and the email says which
 
 `db/migrations/0019_item_level_and_tgq_levels.sql`, `src/lib/tgq.ts`,
@@ -828,6 +838,24 @@ the same rule the drawings card learned.
 
 `groupIntoLines` is pure and tested in the pure tier; the table's own behaviour
 is tested in the component tier, which runs without a database.
+
+### A chase asks only this project's questions, and only what the record asks
+
+`src/lib/chase-drafts.ts` (`loadQuestionsByKey`, `CHASE_HEADING_PREDICATE`),
+`src/app/api/drafts/**`, `tests/lib/chase-heading-predicate.test.ts`
+
+`loadQuestionsByKey` read ANY record and paired every requirement with every
+record (a cross join with no category clause), and neither the generate nor
+the edit route compared the record's project with the draft's — so a crafted
+or stale request could put another client's items, refs and values into this
+project's chase email, which a person then sends (audit A3/F11, 2026-11-06).
+It now takes the project and carries `loadOutstanding`'s scope clause for
+clause, minus the answer-state filter: the project, the record's category's
+questions, an active phase, not a split heading. A missing key is refused in
+one sentence that names nothing of the other project. The split-heading clause
+is `CHASE_HEADING_PREDICATE`; the driver cannot interpolate a fragment, so the
+test reads the chase queries' SOURCES and fails on one without it or without
+`run.status = 'active'` — it was missing from three.
 
 ### The infill screen fills in what we know, and it writes through the two routes that already exist
 
@@ -2215,8 +2243,12 @@ WAITING FOR A SLOT stopped polling and never saw them start; the overview did
 not poll at all. Being read OR waiting for a slot is in flight; a plain
 `pending` run nobody asked to read is not, or polling would never stop. The
 overview refreshes its DOCUMENTS only, never through `load()`, which resets the
-details form. The waiting expression is in three queries and
-`tests/lib/intake-in-flight.test.ts` holds them equal.
+details form. The waiting expression is in FOUR queries and
+`tests/lib/intake-in-flight.test.ts` holds them equal — the fourth is
+`project-summary.ts`'s `documents_reading`, which counted `pending` (not in
+flight) and missed `queued` (what dispatch writes), so a document nobody asked
+to read pinned the overview's primary step at "Reading 1 document…" (audit F9,
+2026-11-06). It counts in-flight documents and never a plain `pending`.
 
 **An oversize document is refused before a byte is stored**
 (`src/lib/upload-limits.ts`, a leaf, and `upload-check.ts`): over 20 MB or 600
@@ -2248,9 +2280,39 @@ attempt abandoned by a worker that died mid-run.
 
 The timings are an inequality, not three knobs: model deadline < run abort <
 `maxDuration`; claim expiry > `maxDuration`; visibility timeout > claim expiry.
-`tests/lib/extraction-timing.test.ts` asserts each, against `vercel.json`. There
-is **no exactly-once billing guarantee**; an ambiguous failure can cost a second
-call, and the UI says so before a human restarts one.
+`tests/lib/extraction-timing.test.ts` asserts each, against `vercel.json`, and
+since 2026-11-06 for EVERY route that declares a `maxDuration` (a table that
+fails on a route it does not know; `TRANSCRIPTION_CLAIM_MS` is 900 s, not the
+800 s that equalled its route). There is **no exactly-once billing
+guarantee**; an ambiguous failure can cost a second call, and the UI says so
+before a human restarts one.
+
+**A read that runs out of time is terminal, and a busy redelivery waits the
+claim out** (audit D1, D7, D8, D9, 2026-11-06). Our own 740 s deadline and the
+run's abort reject the stream with an abort that carries no status, and it
+fell to retryable `transport`, so the queue read a 100-page document up to four
+times at full cost and then said "could not be reached". `classifyCallFailure`
+reads the combined SIGNAL first, and an abort is `timeout`: "ran out of time
+after N minutes … split the document". The stream's `currentMessage` is kept
+as `raw_response` on every failure, so the paid partial answer is on the row.
+Staging (`stageOutput`) is the only step inside a try after the model call: a
+throw there fails terminally with the paid answer on the row, and never
+releases the claim. A `busy` outcome carries `claimExpiresInSeconds` and
+`redeliveryDelaySeconds` waits for it plus 30 s, because 30/60/120 s all land
+inside a 900 s claim and the recovery that `busy` promises never ran.
+**Whether "Start again" is offered is `attemptRestartable`**, called by the
+extract route and the four review screens: never over a live claim, whatever
+`claim_count` says (a live fourth attempt used to show the red button, and
+pressing it fenced the paid worker out). Every claim window in SQL is
+`make_interval` over `CLAIM_EXPIRY_SECONDS`; a test refuses a literal, because
+the document GET carried `interval '360 seconds'` against a 900 s claim and
+showed Restart from minute 6. A resent press (same request id) is answered with
+what it did and never re-opens its attempt: re-opening replays a key the queue
+drops, and minting a new one charges twice. Files: `src/lib/anthropic.ts`,
+`extraction-claim.ts`, `extraction-run.ts`, `pdf-bill-checks.ts`,
+`src/app/api/queues/[topic]/route.ts`, `src/app/api/imports/[id]/extract/route.ts`,
+`tests/lib/extraction-timing.test.ts`, `extraction-restart.test.ts`,
+`anthropic-timeout.test.ts`.
 
 ### Never fetch a client-supplied URL with a store credential
 
@@ -2670,6 +2732,64 @@ and then nothing at all — the card simply looked as though the click had not
 registered. Reload first and report afterwards (`reloadThen` on both drawings
 screens). The reload itself is still required: a refused request means the
 screen is out of date.
+
+**A 2xx that is not a JSON object is a failure, and a 401 says where to sign
+in** (audit G4, G11, 2026-11-06). `apiFetch` used to resolve an empty or HTML
+200 as `{ ok: true, data: {} }`, so screens crashed on `res.data.batches.find`
+and `data.record.parent_id`; it is now `ok:false` with "The server answered
+with something that is not data (status N)", and every route a screen calls
+answers with an object. A 401 other than the login's own is "Your session has
+expired. Sign in again." with `signIn`, announced on `window`
+(`SESSION_EXPIRED_EVENT`) and shown once by `SessionExpiredNote` in the
+dashboard layout. Every dashboard segment has an `error.tsx` rendering
+`ScreenError`, so a render-time throw is a Note in the shell, never a white
+page (there was no boundary anywhere, and CLAUDE.md itself records a staged
+shape change that threw on every screen). Files: `src/lib/api-fetch.ts`,
+`src/components/layout/ScreenError.tsx`, `SessionExpiredNote.tsx`,
+`src/app/dashboard/**/error.tsx`.
+
+### A refusal is screen text written on the server
+
+`tests/lib/vocabulary-guard.test.ts`, `src/lib/intake-status.ts`
+(`documentClosedSentence`, `reviewedWord`), `src/lib/draft-status.ts`
+
+Every `DomainConflictError` message and every `json({ error })` body is
+printed verbatim by a screen, and 29 of them printed a raw status ("This
+import is parsing, not open for editing" is the CHECK talking), three said
+"run" for a phase, and thirty accused "another tab" or "someone else" for a
+version the sentence could only know had moved (audit G15, 2026-11-06). The
+guard now reads the literals inside both under `src/lib` and `src/app/api` and
+fails on "run", on "another tab" / "someone else" (the sentence says "changed
+since this screen loaded. Reload"), and on a status printed raw: a status
+reaches a sentence only through the helpers, which name the state and the
+next step ("This bill has already been confirmed, so its columns can no
+longer be changed. Open its phase to change anything on it"). A refusal that
+names the writer from `updated_by` is the allowlisted exception. Codes never
+change; screens switch on them. The guard parses `.ts` as TS: read as TSX, a
+generic arrow silently ended a file's scan, which is how the screen scan had a
+blind spot too. Two blind spots remain and are stated in its header: a message
+built into a variable and passed by name, and a plain `Error` a route turns
+into a sentence.
+
+### A click's version is the version of its render
+
+`src/lib/acked-versions.ts` (`VersionLedger`, `versionsWritten`),
+`src/lib/observation-drafts.ts`, `DrawingsReview.tsx`,
+`PackDrawingsReview.tsx`, `SpecDocumentReview.tsx`, the drawings PATCH
+
+Confirm waited for the blur's save and then sent the row versions captured by
+the click's render, from BEFORE that save, so typing a figure and pressing
+Confirm within a second read "edited in another tab" with nobody else in the
+document — at least eleven sites (audit G1, 2026-11-06). Every request on
+these screens now reads the ledger when it is BUILT: the larger of what the
+server acknowledged and what the row rendered with, so the reviewer's own saves
+count and someone else's unseen edit is still refused. Never read
+`observation.version` or `item.version` from a closure into a request body.
+The drawings PATCH returns `versions` (`versionsWritten`), a swap's displaced
+row included. A drawings draft ends with its save: dropped on success, and on
+a refusal replaced after the reload by the server's value plus "Your '450' was
+not saved: …" (G10) — before, the typed text stayed on the row and the next
+blur re-sent it over the other edit.
 
 ### The drawing read asks for ITEMS, not pages (staged schemaVersion 4)
 
@@ -3908,6 +4028,15 @@ is `inItemTgq` over the checklist questions. The gate is never judged in SQL:
 the overview's matrix half is totalled in TypeScript (`item-tgq-load.ts`),
 and `tests/db/item-tgq-totals.test.ts` holds totals equal to lines.
 
+**Every total counts every matrix record, not only those with a question**
+(audit F7, 2026-11-06). A matrix item with every question answered and W and
+SH empty has no row in `loadOutstanding`, so it counted on the overview, was
+absent from the chase and fill-in totals, and had no line to open.
+`totalItemTgq` (the chase header) and `countWithItemTgq(…, lineId)` (a chase
+or fill-in line) count it; `MatrixItemTgq.lineId` says which line it is on;
+`contacts-outstanding` counts by `itemTgq` too. Files: `src/lib/chase-grouping.ts`,
+`src/lib/item-tgq-load.ts`, `src/lib/infill.ts`.
+
 ### TGQ is one name over two models, and which applies is per category
 
 `src/lib/tgq.ts` (`questionTier`, `TgqMatrix`), `src/lib/gate-load.ts`
@@ -3946,10 +4075,14 @@ Five things are load-bearing.
   all, so leaving `local_key` out would silently drop them from TGQ.
 - **A mapped category needs NO level.** His matrix has no level column, so
   `questionTierOrNull` answers for a level-less record there and a chase for it
-  is no longer blocked for a reason that does not apply to it. The fallback still
-  refuses a null level, and the level still picks the BWS boilerplate — so the
-  spec table's "No level" row says what it is needed FOR rather than claiming it
-  is missing from the TGQ figure.
+  is not blocked: `groupByContact` blocks on `tier === null`, never
+  `level === null` (audit F1, 2026-11-06 — it tested the level and blocked
+  every seating record without one behind "no level on the record"), and the
+  chase screen's level panel lists placeholder categories only. A blocked row
+  carries a `kind` (`nobody_to_ask` | `no_tier`) and the screens match on it,
+  never on the words. The fallback still refuses a null level, and the level
+  still picks the BWS boilerplate — so the spec table's "No level" row says
+  what it is needed FOR rather than claiming it is missing from the TGQ figure.
 - **One implementation, and the SQL copy is the risk.** `loadOutstanding` calls
   `questionTier` once for the spec table, the chase screen, the generate and edit
   routes and the email; the record screen is handed the matrix as DATA
@@ -4101,6 +4234,28 @@ no reason.
   records"). The card's confirm request never carries a level, so the two
   writes cannot be confused, and a level never blocks a card.
 
+**A suggestion does not move the record's version** (0051, audit D4,
+2026-11-06). `spec_records_bump_version` has a WHEN clause and fires only when
+a column other than `level_suggested`, `level_suggested_reason`, `updated_by`,
+`updated_at` or `version` changes. The drawings confirm revising a suggestion
+(a page that names brass) used to bump the version and stale every unsent
+chase draft on the record, while this file said the version was untouched. An
+update that changes nothing no longer bumps either; a new column bumps by
+default.
+
+**A bill line's CATEGORY follows the same rule as its level** (audit G8, Max
+2026-11-06). The review's select was pre-filled with the suggestion and the
+confirm wrote it whatever `categoryStatus` said: the level-picker trap, and a
+guess nobody looked at became the record's category and created its checklist.
+The staging's guess carries its evidence (`categoryReason`, from
+`suggestCategory`) and renders as a `SuggestButton` in `BillCategoryCell`; the
+select stays empty until a person picks; `categoryToWrite`
+(`src/lib/bill-category.ts`) is the confirm's only reading, and a category is
+written only where `categoryStatus = 'chosen'`. A guess nobody accepted
+confirms with no category and no checklist, as an unsuggested line always has.
+"Accept all suggested categories on this tab" is one press per tab. `qa:demo`
+accepts its guesses before confirming.
+
 ### The record is four jobs, and a tab each (five since 2026-10-05)
 
 `src/app/dashboard/records/[id]/page.tsx`, `src/components/records/RecordDetails.tsx`
@@ -4167,6 +4322,19 @@ links to `/api/imports/[id]/source`**, which serves inline — it downloads
 through the mime or evidence route, or offers no Open at all. The count is the
 loaded list's length, null until the tab opens like Versions, so there is no
 second count in the record route to drift from the table.
+
+**No input is keyed on a page-wide reload counter** (audit G2, G3, G6, G9,
+2026-11-06). Every checklist box was keyed on `answer_id:version:reloadKey`
+and the page bumped `reloadKey` on every save, so typing in question A, tabbing
+to B and typing lost B's text when A's reload landed — the details panel's own
+trap, in the checklist. A box is keyed on its answer's version and its own
+refused saves (`refusals`); `reloadKey` stays for the history and documents
+tabs. `PendingReason` carries the qualifier, so a qualifier-only edit that
+needs a reason is saved when the reason is given. The project's details form
+is `ProjectDetailsCard`, which holds the form only while editing, so nothing
+the page reloads can reach it (seven callers used to reset it). The record
+view is keyed by id (`RecordForId`), so an open reason box never crosses to
+the next record.
 
 ### A link goes somewhere; a button does something
 
@@ -4358,6 +4526,15 @@ their responsibilities elsewhere without a deliberate architecture decision.
   `src/lib/answer-provenance-backfill.ts` — an answer RECORDS that it is a
   projection of the record's specs (`source_kind = 'attribute'`); the backfill's
   five-rule decision table is the only thing that may relabel a pre-0050 row.
+- `src/lib/project-summary-shape.ts` and `src/lib/upload-paths.ts` — what a
+  SCREEN may import. The browser never imports `db.ts` or `blob-source.ts`:
+  two pages and seven upload components did, through value imports that
+  dragged `@neondatabase/serverless` and `@vercel/blob` into the bundle with
+  only lazy initialisation keeping it from crashing (audit G5). `blob-source.ts`
+  is `server-only` (vitest aliases it to Next's empty module); `db.ts` cannot
+  be, because sixteen tsx scripts import it, so
+  `tests/lib/client-server-boundary.test.ts` walks every "use client" file's
+  runtime imports and fails on a path to either.
 - `src/lib/printed-number.ts` — the one reader of a printed number; a
   thousands-or-decimal group is refused, never guessed.
 
@@ -4482,7 +4659,10 @@ questions. The build runs on `audit-int` with Opus coders in worktrees, every
 landing checked on the local stack with the database tier required. Stage 1
 (the file and the bill) is landed: answer provenance (0050), configurations
 follow their line, the one number reader, the replace tick follows its row,
-the finish planner, the gate slot rule. The sections above carry each rule
+the finish planner, the gate slot rule. Stage 2 (what a person hits) is
+landed: the click's version, the checklist keeps what is typed, an error
+boundary, the chase respects the matrix (0051), reads that cost what they
+should, refusals written for people, the category as a suggestion. The sections above carry each rule
 under its own heading, dated 2026-11-06; §4 of the audit places the open items
 of the 12 Oct, 23 Oct and 15 Oct plans against it. Pilot needs 0050 and the
 provenance backfill before this code (the promotion notes are in
