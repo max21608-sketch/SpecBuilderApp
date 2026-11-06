@@ -240,10 +240,17 @@ export type TranscriptionRecord = {
 };
 
 /**
- * A claim this old is a request that died. The model's deadline (740 s) and a
- * minute; a literal, because this leaf may not import the server's timings.
+ * A claim this old is a request that died. A literal, because this leaf may
+ * not import the server's timings; tests/lib/extraction-timing.test.ts holds
+ * it to them.
+ *
+ * It must OUTLIVE the transcribe route's maxDuration (800 s), not equal it
+ * (audit C15, 2026-11-06). At 800 s exactly, a request still writing its
+ * result in its last second already read as dead, and a second press could
+ * start a second charged transcription over it. 900 s is the extraction
+ * claim's figure, for the same reason and with the same margin.
  */
-export const TRANSCRIPTION_CLAIM_MS = 800_000;
+export const TRANSCRIPTION_CLAIM_MS = 900_000;
 
 /** Is a transcription in flight right now, by its record? */
 export function transcriptionPending(record: TranscriptionRecord | null | undefined, now = Date.now()): boolean {

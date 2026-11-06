@@ -386,10 +386,12 @@ describe("transcribePdfBill, the model faked", () => {
 });
 
 describe("the claim on a transcription", () => {
-  it("outlives the model's deadline by a minute, and no more", async () => {
-    const { MODEL_DEADLINE_MS } = await import("@/lib/extraction-claim");
+  it("outlives the route that holds it, by the extraction claim's margin", async () => {
+    // It equalled the route's maxDuration (800 s) until audit C15; the full
+    // inequality, for every route, is in extraction-timing.test.ts.
+    const { CLAIM_EXPIRY_SECONDS } = await import("@/lib/extraction-claim");
     const { TRANSCRIPTION_CLAIM_MS, transcriptionPending } = await import("@/lib/pdf-bill-checks");
-    expect(TRANSCRIPTION_CLAIM_MS).toBe(MODEL_DEADLINE_MS + 60_000);
+    expect(TRANSCRIPTION_CLAIM_MS).toBe(CLAIM_EXPIRY_SECONDS * 1000);
     const now = Date.parse("2026-10-15T20:00:00Z");
     expect(transcriptionPending({ pending: { requestId: "r", at: "2026-10-15T19:59:00Z" } }, now)).toBe(true);
     expect(transcriptionPending({ pending: { requestId: "r", at: "2026-10-15T19:40:00Z" } }, now)).toBe(false);
