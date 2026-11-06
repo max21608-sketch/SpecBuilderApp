@@ -51,8 +51,9 @@ one agent.
 | `npm run db:backfill-snapshots` | one-off: gives every record that predates 0012 a version 1 under a `history_begins` change. Dry run unless `--apply`; safe to re-run |
 | `npm run db:backfill-bill-swatches` | one-off: for bills confirmed before 2026-10-05, gives each fabric code the picture its bill lines printed as its swatch, and files uncoded real fabrics as in-house finishes — the same rule the bill confirm now runs (`src/lib/bill-fabric-filing.ts`). Dry run unless `--apply`; safe to re-run; `--yes-pilot` / `--yes-production` |
 | `npm run db:backfill-finish-twins` | one-off: merges library rows that are one finish under two codes (a bare code and its zone twin, `MTL-01` / `GR-MTL-01`; and `fabricOwnCode` twins, `GR-FAB-13 PL-FUR-04`) into the canonical row, re-links their specs, recomposes answers, one version per record, one change set per project. A twin holding a different description, swatch or BW standard is skipped and named; an emptied twin is retired, never deleted. Dry run unless `--apply`; safe to re-run; `--yes-pilot` / `--yes-production` |
-| `npm run db:backfill-finishes` | one-off: builds each project's finishes library from the codes its drawings carry, and links them. Dry run unless `--apply`; safe to re-run. Leaves a code whose items disagree blank, and names it |
-| `npm run db:qa-clean` | sweeps what a failed database-tier test run left behind. Refuses production outright |
+| `npm run db:backfill-finishes` | HISTORICAL (audit B9, 2026-11-06): kept only because the finishes page names it as the way to link unlinked codes. It predates the zone-twin lookup (run `db:backfill-finish-twins` after it) and recomposes no checklist answer; its header says so and it warns when run |
+| `npm run db:delete-project -- --project=<id or number>` | deletes ONE project by SCRIPT, never from the app (Max, 2026-11-06): the dry run lists every table's rows, every file under `projects/<id>/` and the mail that survives unassigned; `--apply` deletes the rows in one transaction, re-counts before commit, then the files. `--yes-pilot` / `--yes-production`; a `TEST` project also needs `--yes-test`; `:local` for the local stack. `audit_log` is left alone |
+| `npm run db:qa-clean` | sweeps what a failed database-tier test run left behind, through `db/project-delete.mjs` (rows only; matches `left(name,5) = '__QA '`, never `like`, where `_` is a wildcard). Refuses production outright. Never while another run is in progress |
 | `npm run qa:fake-inbox` | invented correspondence for the inbox screen, recorded through the app's own `recordMessage` so the routing outcomes are real. Sandbox only, no production flag. Dry run unless `--apply`; `--clear --apply` sweeps it, keeping any message somebody has since assigned |
 | `npm run qa:levels -- --project=<ref>` | makes up a level for every line item and a designer contact behind them, so the chase screen can be walked before anybody has decided either. Levels go through `setRecordLevel`; the designer code is a plain update, because nothing in the app edits what a BOQ said. Same guards, and `--clear --apply` puts it back |
 | `npm run qa:demo` | a WHOLE invented project — bill, drawings, preamble, correspondence, finishes, pictures and a checklist worked up to ~83% — so the app can be walked through in front of somebody. Built through the app's OWN confirms, so what is on screen is what the app does; no model is called and nothing is charged. Sandbox only, no production flag. Dry run unless `--apply`; `--clear --apply` sweeps it (`like 'DEMO%'`). Takes ~15 minutes, nearly all of it the checklist. It also writes ONE document it does NOT load, to `demo-documents/`, so there is something to upload live |
@@ -2708,6 +2709,123 @@ words so a value stays checkable against its page; the CELL renders the library.
     does. Where nothing can be suggested the row keeps the empty picker and the
     screen says why.
 
+### The write boundary is in every handler, and every byte goes out under one header
+
+`src/lib/route-guards.ts` (`requireWriter`, `requireUuid`), `src/lib/roles.ts`,
+`src/middleware.ts`, `src/lib/content-disposition.ts`, `src/lib/picture-types.ts`,
+`src/lib/security-headers.ts`, `next.config.ts`, `src/lib/blob-source.ts`
+(`assertPathnameShape`), `src/lib/upload-paths.ts` (`pathnameSafeName`),
+`src/lib/change-sets.ts` (`verifyEvidence`, `VerifiedEvidence`),
+`src/lib/cron-auth.ts`, `src/lib/login-throttle.ts`, `src/lib/error-detail.ts`
+(`explainFailure`), `src/lib/return-path.ts`; tests `route-guards`,
+`middleware-matcher`, `content-disposition`
+
+Audit Stage 4.1, 2026-11-06. Role was enforced only by a matcher whose
+exceptions were prefixes; a swatch was served inline as whatever content type
+the uploader declared (a stored script on the app origin for any editor); a
+curly apostrophe in a filename threw inside `Headers` and killed every "page
+N" link on that document; `%2e%2e` in a pathname beat the project prefix
+check because the SDK concatenates and undici resolves it; the login's timing
+said whether an account existed; driver error text reached pilot's browsers.
+
+- **Every write handler calls `requireWriter(user)`** after its session check
+  (54 files) and **every destructured path id goes through `requireUuid`**
+  before SQL (64 files; `abc` was a non-JSON 500). `tests/lib/route-guards.test.ts`
+  reads every route file and fails on a handler that forgets either; its four
+  exemptions (login, logout, the queue consumer, the Graph webhook) are named
+  there with their reasons.
+- **`Headers` THROWS on a character above U+00FF**, so a `Content-Disposition`
+  is always `contentDisposition(kind, name)` — `filename="<ascii>";
+  filename*=UTF-8''<encoded>` — and never hand-written; a grep test holds it,
+  and the five sanitisers that existed are one. The email `.eml` from
+  `/api/imports/[id]/source` is a DOWNLOAD with `nosniff`, not a 404, because
+  every provenance link to an email-sourced spec goes through that route.
+- **A picture is served inline only when its stored type is on
+  `picture-types.ts`**, and on write the type and size come from the store
+  (`headTrustedBlob`), never the request; anything else stored under an old
+  row is served as a download. **Evidence is HEADed before the transaction**
+  and `attachEvidence` accepts only the `VerifiedEvidence` brand, so a route
+  that skips the HEAD does not compile; a missing blob is refused after the
+  project check, so the refusal cannot probe another project's files.
+- **A pathname is refused for what a URL parser would do with it**: a
+  percent-encoded octet, `?`, `#`, `\`, a control character, an empty, `.` or
+  `..` segment. It is NOT an ASCII allowlist: a client's document keeps its
+  own name in the store (`Ronnie Scott’s – Drawings.pdf`), and an allowlist
+  would make it unreadable by its own project. New uploads replace those
+  characters before asking for a token; a row uploaded before with `#` or `?`
+  in its name is now refused "not valid" rather than read as a wrong path.
+- **A failure's raw text reaches a browser only when `APP_ENV=development`.**
+  Elsewhere it is the app's own sentence, or a sentence plus a reference the
+  log holds (`explainFailure`). Pilot holds real data and was treated as
+  non-production here.
+- **Login always costs one scrypt** (an unknown or inactive account is
+  checked against a hash no password matches). Ten failures per email or per
+  IP within 15 minutes lock that key for 60 seconds (429, the wait in words
+  and in `Retry-After`), in memory per instance — the header says what that
+  does not stop. `?from=` is honoured after sign-in only for a path under
+  `/dashboard`.
+- **A phase retire or restore and a level set carry the version the screen
+  showed** (`phase_version_stale`, `level_stale`; the drawings card's
+  `ResolvedRecord` carries each record's version). `POST /api/projects` is
+  one insert with `on conflict do nothing`, a 409 in words, its fields
+  length-capped. Cron secrets compare in constant time and fail closed when
+  unset; the Graph validation echo carries `nosniff` and a length cap.
+- **Security headers.** Enforced: `Content-Security-Policy: frame-ancestors
+  'none'; base-uri 'self'; object-src 'none'`, `X-Frame-Options: DENY`,
+  `nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, a minimal
+  `Permissions-Policy`. The FULL policy ships Report-Only until a browser
+  walk shows no violations (the bill upload's direct PUT to the blob origin,
+  the pdfjs worker and crops, record pictures are the places to look); the
+  recommended enforced form is in `security-headers.ts`'s header. Dropping
+  `'unsafe-inline'` from `script-src` needs a per-request nonce minted in the
+  middleware.
+
+### A single-row edit locks its record first
+
+`src/lib/record-lock.ts`, `src/lib/db-transaction.ts`, `tests/db/lock-order.test.ts`
+
+Audit B6 and E8, 2026-11-06. The acquisition order is project → draft or
+intake row → RECORDS (by id) → requirements → answers and attributes. Every
+confirm and `editCommonSpec` kept it; the single-row edits did not:
+`editAnswer`, the apply-to-many route, `correctAttribute`, `retireAttribute`,
+`restoreAttribute`, `setAttributeFinish` and `resolveDisagreement` locked their
+row and reached the record only in `snapshotRecords`. That deadlocked (40P01,
+reported as "someone else was changing this") against any records-first
+writer, and left the occupancy check unguarded, so two moves into one slot
+both passed and the second died on the slot index as a 500. Each now calls
+`record-lock.ts` before it reads its row, and batch callers
+(`applyProjectWide`, the apply route) lock every record in id order first.
+The lock is `for update`, which fires no trigger, so `spec_records.version`
+never moves. The test forces each interleaving with `pg_blocking_pids`, never
+a sleep. `attribute-standard.ts` (`setAttributeStandard`) is the one writer
+still attribute-first (Stage 5.4).
+
+**Changing a record's category** deletes its old category's answers, so two
+things are refused in words BEFORE anything is written (`record-category.ts`,
+audit B3): a PERSON's answer (`manual`, `email`, `document`, not `missing`),
+named by prompt — `attribute` answers are projections, go with the old rows
+and are recomposed under the new category by the same `recomposeAnswers` E5
+added, so a bill line with sizes moves freely (counting them refused every
+such record on the Stage 1 walk); and an answer any chase coverage row points
+at (`category_chased`, naming the chase, which used to be a 23503 → "Nothing
+was written"). Coverage is history and survives void and supersede, so a
+chased record can NEVER change category today; the sentence promises no way
+round it, and allowing it is a migration (retirable answers, or coverage that
+outlives its answer) and Max's decision.
+
+**One library loader.** `bill-fabric-load.ts`'s `loadFinishLibrary` is the only
+query carrying `zonesOnItems`; `drawing-resolution.ts`, `confirm-drawings.ts`
+and `loadScheduleLibrary` call it (audit E7: the schedule loader had none, so
+`GR-MTL-01` and `PL-MTL-01` on one schedule both folded onto a bare `MTL-01`,
+or two fills on one row 409'd the whole confirm). A finishes schedule also
+counts the zones it prints itself when reading a bare row, and keys
+"repeated" on the resolved finish. Also from the same pass: a common answer
+`na` with a value is refused 400 before any transaction; restoring a retired
+finish onto a live code, or renaming onto one, is `code_exists` naming the
+live row (it was the unique index's 500); `parseEnvelope` never throws on a
+bad `Date:` header (null date, `dateRaw` kept, the worker names the header);
+a typed reason on a project-wide override always gets its own change set.
+
 ### A CHECK is re-listed in full, so copying a stale list DELETES values
 
 `db/migrations/0032_restore_email_confirm.sql`, `tests/db/vocabulary-sync.test.ts`
@@ -2737,7 +2855,110 @@ Two things are worth more than the fix:
   against their own CHECK, and reports drift the other way. It fails in a second
   on the next drop-and-recreate that loses a value, which is the only version of
   this that scales. Read the LIVE constraint when re-listing one, never a
-  migration.
+  migration. **The same rule holds for a foreign key's delete action and a
+  trigger's arguments**: 0055 rebuilds seven foreign keys from
+  `pg_get_constraintdef`, and 0054's audit triggers carry the columns they
+  leave out as ARGUMENTS, so re-running 0001's trigger block would re-create
+  them without the arguments — read `pg_get_triggerdef` first. Twelve more
+  vocabularies joined `vocabulary-sync` on 2026-11-06 (intake statuses and
+  source kinds; record, run, attribute, note, project and draft statuses;
+  attribute states; contact roles; gate value types; question tiers).
+
+### A project is deleted by one statement and one script, and the trail keeps only what it should
+
+`db/migrations/0054_audit_excludes_document_columns.sql`,
+`0055_project_deletable.sql`, `db/project-delete.mjs`, `db/delete-project.mjs`,
+`tools/qa-clean.mjs`, `tests/db/project-delete.test.ts`,
+`tests/db/audit-excluded-columns.test.ts`
+
+Audit B4 and B5, 2026-11-06. The audit trigger copied whole documents, email
+bodies and password hashes into the one table nothing can delete from: every
+review autosave wrote two copies of the staged JSON (hundreds of KB per click
+on the AMB read), every triage duplicated an NDA email body, and a scrypt hash
+sat in the log for ever — the likely cause of "the sandbox database is full",
+and the reason no retention decision could ever be kept. And a project could
+not be deleted at all: `email_messages.project_id on delete set null`
+conflicted with its own CHECK, two draft keys were RESTRICT, and the rest of
+the cascade depended on RI trigger order, which `db/restore.mjs` can change.
+Max, 2026-11-06: stop auditing those columns; a project is deletable by
+SCRIPT, never from the app.
+
+- **The audit trail leaves documents out.** `write_audit()` drops the columns
+  named in its trigger's arguments: `intake_runs` (`parsed`, `raw_response`),
+  `email_messages` (`body_text`, `headers_raw`), `users` (`password_hash`).
+  Every other table is audited whole; the actor fallback and the change-set
+  GUC are unchanged. Rows already written are not rewritten (append-only), so
+  pilot's existing space is not reclaimed — that is its own migration and
+  decision.
+- **Mail outlives its project.** An assigned message whose project is deleted
+  becomes unassigned with the reason "Its project was deleted.", by a trigger
+  that recognises only the foreign key's own set-null; an `.eml` stored only
+  under the project's prefix goes with the project, a mailbox arrival stays.
+- **No RESTRICT between two tables a project delete empties.** RESTRICT is
+  checked the moment a row goes, so it passes or fails on cascade order; NO
+  ACTION is checked at the end of the statement and still refuses a lone
+  delete with the same constraint name. Six were rebuilt (batch, run-same-
+  project, finish, contact-same-project, the draft item's record and answer);
+  `email_drafts.project_id` cascades; the version guard allows a delete once
+  the record's project is gone. A test reads the catalog and fails on the
+  next order-sensitive RESTRICT added.
+- **One deletion path.** `deleteProjectRows` is the only one: polymorphic rows
+  by prefix or entity, mail whose only copy is under the prefix, then the
+  project; it counts every table again before commit, refuses to commit if
+  anything is left, returns the file paths to delete after commit, and leaves
+  `audit_log` alone. Its table list is held equal to `copy-project-core.ts`'s
+  `TABLE_HANDLING`, so a new table fails a test before it is a row left
+  behind. `qa-clean` calls it. 0013's header ("nothing deletes an attachment")
+  is now false for a deleted project's attachments, by this decision.
+
+### The requirement seeds match on a key, and an answered question keeps its meaning
+
+`db/migrations/0057_requirements_seed_key.sql`, `db/seed/0003`, `0007`,
+`0009`, `tests/db/requirements-seed-key.test.ts`
+
+Audit B7, 2026-11-06. The three requirement seeds upserted on
+`(category_id, sort_order)`, so inserting one question into a revised cheat
+sheet rewrote the prompt of every row below it and every answer on those rows
+changed meaning silently (the composite field FK caught a FIELD change loudly;
+a prompt change was silent). `requirements.seed_key` is `field:<json_id>` for
+a question that fills a BWS field, `key:<local_key>` for a matrix readiness
+question, otherwise `q:<slug of the prompt>`, unique per category; the 797
+seeded rows got theirs in the migration and the seed files carry them
+literally, upserting on `(category_id, seed_key)` and moving `sort_order`. The
+position constraint stays unique but DEFERRABLE, checked at statement end so a
+revised sheet reorders in one pass — nothing may use it as an ON CONFLICT
+arbiter. A trigger refuses to change `kind`, `spec_field_id`, `local_key` or
+`prompt` on a question with a non-missing answer or a chase line, with the
+counts: a reworded question is a NEW row with a new key, and the old one waits
+to be retired. **Pilot: apply 0057, THEN re-seed with this branch's seed
+files** — the old seeds fail against 0057 and the new ones fail without it;
+afterwards `select count(*) from requirements where created_by = 'seed'` is
+still 797.
+
+### The migration ledger is written by the file's own transaction
+
+`db/migration-runner.mjs` (the core; `run-migrations.mjs` is the CLI),
+`tests/db/migration-runner.test.ts`
+
+Audit B9, 2026-11-06. The runner wrote the ledger row AFTER the file's own
+`commit;`, outside it, with no lock against two runners: a crash between the
+two re-applied the file next time, and a failed file left the connection in
+an aborted transaction. Now each file must be `begin;` first and `commit;`
+last, each on its own line, and the ledger insert goes before the commit;
+anything else is refused before it runs — so `create index concurrently`
+cannot be a migration file as things stand (0056's two indexes are plain
+`create index`, a short SHARE lock). A session advisory lock serialises two
+runners; a failed file is rolled back. From 0056 the ledger records each
+file's sha256 (`schema_migrations.checksum`): an applied file whose checksum
+no longer matches is a WARNING, never a failure, because the house rule is to
+never edit an applied migration and the warning is how that is noticed.
+`db/restore.mjs` runs `--single-transaction` (a dump that fails half way
+leaves 0 tables, not half); `backup.mjs` and `restore.mjs` pass the password
+through `PGPASSWORD`, never on the command line; every `db/backfill-*.ts`
+imports `requireScriptEnvironment` instead of its own copy of the guard; the
+500 path in `db-transaction.ts` logs the error code, constraint, table and a
+reference, never the driver's `detail`, which echoes stored values into the
+logs.
 
 ### A backtick inside a `sql` template closes it
 
@@ -4543,7 +4764,12 @@ their responsibilities elsewhere without a deliberate architecture decision.
 - `src/middleware.ts` — the authorization boundary. `WRITER_ROLES` is an
   allowlist because the denylist version failed open on a mis-cased `"Viewer"`.
   Routes are default-protected with explicit public exceptions, so a forgotten
-  new route fails closed.
+  new route fails closed. Since 2026-11-06 `WRITER_ROLES` lives in
+  `src/lib/roles.ts`, every write handler re-checks it with `requireWriter`
+  (the matcher was the ONLY check), and every public exception is anchored
+  (`$` for one route, `/` for a family) and tested through Next's own matcher
+  compiler — they were prefixes, so a future `/api/cronjobs` would have been
+  public.
 - `src/lib/audit.ts` — the append-only audit trail and optimistic locking. Actor
   is passed as a column, never as connection session state: Neon's HTTP driver
   kills `SET LOCAL`, which is why `write_audit()` falls back to
@@ -4698,7 +4924,11 @@ landed: the click's version, the checklist keeps what is typed, an error
 boundary, the chase respects the matrix (0051), reads that cost what they
 should, refusals written for people, the category as a suggestion. Stage 3
 (before Graph) is landed: re-assignment works, a daily cap on automatic
-reads, only stamped evidence auto-assigns, one row per email. The sections above carry each rule
+reads, only stamped evidence auto-assigns, one row per email. Stage 4 (the
+boundary and the trail) is landing: the write boundary in every handler,
+locks before occupancy, the category guard, a deletable project and a trail
+that keeps only what it should (0054–0057); sessions and versions (0052,
+0053) follow. The sections above carry each rule
 under its own heading, dated 2026-11-06; §4 of the audit places the open items
 of the 12 Oct, 23 Oct and 15 Oct plans against it. Pilot needs 0050 and the
 provenance backfill before this code (the promotion notes are in
