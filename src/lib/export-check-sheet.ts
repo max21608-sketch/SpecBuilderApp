@@ -42,6 +42,7 @@ import {
   type CellSource,
   type ExportScope,
 } from "@/lib/bws-export";
+import { asciiFilenamePart } from "@/lib/content-disposition";
 
 /**
  * Spreadsheet column letter from position — A, Z, AA, DE.
@@ -198,7 +199,6 @@ export function composeCheckSheet(scope: ExportScope): CheckSheet {
 
 /** Allowlisted the same way the export filename is, and deliberately unmistakable for it. */
 export function checkSheetFilename(projectNumber: string, runName: string | null, extension: string): string {
-  const safe = (raw: string) => raw.replace(/[^A-Za-z0-9 &-]/g, "").slice(0, 60).trim();
-  const scope = runName ? ` - ${safe(runName)}` : "";
-  return `${safe(projectNumber) || "export"}${scope} - export check sheet.${extension}`;
+  const scope = runName ? ` - ${asciiFilenamePart(runName)}` : "";
+  return `${asciiFilenamePart(projectNumber) || "export"}${scope} - export check sheet.${extension}`;
 }

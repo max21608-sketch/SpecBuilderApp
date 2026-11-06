@@ -19,6 +19,7 @@ import { json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { composeWorkbook, exportFilename, toCsv } from "@/lib/bws-export";
 import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
+import { contentDisposition } from "@/lib/content-disposition";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -60,7 +61,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   const filename = exportFilename(loaded.projectNumber, scope.runName, format);
   const headers = {
-    "content-disposition": `attachment; filename="${filename}"`,
+    "content-disposition": contentDisposition("attachment", filename),
     "cache-control": "private, no-store",
     "x-export-records": String(records.length),
     "x-export-scope": runId ? "run" : "project",

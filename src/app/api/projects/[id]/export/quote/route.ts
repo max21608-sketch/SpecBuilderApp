@@ -20,6 +20,7 @@ import { getSessionUser } from "@/lib/session";
 import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
 import { composeQuoteSheet, type QuoteBoilerplate } from "@/lib/quote-lines";
 import { toCsv } from "@/lib/bws-export";
+import { asciiFilenamePart, contentDisposition } from "@/lib/content-disposition";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -99,15 +100,13 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     return json({ ok: true, ...sheet, records: sheet.rows.length });
   }
 
-  const filename = `${loaded.projectNumber || "project"}${scope.runName ? ` - ${scope.runName}` : ""} - quote lines.csv`
-    .replace(/[^A-Za-z0-9 .&-]/g, "")
-    .trim();
+  const filename = `${asciiFilenamePart(loaded.projectNumber) || "project"}${scope.runName ? ` - ${asciiFilenamePart(scope.runName)}` : ""} - quote lines.csv`;
   // A CSV a person OPENS: a cell that starts like a formula is neutralised
   // (audit A17). The BWS export does not do this; see `toCsv`.
   return new Response(toCsv([sheet.header, ...sheet.rows], { neutraliseFormulas: true }), {
     headers: {
       "content-type": "text/csv; charset=utf-8",
-      "content-disposition": `attachment; filename="${filename}"`,
+      "content-disposition": contentDisposition("attachment", filename),
       "cache-control": "private, no-store",
       "x-quote-records": String(sheet.rows.length),
       // The screen reads these so it can say what is blank and why without a

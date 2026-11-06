@@ -30,6 +30,7 @@ import {
 } from "@/lib/blob-source";
 import { openChangeSet } from "@/lib/change-sets";
 import { isPictureContentType, pictureServing } from "@/lib/picture-types";
+import { contentDisposition } from "@/lib/content-disposition";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +63,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const served = pictureServing(String(row.content_type || source.contentType || ""));
     const headers = new Headers({
       "content-type": served.contentType,
-      "content-disposition": served.inline ? "inline" : "attachment",
+      "content-disposition": contentDisposition(served.inline ? "inline" : "attachment"),
       "accept-ranges": "bytes",
       // NDA-covered client material, and re-fetched once per library row.
       "cache-control": "private, max-age=3600",

@@ -20,6 +20,7 @@ import { streamTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { pictureServing } from "@/lib/picture-types";
 import { assertBoqDocument } from "@/lib/boq-import";
 import { effectiveRowImage, rowImageFor } from "@/lib/bill-row-image";
+import { contentDisposition } from "@/lib/content-disposition";
 
 export const dynamic = "force-dynamic";
 
@@ -63,7 +64,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const served = pictureServing(image.contentType || source.contentType || "");
     const headers = new Headers({
       "content-type": served.contentType,
-      "content-disposition": served.inline ? "inline" : "attachment",
+      "content-disposition": contentDisposition(served.inline ? "inline" : "attachment"),
       // Private and per-user: a picture out of an NDA-covered client document.
       "cache-control": "private, max-age=3600",
       "x-content-type-options": "nosniff",

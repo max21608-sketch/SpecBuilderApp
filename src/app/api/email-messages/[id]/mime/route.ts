@@ -11,12 +11,9 @@
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { blobPathname, streamTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
+import { contentDisposition } from "@/lib/content-disposition";
 
 export const dynamic = "force-dynamic";
-
-function safeFilename(name: string): string {
-  return name.replace(/[\r\n"\\]/g, "").slice(0, 200) || "email.eml";
-}
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
@@ -52,7 +49,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     });
     const headers = new Headers({
       "content-type": String(row.content_type || "message/rfc822"),
-      "content-disposition": `attachment; filename="${safeFilename(String(row.filename ?? `${String(row.subject ?? "email").slice(0, 80)}.eml`))}"`,
+      // A subject is the likeliest place for a curly quote or an en dash (A6).
+      "content-disposition": contentDisposition(
+        "attachment",
+        String(row.filename ?? "") || `${String(row.subject ?? "").trim().slice(0, 80) || "email"}.eml`,
+      ),
       "accept-ranges": "bytes",
       // NDA-covered client correspondence. No shared cache may hold it.
       "cache-control": "private, no-store",

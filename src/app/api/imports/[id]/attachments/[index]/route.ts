@@ -37,6 +37,7 @@ import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { readAttachment } from "@/lib/email-envelope";
+import { contentDisposition } from "@/lib/content-disposition";
 
 export const dynamic = "force-dynamic";
 
@@ -92,10 +93,10 @@ export async function GET(
   }
   const { meta, bytes: body } = found;
 
-  // A filename a stranger chose. Quotes, backslashes and newlines are stripped
-  // so it cannot break out of the header, and a missing one gets a plain name
-  // rather than an invented extension.
-  const filename = (meta.filename ?? `attachment-${position + 1}`).replace(/["\\\r\n]/g, "");
+  // A filename a stranger chose, in any script. `contentDisposition` keeps it
+  // inside the header and keeps `Headers` from throwing on a character above
+  // U+00FF (audit A6: that throw was an unhandled, non-JSON 500 here).
+  const filename = meta.filename ?? `attachment-${position + 1}`;
 
   return new Response(new Uint8Array(body), {
     status: 200,
@@ -104,7 +105,7 @@ export async function GET(
       // ALWAYS a download, never inline. The .eml route's rule: this is a file
       // somebody outside the company attached, and a browser rendering it is
       // this app showing a stranger's markup as its own.
-      "content-disposition": `attachment; filename="${filename}"`,
+      "content-disposition": contentDisposition("attachment", filename),
       "x-content-type-options": "nosniff",
       "content-length": String(body.byteLength),
       // Client specification material. A shared cache holding it is a
