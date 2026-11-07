@@ -247,7 +247,7 @@ so screens are verified against reads already paid for.
 `src/lib/anthropic.ts` (`PROMPTS.shop_drawings`),
 `src/lib/drawing-document.ts` (`stageDrawings`, `assertStagedDrawings`,
 `canonicalCode`, `variantLettersByItem`, `foldableRow`, `wasReadByModel`),
-`src/lib/dimension-guess.ts`, `tools/measure-drawing-reading.ts`
+`src/lib/drawing-legacy.ts` (was `dimension-guess.ts` until 2026-11-07), `tools/measure-drawing-reading.ts`
 
 Three defects reported on one pack in one sitting, 2026-09-18 — a transposed
 dimension cell, a card nobody could read, one armchair about to become two BWS
@@ -688,6 +688,50 @@ equipped with a default set of things to fill in."*
   (`record_retire`, 0038 re-lists both CHECKs from the LIVE constraint text);
   restore does not. Retiring the last live configuration makes the bill line an
   item again, and the panel says so.
+
+### The frozen reads live in one file
+
+`src/lib/drawing-legacy.ts`, `tests/lib/drawings-v3-frozen.test.ts`
+
+Audit 5.3 cut D, 2026-11-07. What only a run staged as `schemaVersion` 1, 2
+or 3 reaches is `drawing-legacy.ts`: `stageDrawings` (the page-centric
+staging, reachable only by a harness re-read of the v3 tool),
+`applyViewGuesses` (a v1 run's read-time slot guess), `dedupeMeasured`
+(cross-view de-duplication, v1–v3), `variantLettersByItem` (page lettering;
+v4 letters nothing) and the view-repetition guess that was
+`dimension-guess.ts`, now deleted. About 730 lines left `drawing-document.ts`;
+what stayed is read by version 4 too (`upgradeDimensionSlots`, `suggestUnit`,
+`usableViews`, `pickItemView`, `codeGroupsOf`, `canonicalCode`,
+`groupItemsByCode`). Nothing new may call into the legacy file, and the whole
+of it goes when the last v1–v3 run has been re-read. It imports
+`drawing-document.ts` and is imported by it: the cycle holds only because
+neither reads the other at import time, so a top-level constant built from
+the other module is the trap. `drawings-v3-frozen.json` is what proves a
+change there changed nothing — byte-identical through the move.
+
+**The import route is a dispatcher** (`src/app/api/imports/[id]/route.ts`,
+148 lines from 2,276; `src/lib/import-route/{bill,drawings,proposals}.ts`).
+It reads the run, chooses the shape from the RUN (never the request), and
+hands the request to one plain function: `bill.ts` (a bill's GET and every
+line and sheet autosave), `drawings.ts` (the drawings GET, the bulk unit, the
+autosave and the slot swap) or `proposals.ts` (every other specification
+document: proposals, preamble, finishes schedule). The code moved byte for
+byte; `tests/db/intake-routes.test.ts` and `route-contracts.test.ts` are the
+contract. The GET checks its own session (audit R1's last handler), so
+`READS_TRUSTING_THE_MIDDLEWARE` is empty; its refusals say "bill" or
+"document", never "import", and the vocabulary guard reads them with no
+pending list. **`confirmDrawingItem` and `confirmBoqImport` are orchestrators
+over named steps in their own files**, run in one transaction in a fixed
+order (`resolveCard`, `checkBlockers`, `placeWrites`, `checkedImagePath`,
+`openDrawingChange`, `fileFinishes`, `writeSwatches`, then per record
+`writePicture`, `writeAttributes`, `promoteAnswers`, `reviseLevelSuggestion`,
+then `snapshotRecords`, `markApplied`; and `lockBill`, `refuseUnconfirmable`,
+`planBillWrites`, then per sheet `openSheetPhase`, `carryPairedLine` /
+`insertNewLine`, `writeSheetFinishLines`, `retireUnlisted`). Every step that
+refuses runs BEFORE the change set opens; a refusing step moved below that
+line is a confirm that half-writes. `checkBlockers` returns the library
+array the finish step pushes onto, and "already recorded" must keep reading
+that same array, or a finish created during the confirm is invisible to it.
 
 ### A drawing dimensions everything, and four of them matter
 
