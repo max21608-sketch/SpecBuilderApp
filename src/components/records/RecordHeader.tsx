@@ -37,7 +37,7 @@ export default function RecordHeader({
   tabs,
 }: {
   record: SpecRecord;
-  data: Pick<Payload, "mockup" | "designerContact">;
+  data: Pick<Payload, "mockup" | "designerContact" | "twins">;
   /** The bill line's client refs: a configuration carries none of its own. */
   parentRefs: string;
   recordLabel: string;
@@ -102,6 +102,23 @@ export default function RecordHeader({
             </Link>
           </Fragment>
         ))}
+      {/* ITS TWINS (0060): the same item on another line, one link each. */}
+      {(data.twins ?? []).map((twin) => (
+        <Fragment key={twin.twinId}>
+          <span aria-hidden>·</span>
+          <span>
+            twin of{" "}
+            <Link
+              href={`/dashboard/records/${twin.recordId}`}
+              className="underline hover:text-neutral-900"
+              title={twin.reason}
+            >
+              {twin.boqCodes[0] ?? twin.label}
+              {twin.area ? ` · ${twin.area}` : ""}
+            </Link>
+          </span>
+        </Fragment>
+      ))}
       {record.source_line_no && <><span aria-hidden>·</span><span>BOQ row {record.source_line_no}</span></>}
       <span aria-hidden>·</span>
       {record.category_name ? (

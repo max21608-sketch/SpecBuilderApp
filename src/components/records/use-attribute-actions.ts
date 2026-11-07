@@ -13,6 +13,7 @@ import { useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import type { AttributeState, AttributeUnit } from "@/lib/spec-vocab";
 import type { Attribute, RetiredAttribute } from "@/components/records/record-payload";
+import type { AlsoRecord } from "@/lib/twin-writes";
 
 export function useAttributeActions(reloadThen: (message: string | null) => Promise<void>) {
   // The spec a reviewer has asked to take off this item, waiting for a reason.
@@ -47,14 +48,20 @@ export function useAttributeActions(reloadThen: (message: string | null) => Prom
   const [attachReason, setAttachReason] = useState("");
   const [attachBusy, setAttachBusy] = useState(false);
 
-  async function retire() {
+  /** `also`: the twins ticked under the dialog (0060), each re-checked by the server. */
+  async function retire(also: readonly AlsoRecord[] = []) {
     if (!retiring || !retireReason.trim()) return;
     setRetireBusy(true);
     try {
       const res = await apiFetch(`/api/attributes/${retiring.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ status: "retired", version: retiring.version, reason: retireReason.trim() }),
+        body: JSON.stringify({
+          status: "retired",
+          version: retiring.version,
+          reason: retireReason.trim(),
+          ...(also.length > 0 ? { alsoRecords: also } : {}),
+        }),
       });
       await reloadThen(res.ok ? null : res.error);
       if (res.ok) {
@@ -78,7 +85,8 @@ export function useAttributeActions(reloadThen: (message: string | null) => Prom
     setCorrectReason("");
   }
 
-  async function correct() {
+  /** `also`: the twins ticked under the editor (0060), each re-checked by the server. */
+  async function correct(also: readonly AlsoRecord[] = []) {
     if (!correcting || !correctReason.trim()) return;
     setCorrectBusy(true);
     try {
@@ -93,6 +101,7 @@ export function useAttributeActions(reloadThen: (message: string | null) => Prom
             state: correctState,
             version: correcting.version,
             reason: correctReason.trim(),
+            ...(also.length > 0 ? { alsoRecords: also } : {}),
           }),
         },
       );

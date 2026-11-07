@@ -171,6 +171,17 @@ export async function GET(request: Request): Promise<Response> {
       (select mr.name from spec_records m join spec_runs mr on mr.id = m.run_id
         where m.mockup_of = r.id and m.status = 'active' and mr.status = 'active' and mr.is_mockup
         order by m.record_no limit 1) as mockup_copy_run_name,
+      -- 0060: the lines this one is a TWIN of (one item on several lines),
+      -- each by its first client ref. A chip on the row, its codes on hover;
+      -- nothing here counts or exports by it.
+      (select coalesce(array_agg(coalesce(
+                (select x.ref_value from spec_record_refs x
+                  where x.record_id = o.id and x.ref_system = 'boq_code' order by x.ref_value limit 1),
+                o.record_no::text) order by o.record_no), '{}')
+         from spec_record_twins t
+         join spec_records o on o.id = case when t.record_a = r.id then t.record_b else t.record_a end
+        where t.status = 'active' and o.status = 'active'
+          and (t.record_a = r.id or t.record_b = r.id)) as twin_codes,
       -- How much a document has actually said about this item. The intake
       -- stage's own progress measure: the cheat-sheet counts beside it measure
       -- a checklist that may not have been assigned yet.

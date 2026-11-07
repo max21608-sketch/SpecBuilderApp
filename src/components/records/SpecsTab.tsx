@@ -36,6 +36,9 @@ import Button, { buttonClass } from "@/components/ui/Button";
 import RecordDetails from "@/components/records/RecordDetails";
 import RecordPicture, { type RecordPictureState } from "@/components/records/RecordPicture";
 import AddSpec from "@/components/records/AddSpec";
+import TwinTicks, { asTwinAttribute, useTwinTicks } from "@/components/records/TwinTicks";
+import TwinLinesPanel from "@/components/records/TwinLinesPanel";
+import { twinOffer } from "@/lib/twin-offer";
 import AddConfiguration from "@/components/records/AddConfiguration";
 import BillLineConfigurations from "@/components/records/BillLineConfigurations";
 import DifferingFields from "@/components/records/DifferingFields";
@@ -169,6 +172,19 @@ export default function SpecsTab({
     restore,
   } = actions;
 
+  // 0060: WHAT AN EDIT OR A RETIRE OFFERS THIS LINE'S TWINS, through the
+  // function the write boundary re-runs under the lock. A configuration's
+  // specs are its own, so it offers none.
+  const lineTwins = record.parent_id ? [] : (data.twins ?? []);
+  const correctOffer = correcting
+    ? twinOffer({ act: "correct", row: asTwinAttribute(correcting, data.specFields ?? []) }, lineTwins)
+    : [];
+  const retireOffer = retiring
+    ? twinOffer({ act: "retire", row: asTwinAttribute(retiring, data.specFields ?? []) }, lineTwins)
+    : [];
+  const correctTicks = useTwinTicks(correctOffer);
+  const retireTicks = useTwinTicks(retireOffer);
+
   // The payload says whether a picture exists; `imageFailed` covers the one
   // case it cannot — a row that names a blob the store no longer holds. An
   // offered picture alone still puts the panel above the readiness card.
@@ -298,6 +314,9 @@ export default function SpecsTab({
             <AddSpec
               recordId={record.id}
               specFields={data.specFields ?? []}
+              // 0060: a bill line's twins are offered the new spec; a
+              // configuration's specs are its own.
+              twins={record.parent_id ? [] : (data.twins ?? [])}
               onAdded={load}
               open
               onOpenChange={setAddingSpec}
@@ -743,12 +762,13 @@ export default function SpecsTab({
                                 />
                               </label>
                             </div>
+                            <TwinTicks offer={correctOffer} ticks={correctTicks} disabled={correctBusy} />
                             <div className="mt-2 flex items-center gap-2">
                               <Button
                                 variant="primary"
                                 size="sm"
                                 disabled={!correctReason.trim() || correctBusy}
-                                onClick={() => void correct()}
+                                onClick={() => void correct(correctTicks.also)}
                               >
                                 {correctBusy ? "Saving…" : "Save the correction"}
                               </Button>
@@ -785,12 +805,13 @@ export default function SpecsTab({
               placeholder="Superseded by the Rev B drawing issued 14 Sep"
               className="mt-2 w-full rounded border border-red-300 bg-white px-2 py-1 text-sm"
             />
+            <TwinTicks offer={retireOffer} ticks={retireTicks} disabled={retireBusy} />
             <span className="mt-2 flex items-center gap-2">
               <Button
                 variant="danger"
                 size="sm"
                 disabled={!retireReason.trim() || retireBusy}
-                onClick={() => void retire()}
+                onClick={() => void retire(retireTicks.also)}
               >
                 {retireBusy ? "Retiring…" : "Retire it"}
               </Button>
@@ -1005,6 +1026,9 @@ export default function SpecsTab({
           onAddConfiguration={openAddConfiguration}
           reloadThen={reloadThen}
         />
+        {/* 0060: the lines that are this item too. Under Configurations,
+            in the same sidebar column. */}
+        <TwinLinesPanel record={record} twins={data.twins ?? []} reloadThen={reloadThen} />
       </div>
     </div>
   );

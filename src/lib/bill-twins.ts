@@ -40,21 +40,21 @@ export async function stageBillTwins(
   input: { runId: string; sheetIndex: number; accept: readonly TwinAccept[]; clear: readonly TwinAccept[]; actor: string },
 ): Promise<{ version: number; accepted: number; cleared: number }> {
   const rows = await txn`select parsed, status, source_kind from intake_runs where id = ${input.runId} for update`;
-  if (!rows[0]) throw new DomainConflictError("gone", "No such import.", { status: 404 });
+  if (!rows[0]) throw new DomainConflictError("gone", "No such bill.", { status: 404 });
   if (rows[0].source_kind !== "boq_xlsx") {
     throw new DomainConflictError("not_a_bill", "Twins are suggested on a bill of quantities only.", { status: 400 });
   }
-  if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This import is already confirmed.");
+  if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This bill is already confirmed.");
   const doc = assertBoqDocument(rows[0].parsed);
   const sheet = doc.sheets[input.sheetIndex];
-  if (!sheet) throw new DomainConflictError("gone", "That tab is no longer in this import. Reload.");
+  if (!sheet) throw new DomainConflictError("gone", "That tab is no longer in this bill. Reload.");
   const lines = sheet.lines as StagedBoqLine[];
   const suggestions = suggestTwins(lines);
 
   const touched = new Set<number>();
   const patch = (entry: TwinAccept): StagedBoqLine => {
     const line = lines[entry.index];
-    if (!line) throw new DomainConflictError("gone", "That line is no longer in this import. Reload.");
+    if (!line) throw new DomainConflictError("gone", "That line is no longer in this bill. Reload.");
     if (touched.has(entry.index)) {
       throw new DomainConflictError("twin_twice", `Row ${line.lineNo} was sent twice. Reload.`, { status: 400 });
     }
@@ -98,7 +98,7 @@ export async function stageBillTwins(
      where id = ${input.runId} and status = 'parsed'
      returning version
   `;
-  if (!written[0]) throw new DomainConflictError("gone", "That import is no longer open. Reload.");
+  if (!written[0]) throw new DomainConflictError("gone", "That bill is no longer open for review. Reload.");
   return { version: Number(written[0].version), accepted, cleared };
 }
 
@@ -139,7 +139,7 @@ export async function linkBillTwins(
     const recordA = input.recordOf(a);
     const recordB = input.recordOf(b);
     if (!recordA || !recordB) {
-      throw new DomainConflictError("twin_not_imported", `Rows ${a} and ${b} were accepted as twins and one of them did not import. Reload the review.`);
+      throw new DomainConflictError("twin_not_imported", `Rows ${a} and ${b} were accepted as twins and one of them did not become an item. Reload the review.`);
     }
     if (recordA === recordB) continue;
     const live = await txn`
