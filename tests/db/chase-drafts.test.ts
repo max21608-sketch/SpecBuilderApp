@@ -151,26 +151,32 @@ describeIfDb("chase drafts", () => {
   });
 
   afterAll(async () => {
-    await client.query(
-      `delete from email_draft_items where draft_id in (select id from email_drafts where project_id = $1)`,
-      [projectId],
-    );
-    await client.query(
-      `delete from status_history where entity_type = 'email_draft'
-       and entity_id in (select id from email_drafts where project_id = $1)`,
-      [projectId],
-    );
-    await client.query(`delete from email_drafts where project_id = $1`, [projectId]);
-    await client.query(`delete from spec_answers where record_id = $1`, [recordId]);
-    await client.query(`delete from spec_record_refs where project_id = $1`, [projectId]);
-    await client.query(`delete from spec_records where project_id = $1`, [projectId]);
-    await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
-    await client.query(`delete from project_contacts where project_id = $1`, [projectId]);
-    await client.query(`delete from projects where id = $1`, [projectId]);
-    // Takes this suite's three requirements with it (`on delete cascade`), so
-    // nothing it invented outlives it.
-    if (categoryId) await client.query(`delete from item_categories where id = $1`, [categoryId]);
-    await client.end();
+    // The category is this suite's own invention, so it goes even when a
+    // delete above throws: two `__qa-chase-drafts-category-*` rows were left
+    // on the shared local database by runs that failed here (5.4 follow-up).
+    try {
+      await client.query(
+        `delete from email_draft_items where draft_id in (select id from email_drafts where project_id = $1)`,
+        [projectId],
+      );
+      await client.query(
+        `delete from status_history where entity_type = 'email_draft'
+         and entity_id in (select id from email_drafts where project_id = $1)`,
+        [projectId],
+      );
+      await client.query(`delete from email_drafts where project_id = $1`, [projectId]);
+      await client.query(`delete from spec_answers where record_id = $1`, [recordId]);
+      await client.query(`delete from spec_record_refs where project_id = $1`, [projectId]);
+      await client.query(`delete from spec_records where project_id = $1`, [projectId]);
+      await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
+      await client.query(`delete from project_contacts where project_id = $1`, [projectId]);
+      await client.query(`delete from projects where id = $1`, [projectId]);
+    } finally {
+      // Takes this suite's three requirements with it (`on delete cascade`), so
+      // nothing it invented outlives it.
+      if (categoryId) await client.query(`delete from item_categories where id = $1`, [categoryId]).catch(() => undefined);
+      await client.end();
+    }
   });
 
   async function currentDrafts(status?: string) {
