@@ -42,6 +42,7 @@ import { snapshotRecords } from "@/lib/record-snapshot";
 import { loadPalettes, palettesByFieldJsonId } from "@/lib/palette-load";
 import { paletteOptionFor } from "@/lib/palettes";
 import { isStandardState, type StandardState } from "@/lib/bw-standard";
+import { lockRecordOfAttribute } from "@/lib/record-lock";
 
 /** What a person asked the standard to become. */
 export type StandardChoice = { state: "proposed"; value: string } | { state: "tbc" } | null;
@@ -68,6 +69,11 @@ type LockedAttribute = {
 };
 
 async function lockAttribute(txn: TxnSql, attributeId: string, expectedVersion: number): Promise<LockedAttribute> {
+  // THE RECORD FIRST (audit B6/E8, 5.4 A6). This was the one single-row spec
+  // writer still taking the attribute first; against a records-first writer
+  // (a confirm, `editCommonSpec`) that is a deadlock reported as "someone else
+  // was changing this". `record-lock.ts` carries the order.
+  await lockRecordOfAttribute(txn, attributeId);
   const rows = await txn`
     select a.id, a.record_id, a.label, a.status, a.version, a.standard_state, a.standard_value,
            f.json_id, r.project_id, fin.code as finish_code
@@ -250,8 +256,17 @@ export async function setAttributeStandard(
  * TBC one, and agreeing twice would be a second change set saying nothing.
  * The evidence -- the client's "yes, fine" -- goes on the change set through
  * the existing evidence path, and the attribute points at the same
- * attachment. Where the reviewer's OPEN change already carries an email, that
- * email is the evidence.
+ * attachment.
+ *
+ * AN OPEN CHANGE'S EMAIL IS NOT THE CLIENT'S YES (audit 5.4 A6, 2026-11-06).
+ * This used to point the agreement at whatever evidence the reviewer's open
+ * change carried, so "the meeting notes of the 14th", opened for a morning's
+ * edits, became the message the client agreed to this standard in, and the
+ * Specs tab opened it as such. The agreement still JOINS the open change, so
+ * the trail carries the email as that change's evidence; the agreement points
+ * only at evidence given with THIS act, and otherwise at nothing, which reads
+ * as "agreed, no message attached" (a yes on a call). Refusing an agreement
+ * with no message of its own would block exactly that.
  */
 export async function agreeAttributeStandard(
   txn: TxnSql,
@@ -281,15 +296,14 @@ export async function agreeAttributeStandard(
     );
   }
 
-  const { changeSetId } = await changeSetForEdit(txn, {
+  const { changeSetId, attached } = await changeSetForEdit(txn, {
     projectId: attribute.projectId,
     actor,
     kind: "standard_agreed",
     reason,
     evidence,
   });
-  const evidenceRows = await txn`select evidence_attachment_id from change_sets where id = ${changeSetId}`;
-  const evidenceId = evidenceRows[0]?.evidence_attachment_id ? String(evidenceRows[0].evidence_attachment_id) : null;
+  const evidenceId = await agreementEvidenceId(txn, changeSetId, attached);
 
   // The option is not re-resolved: it was resolved when it was proposed and
   // the client agreed to THAT one. Read back from the row, verbatim.
@@ -315,4 +329,16 @@ export async function agreeAttributeStandard(
     snapshotNo,
     changeSetId,
   };
+}
+
+/**
+ * The evidence an AGREEMENT points at: the change set's own, only where that
+ * change set was opened for this act. A change the act attached to was opened
+ * for something else, and its evidence is not the client's yes. Shared with
+ * `finish-standard.ts`, so the two agreements read one rule.
+ */
+export async function agreementEvidenceId(txn: TxnSql, changeSetId: string, attached: boolean): Promise<string | null> {
+  if (attached) return null;
+  const rows = await txn`select evidence_attachment_id from change_sets where id = ${changeSetId}`;
+  return rows[0]?.evidence_attachment_id ? String(rows[0].evidence_attachment_id) : null;
 }

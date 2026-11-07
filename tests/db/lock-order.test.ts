@@ -39,6 +39,7 @@ import { correctAttribute } from "@/lib/attribute-correct";
 import { editAnswer } from "@/lib/answer-edit";
 import { resolveDisagreement } from "@/lib/disagreement-resolve";
 import { setAttributeFinish } from "@/lib/finish-edit";
+import { setAttributeStandard } from "@/lib/attribute-standard";
 import { normaliseFinishCode } from "@/lib/finishes";
 import { deleteProjectRows } from "../../db/project-delete.mjs";
 
@@ -281,6 +282,20 @@ describeIfDb("the record is locked before the row an edit touches", () => {
       }),
     );
     expect(result.recordId).toBe(recordId);
+  }, 30_000);
+
+  it("setAttributeStandard waits for the record rather than deadlocking (5.4 A6)", async () => {
+    const recordId = await record();
+    const width = await attribute(recordId, "W");
+    const result = await againstRecordsFirstWriter(recordId, LOCK_ATTRIBUTE, width.id, (sql) =>
+      setAttributeStandard(sql, {
+        attributeId: width.id,
+        expectedVersion: width.version,
+        choice: { state: "tbc" },
+        actor: "__qa-b@example.test",
+      }),
+    );
+    expect(result.attributeId).toBe(width.id);
   }, 30_000);
 
   it("resolveDisagreement ('use this instead') waits for the record rather than deadlocking", async () => {

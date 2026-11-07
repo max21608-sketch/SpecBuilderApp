@@ -36,7 +36,7 @@ import { sql } from "@/lib/db";
 import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
 import { confirmingAsShown } from "./shown-targets";
 import { PATCH as importPatchRoute } from "@/app/api/imports/[id]/route";
-import type { VerifiedEvidence } from "@/lib/change-sets";
+import { attachEvidence, closeChangeSet, openChangeSet, type VerifiedEvidence } from "@/lib/change-sets";
 
 // The drawings confirm requires the records the card showed (audit D3).
 const confirmRoute = confirmingAsShown(confirmPost);
@@ -403,6 +403,64 @@ describeIfDb("the BW standard beside the client's words", () => {
       const fields = diff.attributes.flatMap((line) => line.fields.map((field) => field.label));
       expect(fields).toContain("BW standard");
       expect(fields).not.toContain("Value");
+    },
+    SLOW,
+  );
+
+  it(
+    "an agreement made inside an open change does not claim the change's email as the client's yes (audit 5.4 A6)",
+    async () => {
+      const recordId = confirmedRecord;
+      let attribute = await timberAttribute(recordId);
+      await withTransaction((txn) =>
+        setAttributeStandard(txn, {
+          attributeId: attribute.id,
+          expectedVersion: Number(attribute.version),
+          choice: { state: "proposed", value: options[0]!.value },
+          actor: "qa",
+        }),
+      );
+      attribute = await timberAttribute(recordId);
+
+      // A reviewer opened "the meeting notes of the 14th" with an email
+      // attached. That email is evidence for the CHANGE; nothing says the
+      // client agreed to this standard in it.
+      const actor = "__qa-open-change@example.test";
+      const openId = await withTransaction(async (txn) => {
+        const id = (await import("node:crypto")).randomUUID();
+        const evidenceAttachmentId = await attachEvidence(txn, {
+          projectId,
+          changeSetId: id,
+          evidence: {
+            pathname: `projects/${projectId}/evidence/__qa-meeting.eml`,
+            filename: "__qa-meeting.eml",
+            stored: { size: 120, contentType: "message/rfc822" },
+          } as VerifiedEvidence,
+          actor,
+        });
+        await openChangeSet(txn, { id, projectId, kind: "manual_edit", actor, reason: "__QA meeting notes", evidenceAttachmentId, open: true });
+        return id;
+      });
+
+      const agreed = await withTransaction((txn) =>
+        agreeAttributeStandard(txn, { attributeId: attribute.id, expectedVersion: Number(attribute.version), actor }),
+      );
+      expect(agreed.changeSetId).toBe(openId);
+      attribute = await timberAttribute(recordId);
+      expect(attribute.standard_state).toBe("agreed");
+      expect(attribute.standard_agreed_evidence_id).toBeNull();
+
+      // Put it back where the next test expects it.
+      await withTransaction(async (txn) => {
+        await closeChangeSet(txn, openId, actor);
+        await setAttributeStandard(txn, {
+          attributeId: attribute.id,
+          expectedVersion: Number(attribute.version),
+          choice: { state: "tbc" },
+          reason: "__QA back to TBC for the next test",
+          actor: "qa",
+        });
+      });
     },
     SLOW,
   );
