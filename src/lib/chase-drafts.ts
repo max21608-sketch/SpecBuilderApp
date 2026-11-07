@@ -46,6 +46,83 @@ export const CHASE_HEADING_PREDICATE =
   "not exists (select 1 from spec_records v where v.parent_id = r.id and v.status = 'active')";
 
 /**
+ * THE QUESTION LOADERS' SHARED SHAPE (audit F13, 5.4 A2, 2026-11-06).
+ *
+ * `loadOutstanding` and `loadQuestionsByKey` carried ~50 copied lines, and
+ * each worked out six things about a RECORD (its bill line's number, refs and
+ * quantity, its group number, how many live configurations it has, its own
+ * refs) as correlated subqueries on every QUESTION row: ~117,000 subselects
+ * on a 300-line project. The record's facts are now one CTE, computed once per
+ * record in scope and joined once; the select list is one string.
+ *
+ * Why each fact is what it is: a FINISH OPTION shows its parent's client ref
+ * and its parent's quantity, because S-201 A carries no ref of its own
+ * (copying it would make every drawing card for that code ambiguous) and no
+ * qty (the bill says 45 and never says how many are fabric A). The group
+ * number puts a configuration under its bill line in the order. The variant
+ * count is what makes a split line a heading on screen. `variant_ordinal` is
+ * what a configuration is CALLED (0039), 12.3 rather than its own 34; the
+ * BWS field and the local key are the two ways a question reaches Matthew's
+ * matrix.
+ *
+ * The driver cannot interpolate SQL, so both queries write these out, and
+ * `tests/lib/chase-select.test.ts` reads the source and fails on a loader
+ * that drifts from them (the CHASE_HEADING_PREDICATE pattern). Compare
+ * whitespace-folded. No comments inside either string: a comment in one copy
+ * and not the other would read as drift.
+ */
+export const OUTSTANDING_RECORD_FACTS = `facts as (
+      select r.id as record_id,
+             p2.record_no as parent_record_no,
+             p2.qty as parent_qty,
+             coalesce(p2.record_no, r.record_no) as group_no,
+             coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
+                         from spec_record_refs x where x.record_id = r.parent_id), '') as parent_refs,
+             coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
+                         from spec_record_refs x where x.record_id = r.id), '') as refs,
+             (select count(*) from spec_records v where v.parent_id = r.id and v.status = 'active') as variant_count
+        from spec_records r
+        left join spec_records p2 on p2.id = r.parent_id`;
+
+export const OUTSTANDING_QUESTION_SELECT = `r.project_id,
+      r.id as record_id,
+      r.record_no,
+      r.status as record_status,
+      r.version as record_version,
+      r.item_description,
+      r.area,
+      r.designer,
+      r.level,
+      r.qty,
+      r.run_id,
+      r.parent_id,
+      r.variant_label,
+      r.variant_ordinal,
+      facts.parent_record_no,
+      run.name as run_name,
+      facts.parent_refs,
+      facts.parent_qty,
+      facts.group_no,
+      facts.variant_count,
+      p.bws_project_number,
+      facts.refs,
+      c.id as category_id,
+      c.name as category_name,
+      q.id as requirement_id,
+      q.kind as requirement_kind,
+      q.prompt,
+      q.section,
+      q.sort_order,
+      q.tgq_levels,
+      f.json_id as field_json_id,
+      q.local_key,
+      f.name as field_label,
+      a.id as answer_id,
+      a.version as answer_version,
+      coalesce(a.state, 'missing') as state,
+      a.value as current_value`;
+
+/**
  * Either driver. `sql` from db.ts (HTTP, one request per call) and the
  * transaction-scoped executor from db-transaction.ts have the same shape, so a
  * loader can serve a screen read and a guarded write without being written
@@ -675,12 +752,27 @@ export async function loadOutstanding(
   const allLines = lineIds === null;
   const allRequirements = requirementIds === null;
   const rows = await sql`
+    with facts as (
+      select r.id as record_id,
+             p2.record_no as parent_record_no,
+             p2.qty as parent_qty,
+             coalesce(p2.record_no, r.record_no) as group_no,
+             coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
+                         from spec_record_refs x where x.record_id = r.parent_id), '') as parent_refs,
+             coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
+                         from spec_record_refs x where x.record_id = r.id), '') as refs,
+             (select count(*) from spec_records v where v.parent_id = r.id and v.status = 'active') as variant_count
+        from spec_records r
+        left join spec_records p2 on p2.id = r.parent_id
+       where r.project_id = any(${projectIds}::uuid[]) and r.status = 'active'
+         and (${allLines}::boolean or coalesce(r.parent_id, r.id) = any(${lineIds ?? []}::uuid[]))
+    )
     select
       r.project_id,
-      r.id            as record_id,
+      r.id as record_id,
       r.record_no,
-      r.status        as record_status,
-      r.version       as record_version,
+      r.status as record_status,
+      r.version as record_version,
       r.item_description,
       r.area,
       r.designer,
@@ -689,40 +781,32 @@ export async function loadOutstanding(
       r.run_id,
       r.parent_id,
       r.variant_label,
-      -- 0039: what the record is CALLED, 12.3 rather than its own 34.
       r.variant_ordinal,
-      (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
+      facts.parent_record_no,
       run.name as run_name,
-      -- A FINISH OPTION SHOWS ITS PARENT'S CLIENT REF and its parent's
-      -- quantity: S-201 A carries no ref of its own (copying it would make
-      -- every drawing card for that code ambiguous) and no qty (the bill says
-      -- 45 and never says how many are fabric A).
-      coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
-                  from spec_record_refs x where x.record_id = r.parent_id), '') as parent_refs,
-      (select p2.qty from spec_records p2 where p2.id = r.parent_id) as parent_qty,
-      coalesce((select p2.record_no from spec_records p2 where p2.id = r.parent_id), r.record_no) as group_no,
-      (select count(*) from spec_records v where v.parent_id = r.id and v.status = 'active') as variant_count,
+      facts.parent_refs,
+      facts.parent_qty,
+      facts.group_no,
+      facts.variant_count,
       p.bws_project_number,
-      coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
-                  from spec_record_refs x where x.record_id = r.id), '') as refs,
-      c.id            as category_id,
-      c.name          as category_name,
-      q.id            as requirement_id,
-      q.kind          as requirement_kind,
+      facts.refs,
+      c.id as category_id,
+      c.name as category_name,
+      q.id as requirement_id,
+      q.kind as requirement_kind,
       q.prompt,
       q.section,
       q.sort_order,
       q.tgq_levels,
-      -- The two ways a question reaches Matthew's matrix: the BWS field it
-      -- fills, and the local key a readiness question carries instead.
-      f.json_id       as field_json_id,
+      f.json_id as field_json_id,
       q.local_key,
-      f.name          as field_label,
-      a.id            as answer_id,
-      a.version       as answer_version,
+      f.name as field_label,
+      a.id as answer_id,
+      a.version as answer_version,
       coalesce(a.state, 'missing') as state,
-      a.value         as current_value
+      a.value as current_value
     from spec_records r
+    join facts on facts.record_id = r.id
     join projects p on p.id = r.project_id
     join spec_runs run on run.id = r.run_id
     join item_categories c on c.id = r.category_id
@@ -878,12 +962,26 @@ export async function loadQuestionsByKey(
   const requirementIds = [...new Set(keys.map((k) => k.requirementId))];
 
   const rows = await exec`
+    with facts as (
+      select r.id as record_id,
+             p2.record_no as parent_record_no,
+             p2.qty as parent_qty,
+             coalesce(p2.record_no, r.record_no) as group_no,
+             coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
+                         from spec_record_refs x where x.record_id = r.parent_id), '') as parent_refs,
+             coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
+                         from spec_record_refs x where x.record_id = r.id), '') as refs,
+             (select count(*) from spec_records v where v.parent_id = r.id and v.status = 'active') as variant_count
+        from spec_records r
+        left join spec_records p2 on p2.id = r.parent_id
+       where r.id = any(${recordIds}::uuid[]) and r.project_id = ${projectId}
+    )
     select
       r.project_id,
-      r.id            as record_id,
+      r.id as record_id,
       r.record_no,
-      r.status        as record_status,
-      r.version       as record_version,
+      r.status as record_status,
+      r.version as record_version,
       r.item_description,
       r.area,
       r.designer,
@@ -892,40 +990,32 @@ export async function loadQuestionsByKey(
       r.run_id,
       r.parent_id,
       r.variant_label,
-      -- 0039: what the record is CALLED, 12.3 rather than its own 34.
       r.variant_ordinal,
-      (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
+      facts.parent_record_no,
       run.name as run_name,
-      -- A FINISH OPTION SHOWS ITS PARENT'S CLIENT REF and its parent's
-      -- quantity: S-201 A carries no ref of its own (copying it would make
-      -- every drawing card for that code ambiguous) and no qty (the bill says
-      -- 45 and never says how many are fabric A).
-      coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
-                  from spec_record_refs x where x.record_id = r.parent_id), '') as parent_refs,
-      (select p2.qty from spec_records p2 where p2.id = r.parent_id) as parent_qty,
-      coalesce((select p2.record_no from spec_records p2 where p2.id = r.parent_id), r.record_no) as group_no,
-      (select count(*) from spec_records v where v.parent_id = r.id and v.status = 'active') as variant_count,
+      facts.parent_refs,
+      facts.parent_qty,
+      facts.group_no,
+      facts.variant_count,
       p.bws_project_number,
-      coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
-                  from spec_record_refs x where x.record_id = r.id), '') as refs,
-      c.id            as category_id,
-      c.name          as category_name,
-      q.id            as requirement_id,
-      q.kind          as requirement_kind,
+      facts.refs,
+      c.id as category_id,
+      c.name as category_name,
+      q.id as requirement_id,
+      q.kind as requirement_kind,
       q.prompt,
       q.section,
       q.sort_order,
       q.tgq_levels,
-      -- The two ways a question reaches Matthew's matrix: the BWS field it
-      -- fills, and the local key a readiness question carries instead.
-      f.json_id       as field_json_id,
+      f.json_id as field_json_id,
       q.local_key,
-      f.name          as field_label,
-      a.id            as answer_id,
-      a.version       as answer_version,
+      f.name as field_label,
+      a.id as answer_id,
+      a.version as answer_version,
       coalesce(a.state, 'missing') as state,
-      a.value         as current_value
+      a.value as current_value
     from spec_records r
+    join facts on facts.record_id = r.id
     join projects p on p.id = r.project_id
     join spec_runs run on run.id = r.run_id
     join item_categories c on c.id = r.category_id

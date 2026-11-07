@@ -222,7 +222,7 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
     };
     const full = await readDrafts();
     expect(unpackContactGroups(packed.inventory)).toEqual(full.inventory.groups);
-    const distinct = new Set(full.inventory.groups.flatMap((g) => g.questions.map((q) => `${q.recordId}/${q.requirementId}`)));
+    const distinct = new Set(full.inventory.groups.flatMap((g) => (g.questions as unknown as { recordId: string; requirementId: string }[]).map((q) => `${q.recordId}/${q.requirementId}`)));
     expect(packed.inventory.questions).toHaveLength(distinct.size);
   });
 
