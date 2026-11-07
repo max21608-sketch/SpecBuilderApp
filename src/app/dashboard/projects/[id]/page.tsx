@@ -35,7 +35,7 @@ import ContactsPanel, { type Contact, type ContactsOutstanding } from "@/compone
 import { FOCUSES, type Focus, type RunTally } from "@/components/records/SpecTable";
 import PhaseTabs, { type SpecRun } from "@/components/projects/PhaseTabs";
 import ExportMenu from "@/components/records/ExportMenu";
-import ProjectHistory from "@/components/history/ProjectHistory";
+import HistoryCard, { useHistoryCard } from "@/components/projects/HistoryCard";
 import OpenChangeBar from "@/components/history/OpenChangeBar";
 import FinishesLibrary from "@/components/finishes/FinishesLibrary";
 import AddRun from "@/components/projects/AddRun";
@@ -238,12 +238,7 @@ function ProjectOverview() {
    * how a header comes to disagree with the rows under it.
    */
   const [runTallies, setRunTallies] = useState<Record<string, RunTally>>({});
-  // The history card's three controls live in its heading, so the page holds
-  // their state and the component is told.
-  const [historyCount, setHistoryCount] = useState<number | null>(null);
-  const [historyNaming, setHistoryNaming] = useState(false);
-  const [historyComparing, setHistoryComparing] = useState(false);
-  const [historyShowAll, setHistoryShowAll] = useState(false);
+  const history = useHistoryCard();
 
   const load = useCallback(async () => {
     const res = await apiFetch<{
@@ -527,42 +522,12 @@ function ProjectOverview() {
    * tab starts saying something the card does not.
    */
   const historyCard = (
-    <Card
-      title="History"
-      flush
-      actions={
-        <>
-          <Button size="xs" onClick={() => setHistoryNaming((open) => !open)}>
-            Name this point
-          </Button>
-          <Button size="xs" onClick={() => setHistoryComparing((open) => !open)}>
-            Compare two points
-          </Button>
-          {historyCount !== null && historyCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setHistoryShowAll((open) => !open)}
-              className="text-[12px] font-medium normal-case tracking-normal text-blue-700 hover:underline"
-            >
-              {historyShowAll ? "Show fewer" : `All ${historyCount}`}
-            </button>
-          )}
-        </>
-      }
-    >
-      <ProjectHistory
-        projectId={project.id}
-        specsAgreedBy={project.specs_agreed_by}
-        toQuote={summary.toQuote}
-        onLoaded={setHistoryCount}
-        naming={historyNaming}
-        onNamingChange={setHistoryNaming}
-        comparing={historyComparing}
-        onComparingChange={setHistoryComparing}
-        showAll={historyShowAll}
-        onShowAllChange={setHistoryShowAll}
-      />
-    </Card>
+    <HistoryCard
+      projectId={project.id}
+      specsAgreedBy={project.specs_agreed_by}
+      toQuote={summary.toQuote}
+      history={history}
+    />
   );
 
   const documentsCard = <DocumentsTab projectId={project.id} docs={docs} onReload={load} onError={setError} />;
@@ -678,7 +643,7 @@ function ProjectOverview() {
               ...runs.map((run) => ({ id: run.id, label: run.name, count: Number(run.record_count) })),
               { id: "finishes", label: "Finishes", count: summary.finishes || null },
               { id: "documents", label: "Documents", count: documents?.length ? documents.length : null },
-              { id: "history", label: "History", count: historyCount },
+              { id: "history", label: "History", count: history.count },
             ]}
             trailing={
               <AddRun
