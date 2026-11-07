@@ -25,6 +25,8 @@ import { loadConfigurationFamily } from "@/lib/configuration-family";
 import { currentPicture, itemImageSource, offeredPicture } from "@/lib/item-image";
 import { loadItemPictures } from "@/lib/item-image-write";
 import { loadDisagreements } from "@/lib/disagreements";
+import { twinsOf } from "@/lib/record-twins";
+import { loadTwinAttributes } from "@/lib/twin-offer";
 import {
   designerKey,
   loadOutstanding,
@@ -471,11 +473,25 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // when. One loader for every screen that counts or lists them.
   const disagreements = await loadDisagreements(sql, [id]);
 
+  // ---- the lines this one is a TWIN of (0060) ---------------------------------
+  //
+  // With each twin's live specs, because the Add / Edit value / Retire forms
+  // draw their "also on its twin" ticks from them through `twinOffer`, the
+  // function the write boundary re-runs under the lock. A configuration is
+  // answered with its bill line's twins (shown, never written to from here).
+  const twinLinks = await twinsOf(sql, id);
+  const twinAttributes = await loadTwinAttributes(
+    sql,
+    twinLinks.map((twin) => twin.recordId),
+  );
+  const twins = twinLinks.map((twin) => ({ ...twin, attributes: twinAttributes.get(twin.recordId) ?? [] }));
+
   return json({
     ok: true,
     record,
     picture,
     mockup,
+    twins,
     refs,
     attributes,
     retiredAttributes: retired,

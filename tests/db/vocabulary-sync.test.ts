@@ -54,6 +54,7 @@ import { FINISH_CODE_ORIGINS, FINISH_KINDS } from "@/lib/finishes";
 import { BOQ_ROLES } from "@/lib/boq-roles";
 import { STANDARD_STATES } from "@/lib/bw-standard";
 import { DISAGREEMENT_STATUSES } from "@/lib/disagreements";
+import { TWIN_STATUSES } from "@/lib/record-twins";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -107,6 +108,8 @@ const VOCABULARIES: {
   { name: "STANDARD_STATES (finishes)", constraint: "project_finishes_standard_state_check", values: STANDARD_STATES },
   // 0046: a later document's statement beside a held value, and how it was settled.
   { name: "DISAGREEMENT_STATUSES", constraint: "attribute_disagreements_status_check", values: DISAGREEMENT_STATUSES },
+  // 0060: a twin link between two bill lines is live or retired, never deleted.
+  { name: "TWIN_STATUSES", constraint: "spec_record_twins_status_check", values: TWIN_STATUSES },
   // The statement is copied in the attribute's own shape, so its vocabularies are the attribute's.
   { name: "ATTRIBUTE_GROUPS (disagreements)", constraint: "attribute_disagreements_group_check", values: ATTRIBUTE_GROUPS },
   { name: "ATTRIBUTE_UNITS (disagreements)", constraint: "attribute_disagreements_unit_check", values: ATTRIBUTE_UNITS },

@@ -24,6 +24,8 @@ import { BillDescriptionPanelRow, BillDescriptionSummary, type ReviewDescription
 // A row's picture opened under it: crop it, take it whole, or take none.
 import BillPicturePanelRow from "@/components/imports/BillPicturePanel";
 import { PairingCell } from "@/components/imports/RevisionPanel";
+import BillTwinCell from "@/components/imports/BillTwinCell";
+import { twinPartnerMissing, type TwinSuggestion } from "@/lib/twin-suggest";
 import type { BoqImport, Category, Import, Line, Reconciliation, Sheet } from "@/components/imports/use-boq-import";
 import { billLineId } from "@/lib/needs-you";
 import { ITEM_LEVELS, ITEM_LEVEL_LABELS, isItemLevel } from "@/lib/spec-vocab";
@@ -509,6 +511,9 @@ export default function BillLineRow({
   setSlot,
   setUnit,
   setLineKind,
+  twinSuggestion,
+  onAcceptTwin,
+  onClearTwin,
 }: {
   line: Line;
   place: BillLinePlace;
@@ -540,6 +545,10 @@ export default function BillLineRow({
   onToggleWhy: () => void;
   descriptionOpen: boolean;
   onToggleDescription: () => void;
+  /** 0060: the twin `suggestTwins` reads off the sheet for this line, if any. */
+  twinSuggestion?: TwinSuggestion;
+  onAcceptTwin?: () => void;
+  onClearTwin?: () => void;
 } & Pick<BoqImport, "setLine" | "setPicture" | "setSlot" | "setUnit" | "setLineKind">) {
   const fabric = line.rowKind === "finish_for";
   // The SAME code on a line that is not beside this one.
@@ -787,6 +796,19 @@ export default function BillLineRow({
               <span className="mt-0.5 block text-xs text-neutral-500">
                 Notes: {composeBillNotes(line.notes, line.kept)?.split("\n").join(" · ")}
               </span>
+            )}
+            {/* ONE ITEM ON TWO LINES (0060): a suggestion with its
+                evidence, or the twin a person accepted. */}
+            {!line.ignored && (
+              <BillTwinCell
+                accepted={line.twinOf}
+                partnerMissing={twinPartnerMissing(sheet.lines, line)}
+                suggestion={twinSuggestion}
+                editable={run.status === "parsed" && Boolean(onAcceptTwin)}
+                busy={busy}
+                onAccept={() => onAcceptTwin?.()}
+                onClear={() => onClearTwin?.()}
+              />
             )}
             {description && (
               <BillDescriptionSummary

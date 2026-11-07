@@ -87,6 +87,10 @@ export const CHANGE_SET_KINDS = [
   // 0046: a person settling a disagreement between two documents -- keeping
   // the held value, or using the other document's instead. Always says why.
   "disagreement_resolve",
+  // 0060: two bill lines said to be one item (a twin), and said not to be.
+  // Both say why: each overrides how the bill listed them.
+  "twin_link",
+  "twin_unlink",
 ] as const;
 export type ChangeSetKind = (typeof CHANGE_SET_KINDS)[number];
 
@@ -110,6 +114,9 @@ export const REASON_REQUIRED_KINDS: readonly ChangeSetKind[] = [
   "standard_change",
   // 0046: it decides which of two documents is right.
   "disagreement_resolve",
+  // 0060: it says two lines of a bill are one item, or that they are not.
+  "twin_link",
+  "twin_unlink",
 ];
 
 export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
@@ -140,6 +147,8 @@ export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
   standard_change: "Agreed BW standard changed",
   mockup_add: "Added to the mock-up phase",
   disagreement_resolve: "Disagreement between documents settled",
+  twin_link: "Lines linked as twins",
+  twin_unlink: "Twin lines unlinked",
 };
 
 export type OpenChangeSet = {

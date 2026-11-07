@@ -78,6 +78,7 @@ import { addToMockupPhase, MOCKUP_PHASE_NAME } from "@/lib/mockup-phase";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
 import { documentClosedSentence } from "@/lib/intake-status";
 import { categoryToWrite } from "@/lib/bill-category";
+import { billTwinPairs, linkBillTwins, type TwinStagedLine } from "@/lib/bill-twins";
 
 type StagedLine = {
   index: number;
@@ -193,6 +194,8 @@ export type ConfirmBoqResult = {
    * bill put an item on the mock-up phase and none was left.
    */
   mockup: ConfirmMockupResult | null;
+  /** 0060: twin links written from lines a person accepted as twins on the review. */
+  twinsLinked: number;
 };
 
 export type ConfirmMockupResult = {
@@ -255,6 +258,8 @@ type BillTally = {
   descriptionsHeldBack: number;
   billPictures: number;
   inHouseFinishes: number;
+  /** 0060: twin links written from lines a person accepted on the review. */
+  twinsLinked: number;
   recomposeIds: Set<string>;
   /**
    * Every fabric line that ended up linked to a finish, with its row's
@@ -991,6 +996,7 @@ export async function confirmBoqImport(
     descriptionsHeldBack: 0,
     billPictures: 0,
     inHouseFinishes: 0,
+    twinsLinked: 0,
     recomposeIds: new Set<string>(),
     swatchGroups: new Map(),
     mockupQuantities: new Map(),
@@ -1023,6 +1029,16 @@ export async function confirmBoqImport(
       else await insertNewLine(bill, tally, at, line);
     }
     await writeSheetFinishLines(bill, tally, at, { sheetIndex, fabricLines, plan });
+    // ---- 0060: the twins a person accepted on this tab -------------------
+    // Only lines somebody accepted (`twinOf`, staged by `stageBillTwins`); a
+    // suggestion nobody accepted is never linked. One change set: this one.
+    tally.twinsLinked += await linkBillTwins(txn, {
+      pairs: billTwinPairs(sheet.lines as TwinStagedLine[]),
+      recordOf: (row) => at.recordByRow.get(row)?.recordId ?? null,
+      lines: sheet.lines as TwinStagedLine[],
+      changeSetId,
+      actor,
+    });
     await retireUnlisted(bill, tally, at);
   }
 
@@ -1037,6 +1053,7 @@ export async function confirmBoqImport(
     descriptionsHeldBack,
     billPictures,
     inHouseFinishes,
+    twinsLinked,
     recomposeIds,
     swatchGroups,
     mockupQuantities,
@@ -1086,6 +1103,7 @@ export async function confirmBoqImport(
   await snapshotRecords(txn, recordIds, changeSetId);
 
   return {
+    twinsLinked,
     imported,
     updated,
     retired,

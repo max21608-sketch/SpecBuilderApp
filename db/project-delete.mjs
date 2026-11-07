@@ -77,6 +77,7 @@ const OWNED = [
     from: "baseline_members t join change_sets c on c.id = t.change_set_id where c.project_id = $1",
   },
   { table: "attribute_disagreements", id: "t.id", from: "attribute_disagreements t where t.project_id = $1" },
+  { table: "spec_record_twins", id: "t.id", from: "spec_record_twins t where t.project_id = $1" },
   { table: "intake_batches", id: "t.id", from: "intake_batches t where t.project_id = $1" },
   { table: "intake_runs", id: "t.id", from: "intake_runs t where t.project_id = $1" },
   { table: "project_notes", id: "t.id", from: "project_notes t where t.project_id = $1" },

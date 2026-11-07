@@ -120,6 +120,7 @@ export const TABLE_HANDLING: Record<string, Handling> = {
     blobColumns: ["mailbox_storage_path"],
   },
   attribute_disagreements: { kind: "owned" },
+  spec_record_twins: { kind: "owned" },
 
   // ---- polymorphic: entity_type + entity_id, no FK possible ----
   attachments: { kind: "polymorphic", blobColumns: ["storage_path"] },

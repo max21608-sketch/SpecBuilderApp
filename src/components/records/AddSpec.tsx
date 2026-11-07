@@ -18,7 +18,9 @@ import { useState } from "react";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import { apiFetch } from "@/lib/api-fetch";
 import Button from "@/components/ui/Button";
-import { ATTRIBUTE_GROUPS, ATTRIBUTE_GROUP_LABELS, ATTRIBUTE_UNITS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
+import { ATTRIBUTE_GROUPS, ATTRIBUTE_GROUP_LABELS, ATTRIBUTE_UNITS, DIMENSION_SLOTS, type DimensionSlot } from "@/lib/spec-vocab";
+import { twinOffer, type TwinWithAttributes } from "@/lib/twin-offer";
+import TwinTicks, { useTwinTicks } from "@/components/records/TwinTicks";
 
 type SpecField = { id: string; name: string; json_id: number };
 
@@ -28,9 +30,16 @@ export default function AddSpec({
   onAdded,
   open: controlledOpen,
   onOpenChange,
+  twins = [],
 }: {
   recordId: string;
   specFields: SpecField[];
+  /**
+   * 0060: this bill line's twins, each with its live specs. The new spec is
+   * offered to each (`twinOffer`); empty on a configuration, whose specs are
+   * its own.
+   */
+  twins?: TwinWithAttributes[];
   onAdded: () => void | Promise<void>;
   /**
    * CONTROLLED WHEN GIVEN, and then this component renders NO trigger of its
@@ -64,6 +73,20 @@ export default function AddSpec({
   });
 
   const isDimension = form.attrGroup === "dimension";
+  // WHAT THE NEW SPEC OFFERS EACH TWIN, re-read on every keystroke that moves
+  // the slot or the field: a twin that holds W but not D is offered unticked
+  // for W and ticked for D.
+  const offer = twinOffer(
+    {
+      act: "add",
+      attrGroup: form.attrGroup,
+      label: form.label,
+      dimensionSlot: isDimension && form.dimensionSlot ? (form.dimensionSlot as DimensionSlot) : null,
+      specFieldId: !isDimension && form.specFieldId ? form.specFieldId : null,
+    },
+    twins,
+  );
+  const ticks = useTwinTicks(offer);
 
   async function submit() {
     setSaving(true);
@@ -83,6 +106,7 @@ export default function AddSpec({
           specFieldId: !isDimension && form.specFieldId ? form.specFieldId : null,
           materialCode: form.materialCode.trim() || null,
           state: form.state,
+          ...(ticks.also.length > 0 ? { alsoRecords: ticks.also } : {}),
         }),
       });
       if (!result.ok) {
@@ -90,6 +114,7 @@ export default function AddSpec({
         return;
       }
       setForm({ ...form, label: "", value: "", qualifier: "", materialCode: "", dimensionSlot: "" });
+      ticks.reset();
       setOpen(false);
       await onAdded();
     } finally {
@@ -235,6 +260,7 @@ export default function AddSpec({
           Cancel
         </Button>
       </div>
+      <TwinTicks offer={offer} ticks={ticks} disabled={saving} />
       {error && <p className="mt-2 text-xs text-red-700">{error}</p>}
       <p className="mt-2 text-xs text-neutral-500">
         No document and no page: this is what you say, not what a drawing said. It fills the checklist answer its field

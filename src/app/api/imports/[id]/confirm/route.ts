@@ -197,6 +197,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         // What the bill's Prototype Quantity did: the items also put on the
         // mock-up phase, and any a revision LEFT there, in words.
         mockup: result.mockup,
+        // 0060: twin links written from lines a person accepted on the review.
+        twinsLinked: result.twinsLinked,
         projectId: result.projectId,
         runs: result.runIds.length,
       });

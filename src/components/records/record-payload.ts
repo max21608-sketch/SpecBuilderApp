@@ -10,6 +10,7 @@ import type { MatrixFieldRow } from "@/components/records/GatePanel";
 import type { Palette } from "@/lib/palettes";
 import type { Gate, GateStatus } from "@/lib/gates";
 import type { ItemTgqRow } from "@/lib/item-tgq";
+import type { TwinWithAttributes } from "@/lib/twin-offer";
 
 export type Answer = {
   requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;
@@ -115,6 +116,11 @@ export type Payload = {
    * phase, a retired one included and marked. Optional: an older payload has none.
    */
   mockup?: { isMockup: boolean; of: MockupLink | null; copies: MockupLink[] };
+  /**
+   * The bill lines this one is a TWIN of (0060), each with its live specs for
+   * the "also on its twin" ticks. Optional: an older payload has none.
+   */
+  twins?: TwinWithAttributes[];
   refs: { ref_system: string; ref_value: string }[];
   attributes: Attribute[];
   retiredAttributes: RetiredAttribute[];

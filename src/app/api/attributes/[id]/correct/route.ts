@@ -14,7 +14,7 @@ import { json } from "@/lib/db";
 import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
-import { correctAttribute } from "@/lib/attribute-correct";
+import { correctAttributeWithTwins } from "@/lib/twin-writes";
 import { ATTRIBUTE_UNITS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
 import { verifyEvidence } from "@/lib/change-sets";
 import { requireUuid, requireWriter } from "@/lib/route-guards";
@@ -41,6 +41,20 @@ const Body = z
       })
       .strict()
       .nullable()
+      .optional(),
+    // 0060: the twins a person ticked. Re-read under the lock and checked
+    // against the offer the screen drew (`twin-writes.ts`), never believed.
+    alsoRecords: z
+      .array(
+        z
+          .object({
+            recordId: z.string().uuid(),
+            attributeId: z.string().uuid().nullable().optional(),
+            version: z.number().int().nonnegative().nullable().optional(),
+          })
+          .strict(),
+      )
+      .max(50)
       .optional(),
   })
   .strict();
@@ -105,7 +119,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const evidence = await verifyEvidence(parsed.data.evidence);
   try {
     const result = await withTransaction((txn) =>
-      correctAttribute(txn, {
+      correctAttributeWithTwins(txn, {
         attributeId: id,
         expectedVersion: parsed.data.version,
         value: parsed.data.value,
@@ -115,6 +129,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         reason: parsed.data.reason,
         evidence,
         actor: user.email,
+        alsoRecords: parsed.data.alsoRecords ?? [],
       }),
     );
     return json({ ok: true, ...result });

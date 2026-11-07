@@ -166,6 +166,8 @@ export type SpecRecord = {
   mockup_of_run_name?: string | null;
   mockup_copy_id?: string | null;
   mockup_copy_run_name?: string | null;
+  /** 0060: the first client ref of each line this one is a twin of. Optional: an older payload has none. */
+  twin_codes?: string[];
   /**
    * What the item IS — its size and finish codes — in one line under its name,
    * the bill review's look (2026-10-05). The size is `composeDimensionCell` in
@@ -1231,6 +1233,15 @@ export default function SpecTable({
                         {/* A HEADING, not an item. Its configurations are what
                             the export ships — and a row that stayed silent
                             would read as an item nobody had specced. */}
+                        {/* 0060: one item on several lines. The chip says so; the
+                            other lines are the hover. */}
+                        {(record.twin_codes?.length ?? 0) > 0 && (
+                          <span className="mt-0.5 block">
+                            <Chip tone="live" title={`Twin of ${record.twin_codes!.join(", ")}`}>
+                              twin
+                            </Chip>
+                          </span>
+                        )}
                         {/* THE MOCK-UP, IN WHICHEVER DIRECTION THIS ROW SITS. */}
                         {record.mockup_of && (
                           <span className="block text-xs text-neutral-500">

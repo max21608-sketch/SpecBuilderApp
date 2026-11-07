@@ -592,7 +592,18 @@ export function foldableRow(observation: DrawingObservation): boolean {
 
 export type RunResolution =
   | { runId: string; runName: string; status: "matched"; record: RecordEntry }
-  | { runId: string; runName: string; status: "ambiguous"; candidates: RecordEntry[] };
+  | {
+      runId: string;
+      runName: string;
+      status: "ambiguous";
+      candidates: RecordEntry[];
+      /**
+       * 0060: every candidate is a TWIN of every other, so the bill says they
+       * are one item and all of them are suggested (`readTwinLines`). Still
+       * `ambiguous`, so each line keeps its own tick and can be unticked.
+       */
+      twins?: true;
+    };
 
 export type DrawingResolution = {
   runs: RunResolution[];
@@ -611,6 +622,11 @@ export type DrawingResolution = {
    * including, when nothing there carries the code, what to do about it.
    */
   mockup?: { evidence: string | null; message: string };
+  /**
+   * 0060: lines this drawing would otherwise have asked about are TWINS, and
+   * are all suggested. The server's sentence; the card prints it.
+   */
+  twins?: { message: string };
 };
 
 /**
@@ -842,16 +858,102 @@ export function resolveStagedItem(
     const codes = (Array.isArray(item.itemCodes) ? item.itemCodes : []).filter(
       (code): code is string => typeof code === "string" && code.trim() !== "",
     );
-    return resolveDrawingTargets(item.itemCodeRaw, records, {
-      codes: codes.length > 0 ? codes : item.itemCodeRaw ? [item.itemCodeRaw] : [],
-      drawingNumber: drawingNumberOf(staged.filename),
-    });
+    return readTwinLines(
+      resolveDrawingTargets(item.itemCodeRaw, records, {
+        codes: codes.length > 0 ? codes : item.itemCodeRaw ? [item.itemCodeRaw] : [],
+        drawingNumber: drawingNumberOf(staged.filename),
+      }),
+      records,
+    );
   }
   const canonical = canonicalCode(staged, item.itemCodeRaw);
-  return resolveDrawingTargets(canonical, records, {
-    codes: codesOfItem(staged, item.itemCodeRaw),
-    drawingNumber: drawingNumberOf(staged.filename),
+  return readTwinLines(
+    resolveDrawingTargets(canonical, records, {
+      codes: codesOfItem(staged, item.itemCodeRaw),
+      drawingNumber: drawingNumberOf(staged.filename),
+    }),
+    records,
+  );
+}
+
+/**
+ * TWO LINES OF ONE PHASE THAT THE BILL CALLS ONE ITEM ARE NOT SX11A (0060).
+ *
+ * GR-FUR-13 and PL-FUR-13 are one stool on two lines, and a person (or an
+ * accepted bill-review suggestion) has linked them as twins. Until then the
+ * drawing of FUR-13 could only offer the two and pick neither, and a drawing
+ * of a code printed twice in one phase asked the same question every time.
+ * Where EVERY line the drawing reached is a twin of every other, the link is
+ * the answer the resolution was waiting for: all of them are suggested,
+ * each keeps its own tick (unticking is always there), and the card says
+ * why in one sentence. The confirm's fan-out then writes one row per record
+ * exactly as it writes to two phases.
+ *
+ * Nothing is read from a link that does not cover the whole set. Three lines
+ * of which two are twins is still a question: the third may be a different
+ * item, and choosing among them is a person's.
+ *
+ * Pure, and called inside `resolveStagedItem`, which the screen and the
+ * confirm both reach, so the two cannot disagree. A loader that never read
+ * the links (`twinIds` absent) sees no twins, which is the behaviour before.
+ */
+function readTwinLines(resolution: DrawingResolution, records: RecordEntry[]): DrawingResolution {
+  const candidates = resolution.runs.flatMap((run) => (run.status === "matched" ? [run.record] : run.candidates));
+  const ids = [...new Set(candidates.map((record) => record.id))];
+  const asked = resolution.runs.some((run) => run.status === "ambiguous");
+  if (ids.length < 2 || !asked) return resolution;
+  const byId = new Map(records.map((record) => [record.id, record]));
+  const twinned = (a: string, b: string) => byId.get(a)?.twinIds?.includes(b) === true;
+  const allTwins = (set: readonly string[]) => set.every((a, i) => set.slice(i + 1).every((b) => twinned(a, b)));
+
+  const named = (set: readonly string[]) =>
+    set
+      .map((id) => byId.get(id))
+      .map((record) => record?.boqCodes[0] ?? record?.label ?? "a line")
+      .join(" and ");
+  const sentence = (set: readonly string[]) =>
+    `${named(set)} are twins: the bill lists one item on ${set.length} lines, so this drawing goes on each. Untick a line whose spec differs.`;
+
+  // The page did not say WHICH code (a code end, or two codes on two lines):
+  // the twins say it is all of them, or the question stands. A MOCK-UP copy
+  // of a line is not part of the question: it is matched on its own phase and
+  // never suggested for a drawing that is not a mock-up (`notOntoMockup`),
+  // so its not being linked must not keep the bill's own twins apart.
+  if (resolution.matchedBy && resolution.matchedBy.code === null) {
+    const onBill = ids.filter((id) => byId.get(id)?.onMockupPhase !== true);
+    const judged = onBill.length >= 2 ? onBill : ids;
+    if (judged.length < 2 || !allTwins(judged)) return resolution;
+    return {
+      ...resolution,
+      runs: resolution.runs.map((run) => {
+        const set = run.status === "matched" ? [run.record] : run.candidates;
+        if (set.length === 1) return { runId: run.runId, runName: run.runName, status: "matched" as const, record: set[0]! };
+        const twins = allTwins(set.map((record) => record.id));
+        return twins
+          ? { runId: run.runId, runName: run.runName, status: "ambiguous" as const, candidates: set, twins: true as const }
+          : { runId: run.runId, runName: run.runName, status: "ambiguous" as const, candidates: set };
+      }),
+      // Every line; a mock-up copy among them is taken off again by
+      // `notOntoMockup` for a drawing that is not a mock-up.
+      suggested: ids,
+      twins: { message: sentence(judged) },
+    };
+  }
+
+  // One code on several lines of a phase: each phase whose lines are all twins.
+  const settled: string[] = [];
+  const runs = resolution.runs.map((run) => {
+    if (run.status !== "ambiguous" || !allTwins(run.candidates.map((record) => record.id))) return run;
+    settled.push(...run.candidates.map((record) => record.id));
+    return { ...run, twins: true as const };
   });
+  if (settled.length === 0) return resolution;
+  return {
+    ...resolution,
+    runs,
+    suggested: [...new Set([...resolution.suggested, ...settled])],
+    twins: { message: sentence([...new Set(settled)]) },
+  };
 }
 
 /**
@@ -1008,7 +1110,12 @@ export function targetRecordIds(item: DrawingItem, resolution: DrawingResolution
  * the header. One function, read by the blocker and by the picker, so the
  * screen cannot offer a choice the confirm refuses.
  */
-export function oneLinePerPhase(resolution: { matchedBy?: { kind: CodeEndMatch["kind"]; code: string | null } }): boolean {
+export function oneLinePerPhase(resolution: {
+  matchedBy?: { kind: CodeEndMatch["kind"]; code: string | null };
+  twins?: { message: string };
+}): boolean {
+  // 0060: twin lines are one item, so ticking each of them is the answer.
+  if (resolution.twins) return false;
   return resolution.matchedBy !== undefined && resolution.matchedBy.code === null;
 }
 
