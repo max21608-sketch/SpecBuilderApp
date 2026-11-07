@@ -31,12 +31,14 @@
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import {
   assertBoqDocument,
-  normaliseRef,
   sheetsAwaitingColumnCheck,
   sheetsNeedingColumns,
   type StagedBoqSheet,
 } from "@/lib/boq-import";
 import { effectiveArea, type LinePairing } from "@/lib/boq-reconcile";
+// THE ONE FOLD writes ref_value_norm too (audit 5.4 A3): boq-import had a
+// second one that kept dots and dashes, and nothing matched on its output.
+import { normaliseRef } from "@/lib/record-refs";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { rowKindProblems, type RowKindFields } from "@/lib/boq-row-kinds";
@@ -683,11 +685,17 @@ export async function confirmBoqImport(
         // The client ref can be re-punctuated between revisions. Refs are
         // write-once-and-delete by design (0002), so the old one goes and the
         // new one is written rather than edited in place.
+        //
+        // DELETED BY ITS WORDS, NOT ITS FOLD (5.4 A3). The fold now folds a
+        // dot onto nothing, so `S.201` re-punctuated as `S-201` is the SAME
+        // norm, and a delete keyed on the norm left the old spelling in place
+        // while the insert below did nothing on conflict: the record would go
+        // on showing the bill's previous spelling.
         if (line.code) {
           await txn`
             delete from spec_record_refs
             where record_id = ${target.recordId} and ref_system = 'boq_code'
-              and ref_value_norm <> ${normaliseRef(line.code)}
+              and ref_value <> ${line.code}
           `;
           await txn`
             insert into spec_record_refs (record_id, project_id, ref_system, ref_value, ref_value_norm, source, created_by)

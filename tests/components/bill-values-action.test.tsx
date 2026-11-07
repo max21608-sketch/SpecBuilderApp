@@ -83,7 +83,7 @@ describe("the bill's values, one press per card", () => {
     const rows = stool();
     renderCard(rows, entries(rows));
     expect(screen.getByRole("button", { name: BUTTON }).textContent).toMatch(/\(3\)$/);
-    expect(screen.getByText(`D 460mm → Dia 1'-6"`)).toBeTruthy();
+    expect(screen.getByText(`D 460mm → Dia. 1'-6"`)).toBeTruthy();
     expect(screen.getByText(`H 450mm → 1'-4 3/4"`)).toBeTruthy();
     expect(screen.getByText("Main timber finish TIM-01 → GR TIM 10")).toBeTruthy();
   });

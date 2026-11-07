@@ -325,4 +325,29 @@ describeIfDb("BOQ revision", () => {
     expect(after.rows[0].level).toBe("hero");
     expect(after.rows[0].level_suggested).toBeNull();
   });
+
+  it("a code re-punctuated by the revision is stored as the bill now spells it, folded by the one fold (5.4 A3)", { timeout: 30_000 }, async () => {
+    const { normaliseRef } = await import("@/lib/record-refs");
+    const first = await stage([line({ index: 20, code: "__QA.R21" })]);
+    expect((await confirm(first)).status).toBe(200);
+    const record = (
+      await client.query(
+        `select r.id, r.version, r.run_id from spec_records r join spec_record_refs x on x.record_id = r.id
+          where r.project_id = $1 and x.ref_value = '__QA.R21'`,
+        [projectId],
+      )
+    ).rows[0];
+    const revision = await stage(
+      [line({ index: 20, code: "__QA-R21", replaces: { recordId: record.id, recordVersion: record.version } })],
+      record.run_id,
+    );
+    expect((await confirm(revision)).status).toBe(200);
+    const refs = (
+      await client.query(`select ref_value, ref_value_norm from spec_record_refs where record_id = $1 and ref_system = 'boq_code'`, [record.id])
+    ).rows;
+    // Under the one fold both spellings are QAR21, so a delete keyed on the
+    // fold would keep the old spelling and the insert would do nothing.
+    expect(refs).toEqual([{ ref_value: "__QA-R21", ref_value_norm: normaliseRef("__QA-R21") }]);
+  });
 });
+

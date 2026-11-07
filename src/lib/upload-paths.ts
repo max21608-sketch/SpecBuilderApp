@@ -33,3 +33,14 @@ export function pathnameSafeName(name: string): string {
     .trim();
   return safe === "" || safe === "." || safe === ".." ? "document" : safe;
 }
+
+/**
+ * A filename reduced to ONE ASCII segment, for a stored picture or an email
+ * kept as evidence, where nobody reads the stored name and the attachment row
+ * keeps the real one. Anything but letters, digits, `.`, `_` and `-` runs into
+ * a single hyphen, and the END is kept, so the extension survives the cut.
+ * It was written out in two upload components (audit 5.4 A3); this is the copy.
+ */
+export function asciiPathSegment(name: string, max: number): string {
+  return name.replace(/[^A-Za-z0-9._-]+/g, "-").slice(-max);
+}

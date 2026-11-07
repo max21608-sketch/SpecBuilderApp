@@ -12,7 +12,7 @@
 // opens in Outlook. That is said on screen rather than left to be discovered.
 import { useState } from "react";
 import { upload } from "@vercel/blob/client";
-import { projectUploadPrefix } from "@/lib/upload-paths";
+import { asciiPathSegment, projectUploadPrefix } from "@/lib/upload-paths";
 import Button from "@/components/ui/Button";
 
 export type UploadedEvidence = { pathname: string; filename: string; contentType: string; size: number };
@@ -33,7 +33,7 @@ export default function EvidenceUpload({
     setBusy(true);
     setError(null);
     try {
-      const safe = chosen.name.replace(/[^A-Za-z0-9._-]+/g, "-").slice(-120);
+      const safe = asciiPathSegment(chosen.name, 120);
       const blob = await upload(`${projectUploadPrefix(projectId)}evidence/${Date.now()}-${safe}`, chosen, {
         access: "private",
         handleUploadUrl: "/api/uploads/token",

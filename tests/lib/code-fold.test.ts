@@ -21,14 +21,16 @@
 // line beside a record NO LONGER LISTED — and confirming that retires the
 // record, taking its drawings, its specs and its picture off the phase.
 //
-// AND ONE FOLD IS DELIBERATELY DIFFERENT. `boq-import`'s `normaliseRef` writes
-// the stored `ref_value_norm` column, which has a unique constraint behind it
-// and rows already in it. It is asserted here as a SEPARATE job so that nobody
-// reading this file "fixes" it into the matching one.
+// AND THE STORED COLUMN IS WRITTEN BY THE SAME FOLD (audit 5.4 A3, 2026-11-06).
+// `boq-import` had a second `normaliseRef` that kept dots and dashes, and it
+// wrote `spec_record_refs.ref_value_norm`. Nothing matched on that column, so
+// it was a second fold with no reader. It is retired; confirm-boq and
+// manual-capture write the column through `record-refs`' fold, and
+// `db/backfill-ref-norm.ts` re-folds rows written before (never merging two
+// that now collide).
 // ============================================================================
 import { describe, expect, it } from "vitest";
 import { findRecordsByRef, normaliseRef, type RecordEntry } from "@/lib/record-refs";
-import { normaliseRef as normaliseForStorage } from "@/lib/boq-import";
 import { groupItemsByCode, variantLettersByItem, type DrawingItem } from "@/lib/drawing-document";
 import { reconcileSheet, type ExistingRecord, type RevisedLine } from "@/lib/boq-reconcile";
 
@@ -158,26 +160,13 @@ describe("every matcher reaches the same record", () => {
   });
 });
 
-describe("the STORAGE fold is a different job, and stays different", () => {
-  it("keeps dots and dashes, because a stored column and its unique key hold it", () => {
-    // `spec_record_refs.ref_value_norm`, written by confirm-boq and
-    // manual-capture, with `unique (record_id, ref_system, ref_value_norm)`
-    // behind it and rows already in it. Folding it further is a migration, not
-    // an edit — and it is not what any matcher reads.
-    expect(normaliseForStorage("S.201")).toBe("S.201");
-    expect(normaliseForStorage("s-201")).toBe("S-201");
-    expect(normaliseForStorage("S 201")).toBe("S201");
-  });
-
-  it("is looser than the matching fold, never tighter", () => {
-    // Whatever the storage fold makes equal, the matching fold must too — or a
-    // matcher would be blind to a distinction the database has already merged.
-    const pairs: [string, string][] = [
-      ["FU06C - CG27.2", "fu06c-cg27.2"],
-      ["S 201", "s201"],
-    ];
-    for (const [a, b] of pairs) {
-      if (normaliseForStorage(a) === normaliseForStorage(b)) expect(normaliseRef(a)).toBe(normaliseRef(b));
+describe("the stored column", () => {
+  it("is written by the matching fold, from every writer", async () => {
+    const { readFileSync } = await import("node:fs");
+    for (const file of ["src/lib/confirm-boq.ts", "src/lib/manual-capture.ts"]) {
+      const source = readFileSync(file, "utf8");
+      expect(source, file).toMatch(/import \{[^}]*\bnormaliseRef\b[^}]*\} from "@\/lib\/record-refs"/);
     }
+    expect(readFileSync("src/lib/boq-import.ts", "utf8")).not.toMatch(/export function normaliseRef\b/);
   });
 });

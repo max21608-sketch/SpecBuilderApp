@@ -1567,15 +1567,6 @@ export function countLines(doc: BoqDocument): number {
   return activeSheets(doc).reduce((total, sheet) => total + sheet.lines.length, 0);
 }
 
-/**
- * Normalised form of a client reference, for the ref_value_norm column.
- * `FU06C-CG27.2` and `FU06C - CG27.2` are the same reference written twice;
- * this is what makes them compare equal. The original is always kept alongside.
- */
-export function normaliseRef(raw: string): string {
-  return raw.replace(/\s+/g, "").replace(/[–—]/g, "-").toUpperCase();
-}
-
 /** The staged-shape version this build writes. Bumped with its migration. */
 export const BOQ_SCHEMA_VERSION = 4;
 

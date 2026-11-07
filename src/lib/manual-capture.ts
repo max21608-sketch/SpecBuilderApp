@@ -35,7 +35,7 @@ import { resolveFinishCode } from "@/lib/finishes";
 import { loadFinishLibrary } from "@/lib/bill-fabric-load";
 import { wordsBeside } from "@/lib/bill-description";
 import { guessLevelFromBill } from "@/lib/level-guess";
-import { normaliseRef } from "@/lib/boq-import";
+import { normaliseRef } from "@/lib/record-refs";
 import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_UNITS,

@@ -49,6 +49,7 @@ import {
   type OccupiedSlots,
 } from "@/lib/drawing-document";
 import type { DimensionSlot } from "@/lib/spec-vocab";
+import { SLOT_PREFIX } from "@/lib/dimensions";
 
 /** One value of the bill's this card would replace, on one record. */
 export type BillReplacement = {
@@ -166,7 +167,6 @@ export function withBillAcknowledgements(
   return list;
 }
 
-const SLOT_PREFIX: Record<DimensionSlot, string> = { W: "W", D: "D", H: "H", SH: "SH", DIA: "Dia" };
 
 /** A figure as it reads: the unit beside it only where the figure ends in a digit (`1'-6"` carries its own). */
 function figure(value: string | null, unit: string | null): string {
