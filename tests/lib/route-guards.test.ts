@@ -31,7 +31,7 @@ function routeFiles(dir = API): string[] {
 const NOT_A_WRITER_ROUTE: Record<string, string> = {
   "auth/login/route.ts": "the way in: there is no session yet",
   "auth/logout/route.ts": "a view-only account must still be able to sign out",
-  "queues/[topic]/route.ts": "a queue consumer, authenticated by the queue's own signed protocol",
+  "queues/[topic]/route.ts": "a queue consumer: it runs only on a payload received from the queue service by id (src/lib/queue-callback.ts)",
   "graph/notifications/route.ts": "Microsoft Graph, authenticated by clientState and a known subscription",
 };
 

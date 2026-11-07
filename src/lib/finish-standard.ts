@@ -38,6 +38,7 @@
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { changeSetForEdit, type ChangeSetKind, type VerifiedEvidence } from "@/lib/change-sets";
+import { agreementEvidenceId } from "@/lib/attribute-standard";
 import { carryFinishToItems } from "@/lib/finish-edit";
 import { loadPalettes, palettesByFieldJsonId } from "@/lib/palette-load";
 import { paletteOptionFor } from "@/lib/palettes";
@@ -282,9 +283,10 @@ export async function agreeFinishStandard(
     );
   }
 
-  const { changeSetId } = await changeSetForEdit(txn, { projectId, actor, kind: "standard_agreed", reason, evidence });
-  const evidenceRows = await txn`select evidence_attachment_id from change_sets where id = ${changeSetId}`;
-  const evidenceId = evidenceRows[0]?.evidence_attachment_id ? String(evidenceRows[0].evidence_attachment_id) : null;
+  const { changeSetId, attached } = await changeSetForEdit(txn, { projectId, actor, kind: "standard_agreed", reason, evidence });
+  // Only this act's own evidence is the client's yes (`agreementEvidenceId`,
+  // audit 5.4 A6): an open change's email was opened for something else.
+  const evidenceId = await agreementEvidenceId(txn, changeSetId, attached);
 
   await writeStandard(
     txn,

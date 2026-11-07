@@ -407,7 +407,10 @@ export function placedSizeOf(statements: readonly BillStatement[]): PlacedSize |
     if (!readLabel) return;
     const dimension = readDimension(readLabel, statement.value);
     if (!dimension || dimension.parts.length === 0) return;
-    const metric = !dimension.imperial && (dimension.unit === "mm" || dimension.unit === "cm");
+    // METRES ARE METRIC (audit 5.4 A4). Only mm and cm were offered for
+    // placing, so `W1,5 x D0,9 x H0,8 m` was "a size this app could not
+    // place" on the Stage 1 walk; the figures and the comma read fine.
+    const metric = !dimension.imperial && (dimension.unit === "mm" || dimension.unit === "cm" || dimension.unit === "m");
     const inches = dimension.unit === "in";
     const unitless = dimension.unit === null && !dimension.imperial;
     if (metric || inches) sizes.push({ index, statement, reading: dimension, metric });

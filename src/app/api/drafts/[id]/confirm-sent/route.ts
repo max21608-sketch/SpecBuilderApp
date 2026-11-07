@@ -139,7 +139,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
 
       // Live state for exactly the covered questions, read through THIS
-      // transaction so the rows validated are the rows locked.
+      // transaction while the draft row is held. Read, not locked (audit F14:
+      // this said "the rows validated are the rows locked", which they were
+      // not): an answer edited after this read is a later change the next
+      // reading of the draft reports as stale.
       // Scoped to the draft's project: a covered question that is no longer
       // one this project's record asks reads `questionGone` (audit A3/F11).
       const live = await loadQuestionsByKey(

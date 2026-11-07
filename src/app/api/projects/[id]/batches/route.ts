@@ -20,6 +20,10 @@ export const dynamic = "force-dynamic";
 const CreateBatch = z.object({ label: z.string().trim().max(200).optional() }).strict();
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
+  // The handler asks for the session itself, as every other handler does
+  // (audit R1): the middleware is the first line, never the only one.
+  const user = await getSessionUser();
+  if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
   const badId = requireUuid(id);
   if (badId) return badId;
@@ -129,11 +133,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const badId = requireUuid(id);
   if (badId) return badId;
 
-  let raw: unknown = {};
+  // Not read as `{}`: a body nobody could read creates nothing (audit R2).
+  let raw: unknown;
   try {
     raw = await request.json();
   } catch {
-    raw = {};
+    return json({ ok: false, error: "invalid JSON" }, 400);
   }
   const parsed = CreateBatch.safeParse(raw);
   if (!parsed.success) {

@@ -1,9 +1,17 @@
 // The consumer for long document extractions.
 //
 // Deliberately NOT a session route: this is reached by the platform, not by a
-// browser. It is excluded from the middleware matcher and authenticates itself
-// through handleCallback's signed protocol. Adding it to the matcher breaks
-// every background job with a 401 that looks like a platform outage.
+// browser. It is excluded from the middleware matcher, and adding it there
+// breaks every background job with a 401 that looks like a platform outage.
+//
+// NOTHING IN A CALLBACK IS SIGNED (audit R3, 2026-11-06). What authenticates a
+// delivery is that the payload is RECEIVED FROM THE QUEUE SERVICE by message
+// id, with this deployment's OIDC token, which the SDK does for the structured
+// (v1beta) callback our `queue/v1beta` trigger sends. The SDK's binary
+// (v2beta) callback runs the consumer on the request's own body before it
+// speaks to the service, so it is refused here before `handleCallback` sees
+// it: src/lib/queue-callback.ts says why, and what to read before the trigger
+// type is ever changed.
 //
 // Four deliveries, not forty. A retry here is a fresh high-effort model run
 // costing real money, and the faults worth retrying (a blob 5xx, a DB blip)
@@ -23,6 +31,7 @@ import { handleCallback, type MessageMetadata } from "@vercel/queue";
 import { type ExtractionQueueMessage } from "@/lib/extraction-queue";
 import { runDocumentExtraction, recordExtractionFailure } from "@/lib/extraction-run";
 import { ClaimBusyError, MAX_DELIVERIES, redeliveryDelaySeconds, VISIBILITY_TIMEOUT_SECONDS } from "@/lib/extraction-claim";
+import { unverifiableCallbackReason } from "@/lib/queue-callback";
 
 export const runtime = "nodejs";
 // A LITERAL, not MAX_DURATION_SECONDS. Next reads route segment config
@@ -85,6 +94,14 @@ const queueHandler = handleCallback<ExtractionQueueMessage>(
 );
 
 export async function POST(request: Request): Promise<Response> {
+  const refused = unverifiableCallbackReason(request.headers);
+  if (refused) {
+    // The platform never sends this shape to a v1beta trigger, so whoever did
+    // is not the platform. Logged for whoever reads the runtime logs; the
+    // answer says nothing about why.
+    console.warn(`[queue] refused a callback the queue service cannot vouch for: ${refused}`);
+    return Response.json({ error: "This callback cannot be checked with the queue service, so nothing was done with it." }, { status: 400 });
+  }
   return queueHandler(request);
 }
 

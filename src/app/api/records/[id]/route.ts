@@ -36,12 +36,16 @@ import { requireUuid, requireWriter } from "@/lib/route-guards";
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
+  // The handler asks for the session itself, as every other handler does
+  // (audit R1): the middleware is the first line, never the only one.
+  const user = await getSessionUser();
+  if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
   const badId = requireUuid(id);
   if (badId) return badId;
 
   const rows = await sql`
-    select r.id, r.record_no, r.item_description, r.product_reference, r.qty, r.designer, r.area,
+    select r.id, r.record_no, r.item_description, r.product_reference, r.qty, r.qty_raw, r.designer, r.area,
            r.spec_description, r.internal_notes, r.dimension_note,
            r.boq_category, r.status, r.version, r.source_line_no, r.category_id, r.level,
            r.level_suggested, r.level_suggested_reason,

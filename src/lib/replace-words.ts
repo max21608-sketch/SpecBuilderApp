@@ -21,9 +21,9 @@
 // that nothing is deleted.
 // ============================================================================
 import type { DimensionSlot } from "@/lib/spec-vocab";
+import { SLOT_PREFIX } from "@/lib/dimensions";
 import { sourceSays, type SourceLike } from "@/lib/source-words";
 
-const SLOT_PREFIX: Record<DimensionSlot, string> = { W: "W", D: "D", H: "H", SH: "SH", DIA: "Dia" };
 
 /** Long finish text is cut: the full value is on the row above and under the toggle. */
 const MAX_QUOTE = 70;

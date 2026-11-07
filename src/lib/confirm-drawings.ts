@@ -199,9 +199,9 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
     for update
   `;
   const run = rows[0];
-  if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+  if (!run) throw new DomainConflictError("not_found", "No such document.", { status: 404 });
   if (run.document_kind !== "shop_drawings") {
-    throw new DomainConflictError("wrong_kind", "That import is not a set of shop drawings.", { status: 400 });
+    throw new DomainConflictError("wrong_kind", "That document is not a set of shop drawings.", { status: 400 });
   }
   if (run.status !== "parsed" && run.status !== "confirmed") {
     throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be reviewed" }));
@@ -209,7 +209,7 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
   if (expectedVersion !== null && Number(run.version) !== expectedVersion) {
     throw new DomainConflictError(
       "import_version_stale",
-      "This import changed while you were reviewing it. Reload and check before confirming.",
+      "This document changed while you were reviewing it. Reload and check before confirming.",
     );
   }
   // Read with the register, exactly as the screen reads it: a callout whose
@@ -279,7 +279,7 @@ function takeObservations(
   for (const ref of refs) {
     const observation = item.observations.find((row) => row.id === ref.id);
     if (!observation) {
-      throw new DomainConflictError("observation_missing", "One of these specs is no longer part of this import. Reload.");
+      throw new DomainConflictError("observation_missing", "One of these specs is no longer part of this document. Reload.");
     }
     if (!allow.includes(observation.reviewStatus)) {
       throw new DomainConflictError(
@@ -300,7 +300,7 @@ function takeObservations(
 
 function findItem(staged: StagedDrawings, itemId: string): DrawingItem {
   const item = staged.items.find((row) => row.id === itemId);
-  if (!item) throw new DomainConflictError("item_missing", "That item is no longer part of this import. Reload.");
+  if (!item) throw new DomainConflictError("item_missing", "That item is no longer part of this document. Reload.");
   return item;
 }
 
@@ -337,7 +337,7 @@ async function writeStaged(
     where id = ${run.runId}
     returning id
   `;
-  if (!rows[0]) throw new Error("the import was not updated");
+  if (!rows[0]) throw new Error("the document was not updated");
   return status;
 }
 

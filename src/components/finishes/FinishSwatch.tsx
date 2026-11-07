@@ -14,7 +14,7 @@
 // deleting it, because a version may point at it.
 import { useState } from "react";
 import { upload } from "@vercel/blob/client";
-import { projectUploadPrefix } from "@/lib/upload-paths";
+import { asciiPathSegment, projectUploadPrefix } from "@/lib/upload-paths";
 import { apiFetch } from "@/lib/api-fetch";
 
 function Swatch({ finishId, hasSwatch }: { finishId: string; hasSwatch: boolean }) {
@@ -67,7 +67,7 @@ function Upload({
     setBusy(true);
     setError(null);
     try {
-      const safe = file.name.replace(/[^A-Za-z0-9._-]+/g, "-").slice(-80);
+      const safe = asciiPathSegment(file.name, 80);
       const blob = await upload(`${projectUploadPrefix(projectId)}finish-swatches/${Date.now()}-${safe}`, file, {
         access: "private",
         handleUploadUrl: "/api/uploads/token",

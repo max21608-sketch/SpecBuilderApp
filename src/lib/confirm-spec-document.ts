@@ -105,7 +105,7 @@ async function confirmSourceFor(txn: TxnSql, run: Omit<LoadedRun, "actor">, coun
     // writing answers whose provenance line would be a guess.
     throw new DomainConflictError(
       "email_missing",
-      "This import is an email, but the message it came from is missing. Nothing was written.",
+      "This document is an email, but the message it came from is missing. Nothing was written.",
     );
   }
 
@@ -129,9 +129,9 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
     for update
   `;
   const run = rows[0];
-  if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+  if (!run) throw new DomainConflictError("not_found", "No such document.", { status: 404 });
   if (run.source_kind !== "spec_document") {
-    throw new DomainConflictError("wrong_kind", "That import is not a specification document.", { status: 400 });
+    throw new DomainConflictError("wrong_kind", "That document is not a specification document.", { status: 400 });
   }
   if (run.status !== "parsed" && run.status !== "confirmed") {
     throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be reviewed" }));
@@ -139,13 +139,13 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
   if (expectedVersion !== null && Number(run.version) !== expectedVersion) {
     throw new DomainConflictError(
       "import_version_stale",
-      "This import changed while you were reviewing it. Reload and check before confirming.",
+      "This document changed while you were reviewing it. Reload and check before confirming.",
     );
   }
 
   const staged = (run.parsed ?? null) as StagedSpecDocument | null;
   if (!staged || !Array.isArray(staged.lines)) {
-    throw new DomainConflictError("not_staged", "This import has nothing staged to review.");
+    throw new DomainConflictError("not_staged", "This document has nothing staged to review.");
   }
   return {
     runId: String(run.id),
@@ -161,7 +161,7 @@ function takePending(staged: StagedSpecDocument, refs: ProposalRef[], allow: Pro
   for (const ref of refs) {
     const proposal = staged.lines.find((line) => line.id === ref.id);
     if (!proposal) {
-      throw new DomainConflictError("proposal_missing", "One of these rows is no longer part of this import. Reload.");
+      throw new DomainConflictError("proposal_missing", "One of these rows is no longer part of this document. Reload.");
     }
     if (!allow.includes(proposal.reviewStatus)) {
       throw new DomainConflictError(
@@ -196,7 +196,7 @@ async function writeStaged(txn: TxnSql, run: Omit<LoadedRun, "actor">, actor: st
     where id = ${run.runId}
     returning id
   `;
-  if (!rows[0]) throw new Error("the import was not updated");
+  if (!rows[0]) throw new Error("the document was not updated");
   return status;
 }
 

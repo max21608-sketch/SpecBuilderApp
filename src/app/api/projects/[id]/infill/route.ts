@@ -40,6 +40,7 @@ import {
 } from "@/lib/chase-drafts";
 import {
   summariseLines,
+  gateOnlyLineSummaries,
   infillTotals,
   type InfillDimension,
   type InfillLineSummary,
@@ -48,7 +49,7 @@ import {
 } from "@/lib/infill";
 import { groupByQuestion } from "@/lib/chase-grouping";
 import { loadMatrixItemTgq, type MatrixItemTgq } from "@/lib/item-tgq-load";
-import { numberingFromRow, recordLabel } from "@/lib/record-label";
+import { numberingFromRow, recordLabel, recordShortLabel } from "@/lib/record-label";
 import { areaOptions } from "@/lib/area-filter";
 import { normaliseFinishCode } from "@/lib/finishes";
 import { loadPalettes } from "@/lib/palette-load";
@@ -342,40 +343,38 @@ async function loadFinishes(projectId: string): Promise<Map<string, string>> {
  * as "record it on the item": nothing on it is a box to fill here.
  */
 async function gateOnlyLines(items: MatrixItemTgq[]): Promise<InfillLineSummary[]> {
+  // The items AND their bill lines: a configuration's line is described by the
+  // bill line's own row (`gateOnlyLineSummaries`, audit 5.4 A11).
+  const ids = [...new Set(items.flatMap((item) => [item.recordId, item.lineId]))];
   const rows = await sql`
-    select r.id, r.record_no, r.variant_ordinal, r.item_description, r.qty, r.level, r.area, r.run_id,
+    select r.id, r.parent_id, r.record_no, r.variant_ordinal, r.variant_label, r.item_description, r.qty, r.level,
+           r.area, r.run_id,
            (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
+           (select count(*)::int from spec_records v where v.parent_id = r.id and v.status = 'active') as variant_count,
            run.name as run_name, p.bws_project_number,
            coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
                        from spec_record_refs x where x.record_id = coalesce(r.parent_id, r.id)), '') as refs
       from spec_records r
       join spec_runs run on run.id = r.run_id
       join projects p on p.id = r.project_id
-     where r.id = any(${items.map((item) => item.recordId)}::uuid[])
+     where r.id = any(${ids}::uuid[])
   `;
-  const byId = new Map(items.map((item) => [item.recordId, item]));
-  return rows.map((row) => {
-    const item = byId.get(String(row.id))!;
-    return {
-      lineId: String(row.id),
+  return gateOnlyLineSummaries(
+    items,
+    rows.map((row) => ({
+      id: String(row.id),
+      parentId: row.parent_id === null || row.parent_id === undefined ? null : String(row.parent_id),
       recordLabel: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
-      code: String(row.refs ?? ""),
+      shortLabel: recordShortLabel(numberingFromRow(row)),
       itemDescription: String(row.item_description ?? ""),
+      refs: String(row.refs ?? ""),
       qty: row.qty === null || row.qty === undefined ? null : Number(row.qty),
-      runId: String(row.run_id),
-      runName: String(row.run_name ?? ""),
       level: row.level === null || row.level === undefined ? null : String(row.level),
       area: row.area === null || row.area === undefined ? null : String(row.area),
-      counts: { toQuote: item.count ?? 0, projectWide: item.projectWide, later: 0, waiting: 0 },
-      states: { missing: 0, tbc: 0 },
-      itemRows: item.rows.map((tgqRow) => ({
-        recordId: item.recordId,
-        label: tgqRow.label,
-        kind: tgqRow.kind,
-        where: tgqRow.where,
-      })),
-      optionCount: 0,
-      options: [],
-    };
-  });
+      runId: String(row.run_id),
+      runName: String(row.run_name ?? ""),
+      variantLabel: row.variant_label === null || row.variant_label === undefined ? null : String(row.variant_label),
+      variantCount: Number(row.variant_count ?? 0),
+    })),
+  );
 }

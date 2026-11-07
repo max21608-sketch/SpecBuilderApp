@@ -15,6 +15,7 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 import { twinLinesComBillWorkbook } from "../fixtures/build-boq";
 
 vi.mock("@/lib/session", () => ({
@@ -164,7 +165,7 @@ describeIfDb("a COM line naming a code on two lines of one phase", () => {
 
   it("confirms: the COM line on both ZC-03 records, the ZC-02 cloths each on their own", { timeout: 60_000 }, async () => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    const response = await POST(jsonRequest("POST", {}), params(runId));
+    const response = await POST(jsonRequest("POST", { version: await stagedVersion(client, runId) }), params(runId));
     const result = (await response.json()) as { ok: boolean; error?: string };
     expect(response.status, result.error).toBe(200);
 

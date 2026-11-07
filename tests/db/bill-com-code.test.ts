@@ -15,6 +15,7 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 import { comCodeBillWorkbook } from "../fixtures/build-boq";
 import { normaliseFinishCode } from "@/lib/finishes";
 
@@ -176,7 +177,7 @@ describeIfDb("a bill that names its cloths by a COM code", () => {
 
   it("confirms: one library entry per COM code, each item's COM 1 linked to it, the cloth and its placement kept", { timeout: 60_000 }, async () => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    const response = await POST(jsonRequest("POST", {}), params(runId));
+    const response = await POST(jsonRequest("POST", { version: await stagedVersion(client, runId) }), params(runId));
     const result = (await response.json()) as { ok: boolean; error?: string };
     expect(response.status, result.error).toBe(200);
 

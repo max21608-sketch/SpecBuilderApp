@@ -138,9 +138,9 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
     for update
   `;
   const run = rows[0];
-  if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+  if (!run) throw new DomainConflictError("not_found", "No such document.", { status: 404 });
   if (run.document_kind !== "finishes_schedule") {
-    throw new DomainConflictError("wrong_kind", "That import is not a finishes schedule.", { status: 400 });
+    throw new DomainConflictError("wrong_kind", "That document is not a finishes schedule.", { status: 400 });
   }
   if (run.status !== "parsed" && run.status !== "confirmed") {
     throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be reviewed" }));
@@ -148,7 +148,7 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
   if (expectedVersion !== null && Number(run.version) !== expectedVersion) {
     throw new DomainConflictError(
       "import_version_stale",
-      "This import changed while you were reviewing it. Reload and check before confirming.",
+      "This document changed while you were reviewing it. Reload and check before confirming.",
     );
   }
   let staged: StagedFinishSchedule;
@@ -177,7 +177,7 @@ function takeEntries(
   const taken: FinishScheduleEntry[] = [];
   for (const ref of refs) {
     const entry = staged.entries.find((row) => row.id === ref.id);
-    if (!entry) throw new DomainConflictError("entry_missing", "One of these finishes is no longer part of this import. Reload.");
+    if (!entry) throw new DomainConflictError("entry_missing", "One of these finishes is no longer part of this document. Reload.");
     if (!allow.includes(entry.reviewStatus)) {
       throw new DomainConflictError(
         "entry_reviewed",
@@ -207,7 +207,7 @@ async function writeStaged(txn: TxnSql, run: LoadedRun, actor: string, entries: 
     where id = ${run.runId}
     returning id
   `;
-  if (!rows[0]) throw new Error("the import was not updated");
+  if (!rows[0]) throw new Error("the document was not updated");
   return status;
 }
 
@@ -590,13 +590,13 @@ export async function setFinishScheduleEntryKind(
     select id, status, parsed, document_kind from intake_runs where id = ${runId} for update
   `;
   const run = rows[0];
-  if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+  if (!run) throw new DomainConflictError("not_found", "No such document.", { status: 404 });
   if (run.status !== "parsed") {
     throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be edited here" }));
   }
   const staged = assertStagedFinishSchedule(run.parsed);
   const entry = staged.entries.find((row) => row.id === entryId);
-  if (!entry) throw new DomainConflictError("entry_missing", "That finish is no longer part of this import. Reload.");
+  if (!entry) throw new DomainConflictError("entry_missing", "That finish is no longer part of this document. Reload.");
   if (entry.reviewStatus !== "pending") {
     throw new DomainConflictError("entry_reviewed", `That finish has already been ${reviewedWord(entry.reviewStatus)}. Reload.`);
   }
@@ -610,6 +610,6 @@ export async function setFinishScheduleEntryKind(
     where id = ${runId} and status = 'parsed'
     returning version
   `;
-  if (!written[0]) throw new DomainConflictError("not_reviewable", "This import closed while you were editing it.");
+  if (!written[0]) throw new DomainConflictError("not_reviewable", "This document was closed while you were editing it.");
   return { version: entry.version + 1 };
 }

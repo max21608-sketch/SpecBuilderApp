@@ -38,7 +38,7 @@ export async function registerTrackerFurniture(
     for update
   `;
   const run = rows[0];
-  if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+  if (!run) throw new DomainConflictError("not_found", "No such document.", { status: 404 });
   if (run.source_kind !== "spec_document" || run.document_kind !== "finishes_schedule") {
     throw new DomainConflictError(
       "wrong_kind",

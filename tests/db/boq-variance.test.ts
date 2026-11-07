@@ -19,6 +19,7 @@
 // ============================================================================
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 import pg from "pg";
 import { parseBoqSheets, BOQ_SCHEMA_VERSION, assertBoqDocument, type BoqLine } from "@/lib/boq-import";
 import { noQtyColumn } from "../fixtures/boq-shapes";
@@ -151,7 +152,7 @@ describeIfDb("BOQ variance, through the confirm", () => {
 
   const confirm = async (runId: string) => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    return POST(post({}), params(runId));
+    return POST(post({ version: await stagedVersion(client, runId) }), params(runId));
   };
 
   /** Register a synthetic workbook as a bill, through the REAL route. */

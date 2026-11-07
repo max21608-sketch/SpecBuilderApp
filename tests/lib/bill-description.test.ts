@@ -439,6 +439,22 @@ describe("a Dims cell of several lines", () => {
       name: "SOFA",
     });
 
+  it("places a size printed in METRES, a decimal comma included (audit 5.4 A4)", () => {
+    // Found on the Stage 1 walk: "a size this app could not place". The comma
+    // was never the problem (the reader takes `1,5`); a size in m was not
+    // offered for placing at all, only mm, cm and inches were.
+    for (const cell of ["W1,5 x D0,9 x H0,8 m", "W1.5 x D0.9 x H0.8 m"]) {
+      const p = plan(cell, "DIMS");
+      expect(p?.cautions, cell).toEqual([]);
+      const sizes = p?.attributes.filter((a) => a.attrGroup === "dimension").map((a) => [a.slot, a.value, a.unit]);
+      expect(sizes, cell).toEqual([
+        ["W", cell.includes(",") ? "1,5" : "1.5", "m"],
+        ["D", cell.includes(",") ? "0,9" : "0.9", "m"],
+        ["H", cell.includes(",") ? "0,8" : "0.8", "m"],
+      ]);
+    }
+  });
+
   it("reads line by line: words are notes, never part of a size", () => {
     const p = plan("REFER TO DRAWING\n800 X 1700 X 780MM\nSH: 420MM");
     const notes = p?.attributes.filter((a) => a.attrGroup === "note").map((a) => a.value);

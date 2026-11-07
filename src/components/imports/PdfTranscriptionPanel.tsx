@@ -110,7 +110,7 @@ export default function PdfTranscriptionPanel({
         </p>
         <p className="mt-0.5">
           {transcription.reason} Every line it writes will be marked as transcribed, with its page, for you to check against {pdfLink}.
-          {otherTab ? " It was started in another tab or a moment ago; this screen shows the result when it lands." : " You can leave this page; the result is kept."}
+          {otherTab ? " It was started a moment ago; this screen shows the result when it lands." : " You can leave this page; the result is kept."}
         </p>
       </section>
     );

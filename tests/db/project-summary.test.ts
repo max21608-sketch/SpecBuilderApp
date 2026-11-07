@@ -22,7 +22,11 @@
 // than described in a comment.
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
-import { it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll, vi } from "vitest";
+// The route asks for a session itself since audit R1.
+vi.mock("@/lib/session", () => ({
+  getSessionUser: async () => ({ id: "00000000-0000-0000-0000-000000000001", email: "__qa@example.test", name: "QA User", role: "viewer" }),
+}));
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { EMPTY_SUMMARY, loadProjectSummary } from "@/lib/project-summary";

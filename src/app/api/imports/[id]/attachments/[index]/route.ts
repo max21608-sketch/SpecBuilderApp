@@ -67,12 +67,12 @@ export async function GET(
     where r.id = ${id}
   `;
   const run = rows[0];
-  if (!run) return json({ ok: false, error: "That import has no stored document." }, 404);
+  if (!run) return json({ ok: false, error: "That document has no stored file." }, 404);
   // Only an email HAS attachments in this sense. A PDF's own embedded files are
   // not something this app has ever read, and answering for one here would be
   // a second meaning for the same URL.
   if (String(run.document_kind) !== "email") {
-    return json({ ok: false, error: "That import is not an email." }, 404);
+    return json({ ok: false, error: "That document is not an email." }, 404);
   }
 
   let bytes: Buffer;

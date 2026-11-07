@@ -131,7 +131,7 @@ describe("the stool: a bill D and H, a drawing Dia and H, a bill metal finish", 
     expect(entries.every((entry) => !entry.acknowledged)).toBe(true);
     const lines = describeBillReplacements(item, entries, (id) => (id === METAL ? "Main metal finish" : null));
     expect(lines.map((line) => line.text)).toEqual([
-      `D 460mm → Dia 1'-6"`,
+      `D 460mm → Dia. 1'-6"`,
       `H 450mm → 1'-4 3/4"`,
       "Main metal finish MTL-01 → GR MTL 01",
     ]);

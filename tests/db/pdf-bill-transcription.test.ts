@@ -23,6 +23,7 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 import { buildPdf } from "../fixtures/build-pdf.mjs";
 
 vi.mock("@/lib/session", () => ({
@@ -219,7 +220,7 @@ describeIfDb("a PDF bill the model transcribes", () => {
     expect(reread.parsed.pdfTranscription.state).toBe("done");
 
     const { POST: confirm } = await import("@/app/api/imports/[id]/confirm/route");
-    const confirmed = await confirm(jsonRequest("POST", {}), params(runId));
+    const confirmed = await confirm(jsonRequest("POST", { version: await stagedVersion(client, runId) }), params(runId));
     const confirmedBody = (await confirmed.json()) as { ok: boolean; error?: string };
     expect(confirmed.status, confirmedBody.error).toBe(200);
     const records = (await client.query(`select item_description, qty from spec_records where project_id = $1 order by source_line_no`, [projectId])).rows;

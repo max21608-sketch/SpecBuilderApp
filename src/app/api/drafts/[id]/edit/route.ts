@@ -22,6 +22,7 @@
 // generation makes this 409 and tells the author to regenerate -- silently
 // re-snapshotting would quietly change what the email claims.
 // ============================================================================
+import { insertCoverageRows } from "@/lib/draft-coverage-write";
 import { z } from "zod";
 import { json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
@@ -278,23 +279,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       // rewrite — inside this transaction, alongside the body it describes.
       await sql`delete from email_draft_items where draft_id = ${id} returning id`;
 
-      let sortOrder = 0;
-      for (const item of covered) {
-        sortOrder += 1;
-        const inserted = await sql`
-          insert into email_draft_items
-            (draft_id, record_id, requirement_id, revision_no, answer_id, snapshot_answer_version,
-             record_version, context_snapshot, prompt_text, field_label, current_value_text,
-             sort_order, tier, record_no, requirement_sort, created_by)
-          values
-            (${id}, ${item.recordId}, ${item.requirementId}, 0, ${item.answerId}, ${item.answerVersion},
-             ${item.recordVersion}, ${JSON.stringify(item.context)}::jsonb, ${item.prompt},
-             ${item.fieldLabel}, ${item.currentValueText ?? ANSWER_STATE_LABELS[item.context.state]},
-             ${sortOrder}, ${item.tier}, ${item.recordNo}, ${item.requirementSort}, ${user.email})
-          returning id
-        `;
-        if (!inserted[0]) throw new Error("a coverage row failed to insert");
-      }
+      // In batches (audit F14): this transaction holds the draft's lock, and a
+      // row at a time made the lock's length the question count.
+      await insertCoverageRows(sql, { draftId: id, covered, actor: user.email });
 
       const rows = await sql`
         update email_drafts

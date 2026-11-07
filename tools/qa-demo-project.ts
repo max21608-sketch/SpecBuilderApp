@@ -64,6 +64,7 @@ import { randomUUID } from "node:crypto";
 import { put, del } from "@vercel/blob";
 import ExcelJS from "exceljs";
 import pg from "pg";
+import { deleteProjectRows } from "../db/project-delete.mjs";
 
 import { sql } from "@/lib/db";
 import { withTransaction } from "@/lib/db-transaction";
@@ -300,58 +301,42 @@ async function sweep(): Promise<void> {
       console.log(`  would remove ${project.bws_project_number}`);
       continue;
     }
-    // Stored files first: the rows are what say where they are.
-    const files = await client.query<{ storage_path: string }>(
-      `select storage_path from attachments
-       where (entity_type = 'project' and entity_id = $1)
-          or (entity_type = 'spec_records' and entity_id in (select id from spec_records where project_id = $1))
-          or (entity_type = 'project_finishes' and entity_id in (select id from project_finishes where project_id = $1))
-          or (entity_type = 'email_messages' and entity_id in (select id from email_messages where project_id = $1))`,
-      [id],
-    );
+    // THE ONE PROJECT DELETE (audit 5.4 A7). This used to be twenty lines of
+    // hand-ordered deletes, which 0055 and 0058 then made the wrong order;
+    // `deleteProjectRows` is what `db:delete-project` and qa-clean run, counts
+    // again before commit, and returns the files it recorded. Files go AFTER
+    // the commit, never inside it.
+    const plan = await deleteProjectRows(client, id, { actor: "script:qa-demo" });
+
     // ITS OWN MAILBOX, COMPUTED THE SAME WAY THE BUILD COMPUTED IT.
     //
-    // This used to read `mailbox like 'demo@%'`, which was the constant the
-    // mailbox WAS until it started following the project. Since then it
-    // matches neither address this script writes, and a HELD message carries
-    // no project_id, so neither half of the predicate reached one. Measured on
-    // the sandbox, 2026-09-23: DEMO-300's five held messages survive a
-    // `--clear --apply`, and the next build of it dies on the first
-    // `recordMessage` — a plain insert against (mailbox, graph_message_id)
-    // with no upsert. The legacy address is what the orphan pass below is for.
+    // A message that arrived through the mailbox SURVIVES its project, taken
+    // off it (deleteProjectRows, 0055), and a HELD one never had a project.
+    // Both stay in the demo's mailbox, and the next build then dies on its
+    // first `recordMessage`, a plain insert against (mailbox,
+    // graph_message_id). Measured on the sandbox, 2026-09-23: DEMO-300's five
+    // held messages survived a `--clear --apply`. These are invented messages
+    // in the demo's own mailbox, so they go too, with their files.
     const mailboxAddress = inboxFor(project.bws_project_number);
-    const mailbox = await client.query<{ mailbox_storage_path: string | null }>(
-      `select mailbox_storage_path from email_messages where mailbox = $2 or project_id = $1`,
-      [id, mailboxAddress],
+    const mail = await client.query<{ id: string; mailbox_storage_path: string | null }>(
+      `select id, mailbox_storage_path from email_messages where mailbox = $1`,
+      [mailboxAddress],
     );
+    const mailIds = mail.rows.map((row) => row.id);
+    const mailFiles = await client.query<{ storage_path: string }>(
+      `select storage_path from attachments where entity_type = 'email_messages' and entity_id = any($1::uuid[])`,
+      [mailIds],
+    );
+    await client.query(`delete from attachments where entity_type = 'email_messages' and entity_id = any($1::uuid[])`, [mailIds]);
+    await client.query(`delete from email_messages where id = any($1::uuid[])`, [mailIds]);
+
     for (const path of [
-      ...files.rows.map((row) => row.storage_path),
-      ...mailbox.rows.map((row) => row.mailbox_storage_path).filter((path): path is string => Boolean(path)),
+      ...plan.blobPaths,
+      ...mailFiles.rows.map((row) => row.storage_path),
+      ...mail.rows.map((row) => row.mailbox_storage_path).filter((path): path is string => Boolean(path)),
     ]) {
       await del(path, { token: process.env.BLOB_READ_WRITE_TOKEN }).catch(() => undefined);
     }
-
-    // The project delete cascades change sets, snapshots, records, runs and
-    // attachments (0013/0014/0015). What it does NOT cascade is anything whose
-    // FK is RESTRICT, and a chase draft is one — deliberately, because a draft
-    // is a communication record. Those go first, in FK-safe order.
-    await client.query(
-      `delete from email_draft_items where draft_id in (select id from email_drafts where project_id = $1)`, [id],
-    );
-    await client.query(`delete from email_drafts where project_id = $1`, [id]);
-    // Email messages are not on the project's cascade either — a held message
-    // never had a project — so they go by their mailbox as well as by project.
-    await client.query(`delete from email_messages where mailbox = $2 or project_id = $1`, [id, mailboxAddress]);
-    await client.query(`delete from project_contacts where project_id = $1`, [id]);
-    // A finish is RESTRICTed by the attributes that point at it, and the order
-    // in which two cascades fire is not something to rely on. Unlinked first,
-    // then removed, so the project delete has nothing left to trip over.
-    await client.query(
-      `update record_attributes set finish_id = null
-        where finish_id in (select id from project_finishes where project_id = $1)`, [id],
-    );
-    await client.query(`delete from project_finishes where project_id = $1`, [id]);
-    await client.query(`delete from projects where id = $1`, [id]);
     console.log(`  removed ${project.bws_project_number} and its files`);
   }
 
@@ -579,8 +564,11 @@ const boqRunId = String(boqRun[0]?.id);
   say("bill parsed", `${stagedSheets.length} tabs, ${stagedSheets.reduce((total, sheet) => total + sheet.lines.length, 0)} lines`);
 }
 
+// The version the script itself just staged: a bill confirm always names the
+// one it read (audit R2).
+const stagedVersion = Number((await sql`select version from intake_runs where id = ${boqRunId}`)[0]!.version);
 const confirmed = await withTransaction((txn) =>
-  confirmBoqImport(txn, { runId: boqRunId, expectedVersion: null, actor: ACTOR }),
+  confirmBoqImport(txn, { runId: boqRunId, expectedVersion: stagedVersion, actor: ACTOR }),
 );
 say("bill confirmed", `${confirmed.imported} records across ${confirmed.runIds.length} runs`);
 

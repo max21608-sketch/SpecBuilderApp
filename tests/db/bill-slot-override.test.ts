@@ -18,6 +18,7 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
@@ -183,7 +184,7 @@ describeIfDb("a size part's slot, corrected before the confirm", () => {
 
   it("confirms the diameter as a dimension attribute and the composed cell as the answer", { timeout: 60_000 }, async () => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    const response = await POST(request("POST", {}), params(runId));
+    const response = await POST(request("POST", { version: await stagedVersion(client, runId) }), params(runId));
     expect(response.status).toBe(200);
 
     const record = (

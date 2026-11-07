@@ -97,6 +97,10 @@ function asDate(value: unknown): string | null {
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
+  // The handler asks for the session itself, as every other handler does
+  // (audit R1): the middleware is the first line, never the only one.
+  const user = await getSessionUser();
+  if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
   const badId = requireUuid(id);
   if (badId) return badId;

@@ -176,6 +176,11 @@ describeIfDb("a confidently routed email assigns itself", () => {
     });
   }
 
+  /** The read a stubbed publish left queued, landed (an unassign waits for it: audit 5.4 A9). */
+  async function settleRead(runId: string): Promise<void> {
+    await client.query(`update intake_runs set status = 'parsed', parsed = null where id = $1`, [runId]);
+  }
+
   async function messageRow(id: string) {
     const rows = await client.query(
       `select project_id, routing_status, routing_reason, assignment_kind, assigned_by,
@@ -566,6 +571,8 @@ describeIfDb("a confidently routed email assigns itself", () => {
     const before = await messageRow(outcome.messageId);
     expect(before.routing_status).toBe("assigned");
 
+    // The read has landed (audit 5.4 A9: an unassign waits for it).
+    await settleRead(String(before.intake_run_id));
     const { unassignMessage } = await import("@/lib/email-registration");
     await unassignMessage(outcome.messageId, {
       actor: "__qa@example.test",
@@ -583,6 +590,33 @@ describeIfDb("a confidently routed email assigns itself", () => {
     // The run stays: it is what the model was paid to produce.
     const kept = await runRow(String(before.intake_run_id));
     expect(kept).toBeTruthy();
+  });
+
+  it("refuses to take a message off its project while its read is running, saying how long (audit 5.4 A9)", async () => {
+    // A read in flight would finish on the old project and be billed there,
+    // and the message would read "unassigned" over a run nobody can see.
+    const outcome = await ingest("__qa_router_inflight", {
+      to: INBOX,
+      from: "someone@elsewhere.test",
+      subject: "Being read",
+    });
+    expect(outcome.outcome).toBe("stored");
+    if (outcome.outcome !== "stored") return;
+    const before = await messageRow(outcome.messageId);
+    await client.query(
+      `update intake_runs set status = 'parsing', claim_token = gen_random_uuid(),
+              processing_started_at = now() - interval '3 minutes' where id = $1`,
+      [before.intake_run_id],
+    );
+
+    const { unassignMessage } = await import("@/lib/email-registration");
+    await expect(
+      unassignMessage(outcome.messageId, { actor: "__qa@example.test", expectedVersion: Number(before.version) }),
+    ).rejects.toThrow(/still running \(started 3 minutes ago\)\. Wait for it, then take it off\./);
+    const after = await messageRow(outcome.messageId);
+    expect(after.routing_status).toBe("assigned");
+    expect(String(after.project_id)).toBe(projectId);
+    expect(String(after.intake_run_id)).toBe(String(before.intake_run_id));
   });
 
   // ---- putting it somewhere else (audit A1) ------------------------------
@@ -611,6 +645,7 @@ describeIfDb("a confidently routed email assigns itself", () => {
     const firstRunId = String(placed.intake_run_id);
     expect(String(placed.project_id)).toBe(projectId);
 
+    await settleRead(firstRunId);
     const { assignMessage, unassignMessage } = await import("@/lib/email-registration");
     await unassignMessage(outcome.messageId, { actor: "__qa@example.test", expectedVersion: Number(placed.version) });
     const held = await messageRow(outcome.messageId);
@@ -658,6 +693,7 @@ describeIfDb("a confidently routed email assigns itself", () => {
     expect(first.registration_request_id).toBe(`email:${outcome.messageId}:${projectId}`);
 
     // ---- and back again: the run it already has, no second read ----------
+    await settleRead(moved.runId);
     const { unassignMessage: unassignAgain } = await import("@/lib/email-registration");
     await unassignAgain(outcome.messageId, { actor: "__qa@example.test", expectedVersion: Number(after.version) });
     const heldAgain = await messageRow(outcome.messageId);

@@ -37,6 +37,8 @@
     "db:backfill-bill-swatches:local": "tsx --env-file=.env.localstack.local db/backfill-bill-swatches.ts",
     "db:backfill-finish-twins": "tsx --env-file-if-exists=.env.local db/backfill-finish-twins.ts",
     "db:backfill-finish-twins:local": "tsx --env-file=.env.localstack.local db/backfill-finish-twins.ts",
+    "db:backfill-ref-norm": "tsx --env-file-if-exists=.env.local db/backfill-ref-norm.ts",
+    "db:backfill-ref-norm:local": "tsx --env-file=.env.localstack.local db/backfill-ref-norm.ts",
     "dump:drawings": "tsx --env-file-if-exists=.env.local tools/dump-drawing-run.ts",
     "vocab:gap": "tsx --env-file-if-exists=.env.local tools/vocab-gap.ts",
     "palette:gap": "tsx --env-file-if-exists=.env.local tools/palette-gap.ts",

@@ -181,6 +181,95 @@ export function summariseLines<Q extends GroupableQuestion & { area?: string | n
   });
 }
 
+/** One record a gate-only line is built from: the item, or the bill line and its configurations. */
+export type GateOnlyRecord = {
+  id: string;
+  parentId: string | null;
+  recordLabel: string;
+  /** `12` or `12.3` (`recordShortLabel`). */
+  shortLabel: string;
+  itemDescription: string;
+  /** The LINE's client refs (a configuration carries none of its own). */
+  refs: string;
+  qty: number | null;
+  level: string | null;
+  area: string | null;
+  runId: string;
+  runName: string;
+  variantLabel: string | null;
+  /** A bill line's LIVE configurations, owing or not (`optionCount`'s rule). */
+  variantCount?: number;
+};
+
+/**
+ * THE LINES FOR MATRIX ITEMS NO QUESTION NAMES, grouped as the chase groups
+ * (audit 5.4 A11, 2026-11-06).
+ *
+ * A matrix record with every checklist question answered and a slot or a
+ * record column still empty has no question to group, so the route gives it a
+ * line of its own. Each one used to be a line carrying ITS OWN id, so two
+ * configurations of line 12 read as two unrelated lines, neither of them line
+ * 12. Now there is one line per BILL LINE (`lineId`), described by the bill
+ * line's own record, with each configuration as a finish option under it, the
+ * way `groupIntoLines` lists them when they do have questions. `records` must
+ * carry the bill line's own row for every configuration's line.
+ */
+export function gateOnlyLineSummaries(
+  items: readonly (Omit<RecordItemTgq, "lineId"> & { recordId: string; lineId: string })[],
+  records: readonly GateOnlyRecord[],
+): InfillLineSummary[] {
+  const byId = new Map(records.map((record) => [record.id, record]));
+  const byLine = new Map<string, typeof items[number][]>();
+  for (const item of items) byLine.set(item.lineId, [...(byLine.get(item.lineId) ?? []), item]);
+  const lines: InfillLineSummary[] = [];
+  for (const [lineId, owed] of byLine) {
+    const line = byId.get(lineId);
+    if (!line) continue;
+    const configurations = owed
+      .filter((item) => item.recordId !== lineId)
+      .map((item) => ({ item, record: byId.get(item.recordId) }))
+      .filter((entry): entry is { item: typeof owed[number]; record: GateOnlyRecord } => entry.record !== undefined)
+      .sort((a, b) => a.record.shortLabel.localeCompare(b.record.shortLabel, undefined, { numeric: true }));
+    const counted = (item: typeof owed[number]): InfillCounts => ({
+      toQuote: item.count ?? 0,
+      projectWide: item.projectWide,
+      later: 0,
+      waiting: 0,
+    });
+    const toQuote = owed.reduce((sum, item) => sum + (item.count ?? 0), 0);
+    const projectWide = owed.reduce((max, item) => Math.max(max, item.projectWide), 0);
+    lines.push({
+      lineId,
+      recordLabel: line.recordLabel,
+      code: line.refs,
+      itemDescription: line.itemDescription,
+      qty: line.qty,
+      runId: line.runId,
+      runName: line.runName,
+      level: line.level,
+      area: line.area,
+      counts: { toQuote, projectWide, later: 0, waiting: 0 },
+      states: { missing: 0, tbc: 0 },
+      itemRows: [...owed.filter((item) => item.recordId === lineId), ...configurations.map((entry) => entry.item)].flatMap((item) =>
+        item.rows.map((row) => ({ recordId: item.recordId, label: row.label, kind: row.kind, where: row.where })),
+      ),
+      // The TRUE number, including configurations with nothing owed, as
+      // `optionCount` always is: "1" beside a line with two would claim B
+      // does not exist.
+      optionCount: Math.max(line.variantCount ?? 0, configurations.length),
+      options: configurations.map(({ item, record }) => ({
+        recordId: record.id,
+        label: record.variantLabel ?? "",
+        name: `${(line.refs || line.recordLabel).trim()} ${record.variantLabel ?? ""}`.trim(),
+        number: record.shortLabel,
+        qty: record.qty,
+        counts: counted(item),
+      })),
+    });
+  }
+  return lines;
+}
+
 // ---------------------------------------------------------------------------
 // One gap, and how it is filled
 // ---------------------------------------------------------------------------

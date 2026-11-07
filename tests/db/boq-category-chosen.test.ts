@@ -13,6 +13,7 @@
 //   node --env-file=.env.localstack.local ~/dev/localstack/one-db-test.mjs tests/db/boq-category-chosen.test.ts
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -115,7 +116,7 @@ describeIfDb("a bill line's category at confirm", () => {
       ],
     );
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    const response = await POST(post({}), params(staged.rows[0].id));
+    const response = await POST(post({ version: await stagedVersion(client, staged.rows[0].id) }), params(staged.rows[0].id));
     expect(response.status, await response.clone().text()).toBe(200);
 
     const records = await client.query(

@@ -128,7 +128,7 @@ export async function setRecordCategory(
 // as well as the kind.
 //
 // A CHASED QUESTION (audit B3). A chase's coverage row points at the answer it
-// asked about (`email_draft_items.answer_id`, 0005, NO ACTION since 0055), and
+// asked about (`email_draft_items.answer_id`, 0005; deferred since 0058), and
 // coverage is history: never updated, and kept when the draft is superseded or
 // its send is voided, as the record of what was asked. So once a question has
 // been chased its answer row can never be deleted, and the delete used to meet

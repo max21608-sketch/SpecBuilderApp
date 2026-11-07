@@ -242,11 +242,11 @@ describe("transcriptionChecks", () => {
 
   it("adds a document total over every line, and leaves out section and subtotal rows", () => {
     const result = check(
-      { totals: [{ page: 2, label: "TOTAL", column: 2, valueRaw: "1,022", scope: "document" }] },
+      { totals: [{ page: 2, label: "TOTAL", column: 2, valueRaw: "1022", scope: "document" }] },
       2,
       [...lines, { lineNo: 6, code: null, qty: 22, rowKind: "subtotal" }],
     );
-    expect(result.byLine.get(5)?.[0]?.words).toBe("Quantities on the bill add to 22, not 1,022");
+    expect(result.byLine.get(5)?.[0]?.words).toBe("Quantities on the bill add to 22, not 1022");
     expect(result.byLine.has(6)).toBe(false);
   });
 
@@ -309,14 +309,44 @@ describe("transcriptionChecks", () => {
 });
 
 describe("printedNumber", () => {
+  // The one reader's rules (printed-number.ts, audit 5.4 A4). It stripped
+  // commas and spaces: `1,2,0` read 120 and `1 200` read 1200, and `1,240` was
+  // twelve hundred and forty whatever convention the bill was printed in.
   it.each([
-    ["1,240", 1240],
+    ["1240", 1240],
+    ["1,240,000", 1240000],
     ["12 nr", 12],
     ["7.5", 7.5],
     ["", null],
     ["TBC", null],
     ["12 / 14", null],
+    ["1,240", null],
+    ["1,2,0", null],
+    ["1 200", null],
   ])("%j → %j", (raw, expected) => expect(printedNumber(raw)).toBe(expected));
+});
+
+describe("a total the reader will not read", () => {
+  const lines: CheckedLine[] = [{ lineNo: 3, code: "ZZ-01", qty: 1200 }];
+  const run = (valueRaw: string, withLines = lines) =>
+    transcriptionChecks({
+      lines: withLines,
+      qtyColumn: 2,
+      pageOf: () => 1,
+      transcription: { totals: [{ page: 1, label: "TOTAL", column: 2, valueRaw, scope: "page" }], pageText: [null], rowUnclear: {} },
+    });
+
+  it("refuses a 1,200 total in its own words, and flags nothing", () => {
+    const result = run("1,200");
+    expect(result.byLine.size).toBe(0);
+    expect(result.summary.join()).toMatch(/1,200.*reads as a thousand or as a decimal, so it was not checked/);
+  });
+
+  it("says how many lines under a total give no quantity, rather than adding them as nothing silently", () => {
+    const result = run("1200", [...lines, { lineNo: 4, code: "ZZ-02", qty: null }]);
+    expect(result.byLine.size).toBe(0);
+    expect(result.summary.join()).toMatch(/1 line under it gives no quantity/);
+  });
 });
 
 describe("transcribePdfBill, the model faked", () => {

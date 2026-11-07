@@ -31,12 +31,14 @@
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import {
   assertBoqDocument,
-  normaliseRef,
   sheetsAwaitingColumnCheck,
   sheetsNeedingColumns,
   type StagedBoqSheet,
 } from "@/lib/boq-import";
 import { effectiveArea, type LinePairing } from "@/lib/boq-reconcile";
+// THE ONE FOLD writes ref_value_norm too (audit 5.4 A3): boq-import had a
+// second one that kept dots and dashes, and nothing matched on its output.
+import { normaliseRef } from "@/lib/record-refs";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { rowKindProblems, type RowKindFields } from "@/lib/boq-row-kinds";
@@ -86,6 +88,8 @@ type StagedLine = {
   itemDescription: string;
   productReference: string | null;
   qty: number | null;
+  /** The cell as printed where it gave no count (`quantity()`), absent on a count or a blank. */
+  qtyRaw?: string;
   qtyUnit: string | null;
   /** Present only where the bill has the column (v4). See `BoqLine`. */
   subArea?: string | null;
@@ -203,9 +207,19 @@ export type ConfirmMockupResult = {
   message: string;
 };
 
+
+/**
+ * `spec_records.qty_raw` (0059): the quantity cell as printed, only where the
+ * bill gave no count. Never beside a quantity: a staged line carrying both is
+ * one this reader did not write, and the count is what the bill said.
+ */
+function qtyRawToWrite(line: Pick<StagedLine, "qty" | "qtyRaw">): string | null {
+  if (line.qty !== null && line.qty !== undefined) return null;
+  return typeof line.qtyRaw === "string" && line.qtyRaw.trim() !== "" ? line.qtyRaw : null;
+}
 export async function confirmBoqImport(
   txn: TxnSql,
-  { runId, expectedVersion, actor }: { runId: string; expectedVersion: number | null; actor: string },
+  { runId, expectedVersion, actor }: { runId: string; expectedVersion: number; actor: string },
 ): Promise<ConfirmBoqResult> {
   // 1. The run, locked. Read the staged lines from the LOCKED row.
   const runs = await txn`
@@ -214,17 +228,19 @@ export async function confirmBoqImport(
     for update
   `;
   const run = runs[0];
-  if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+  if (!run) throw new DomainConflictError("not_found", "No such bill.", { status: 404 });
   if (run.source_kind !== "boq_xlsx") {
-    throw new DomainConflictError("wrong_kind", "That import is not a bill of quantities.", { status: 400 });
+    throw new DomainConflictError("wrong_kind", "That bill is not a bill of quantities.", { status: 400 });
   }
   if (run.status === "confirmed") {
-    throw new DomainConflictError("already_confirmed", "This import has already been confirmed.");
+    throw new DomainConflictError("already_confirmed", "This bill has already been confirmed.");
   }
   if (run.status !== "parsed") {
     throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { noun: "bill" }));
   }
-  if (expectedVersion !== null && Number(run.version) !== expectedVersion) {
+  // Required, never skipped (audit R2): a confirm with no version was a
+  // confirm of whatever the staged bill held by the time it arrived.
+  if (Number(run.version) !== expectedVersion) {
     throw new DomainConflictError(
       "import_version_stale",
       "This bill changed since this screen loaded. Reload and check it before confirming.",
@@ -287,7 +303,7 @@ export async function confirmBoqImport(
     0,
   );
   if (lineCount === 0) {
-    throw new DomainConflictError("nothing_to_import", "Every line is ignored — there is nothing to import.", {
+    throw new DomainConflictError("nothing_to_import", "Every line is ignored, so there is nothing to confirm.", {
       status: 400,
     });
   }
@@ -614,6 +630,9 @@ export async function confirmBoqImport(
               -- NOT the notes column: internal notes are a person's once the
               -- record exists, and a revised bill never writes over them.
               qty_unit = ${line.qtyUnit ?? null},
+              -- 0059: the cell as printed where it gave no count, written over
+              -- like the quantity, so a revision that now prints a count clears it.
+              qty_raw = ${qtyRawToWrite(line)},
               source_import_id = ${runId},
               source_line_no = ${line.lineNo},
               run_id = ${specRunId},
@@ -681,11 +700,17 @@ export async function confirmBoqImport(
         // The client ref can be re-punctuated between revisions. Refs are
         // write-once-and-delete by design (0002), so the old one goes and the
         // new one is written rather than edited in place.
+        //
+        // DELETED BY ITS WORDS, NOT ITS FOLD (5.4 A3). The fold now folds a
+        // dot onto nothing, so `S.201` re-punctuated as `S-201` is the SAME
+        // norm, and a delete keyed on the norm left the old spelling in place
+        // while the insert below did nothing on conflict: the record would go
+        // on showing the bill's previous spelling.
         if (line.code) {
           await txn`
             delete from spec_record_refs
             where record_id = ${target.recordId} and ref_system = 'boq_code'
-              and ref_value_norm <> ${normaliseRef(line.code)}
+              and ref_value <> ${line.code}
           `;
           await txn`
             insert into spec_record_refs (record_id, project_id, ref_system, ref_value, ref_value_norm, source, created_by)
@@ -714,11 +739,11 @@ export async function confirmBoqImport(
       const inserted = await txn`
         insert into spec_records
           (project_id, run_id, record_no, status, category_id, item_description, product_reference, qty,
-           qty_unit, designer, area, boq_category, level, level_suggested, level_suggested_reason,
+           qty_unit, qty_raw, designer, area, boq_category, level, level_suggested, level_suggested_reason,
            internal_notes, source_import_id, source_line_no, created_by, updated_by)
         values
           (${projectId}, ${specRunId}, ${recordNo}, 'active', ${categoryToWrite(line)}, ${plan?.name ?? line.itemDescription},
-           ${line.productReference}, ${line.qty}, ${line.qtyUnit ?? null}, ${line.designer},
+           ${line.productReference}, ${line.qty}, ${line.qtyUnit ?? null}, ${qtyRawToWrite(line)}, ${line.designer},
            ${effectiveArea(line)}, ${line.boqCategory ?? null},
            ${decided.level}, ${decided.suggested}, ${decided.reason},
            ${composeBillNotes(line.notes, keptWithFinishCode(line, sheet.columns?.finishCode?.heading))}, ${runId},

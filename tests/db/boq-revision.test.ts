@@ -19,6 +19,7 @@
 // ============================================================================
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
+import { stagedVersion } from "./staged-version";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -142,7 +143,7 @@ describeIfDb("BOQ revision", () => {
 
   const confirm = async (runId: string) => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    return POST(post({}), params(runId));
+    return POST(post({ version: await stagedVersion(client, runId) }), params(runId));
   };
 
   // Two confirms over a real connection, each taking a project-wide lock.
@@ -324,4 +325,69 @@ describeIfDb("BOQ revision", () => {
     expect(after.rows[0].level).toBe("hero");
     expect(after.rows[0].level_suggested).toBeNull();
   });
+
+  it("a code re-punctuated by the revision is stored as the bill now spells it, folded by the one fold (5.4 A3)", { timeout: 30_000 }, async () => {
+    const { normaliseRef } = await import("@/lib/record-refs");
+    const first = await stage([line({ index: 20, code: "__QA.R21" })]);
+    expect((await confirm(first)).status).toBe(200);
+    const record = (
+      await client.query(
+        `select r.id, r.version, r.run_id from spec_records r join spec_record_refs x on x.record_id = r.id
+          where r.project_id = $1 and x.ref_value = '__QA.R21'`,
+        [projectId],
+      )
+    ).rows[0];
+    const revision = await stage(
+      [line({ index: 20, code: "__QA-R21", replaces: { recordId: record.id, recordVersion: record.version } })],
+      record.run_id,
+    );
+    expect((await confirm(revision)).status).toBe(200);
+    const refs = (
+      await client.query(`select ref_value, ref_value_norm from spec_record_refs where record_id = $1 and ref_system = 'boq_code'`, [record.id])
+    ).rows;
+    // Under the one fold both spellings are QAR21, so a delete keyed on the
+    // fold would keep the old spelling and the insert would do nothing.
+    expect(refs).toEqual([{ ref_value: "__QA-R21", ref_value_norm: normaliseRef("__QA-R21") }]);
+  });
+
+  it("keeps the bill's quantity cell as printed where it gave no count, and a revision writes it over (0059, 5.4 A5)", { timeout: 30_000 }, async () => {
+    const counted = { ...line({ index: 30, code: "__QAQ31" }), qty: 2 };
+    const tbc = { ...line({ index: 31, code: "__QAQ32" }), qty: null, qtyRaw: "TBC" };
+    const blank = { ...line({ index: 32, code: "__QAQ33" }), qty: null };
+    const first = await stage([counted, tbc, blank]);
+    expect((await confirm(first)).status).toBe(200);
+    const read = async () =>
+      (
+        await client.query(
+          `select x.ref_value as code, r.id, r.version, r.run_id, r.qty, r.qty_raw from spec_records r
+             join spec_record_refs x on x.record_id = r.id
+            where r.project_id = $1 and x.ref_value like '__QAQ3%' and r.status = 'active' order by x.ref_value`,
+          [projectId],
+        )
+      ).rows;
+    const before = await read();
+    expect(before.map((row) => [row.code, row.qty, row.qty_raw])).toEqual([
+      ["__QAQ31", 2, null],
+      ["__QAQ32", null, "TBC"],
+      ["__QAQ33", null, null],
+    ]);
+
+    // The revision: the counted line now prints 1,200 (no count), the TBC one a count.
+    const pair = (row: { id: string; version: number }) => ({ recordId: row.id, recordVersion: row.version });
+    const revision = await stage(
+      [
+        { ...line({ index: 30, code: "__QAQ31", replaces: pair(before[0]) }), qty: null, qtyRaw: "1,200" },
+        { ...line({ index: 31, code: "__QAQ32", replaces: pair(before[1]) }), qty: 4 },
+        { ...line({ index: 32, code: "__QAQ33", replaces: pair(before[2]) }), qty: null },
+      ],
+      before[0].run_id,
+    );
+    expect((await confirm(revision)).status).toBe(200);
+    expect((await read()).map((row) => [row.code, row.qty, row.qty_raw])).toEqual([
+      ["__QAQ31", null, "1,200"],
+      ["__QAQ32", 4, null],
+      ["__QAQ33", null, null],
+    ]);
+  });
 });
+

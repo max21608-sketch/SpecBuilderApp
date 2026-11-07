@@ -171,12 +171,15 @@ describe("buildSeedMap", () => {
     expect(map.unmapped.get("s4")).toContain("not unique on the target");
   });
 
-  it("the requirement key in TABLE_HANDLING names the question, not its position", () => {
+  it("the requirement key in TABLE_HANDLING is the seeds' own key (0057), never a position", () => {
+    // One identity for a question: the seeds match on `seed_key`, so the copy
+    // does too (audit 5.4 A7). A second, hand-built identity is how the copy
+    // and a re-seed come to disagree about which row an answer is on.
     const h = TABLE_HANDLING.requirements;
     expect(h?.kind).toBe("seed");
     const sql = h?.kind === "seed" ? h.keySql : "";
-    for (const part of ["c.slug", "r.kind", "f.json_id", "r.local_key", "r.prompt"]) expect(sql).toContain(part);
-    expect(sql).not.toContain("sort_order");
+    for (const part of ["c.slug", "r.seed_key"]) expect(sql).toContain(part);
+    for (const part of ["sort_order", "r.prompt"]) expect(sql).not.toContain(part);
   });
 });
 

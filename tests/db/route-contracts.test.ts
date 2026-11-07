@@ -149,19 +149,15 @@ const SESSION_FREE = new Set([...MIDDLEWARE_EXEMPT, "auth/logout"]);
  * Read handlers that do not ask for a session themselves and rely on the
  * middleware alone. FOUND BY 5.2 (R1): every other handler behind the
  * middleware asks `getSessionUser` and refuses without one (measured: 82 of
- * 89); these seven run their query for whoever reaches them. The middleware refuses them today. The A13 matcher defect
+ * 89); seven ran their query for whoever reached them, and 5.4 fixed six. The middleware refuses them today. The A13 matcher defect
  * (a prefix exempting `/login-as`, `/api/cronjobs`) shows what "today" is
  * worth: one wrong character there and these answer anybody. Each is an
  * `it.fails` below, so the day one is fixed the suite says so.
  */
 const READS_TRUSTING_THE_MIDDLEWARE = new Set([
+  // 5.4 put the session check into the other six (R1). This one's file was
+  // being split into handlers at the same time, so the line goes in there.
   "imports/[id] GET",
-  "projects GET",
-  "projects/[id] GET",
-  "projects/[id]/batches GET",
-  "projects/[id]/contacts GET",
-  "records GET",
-  "records/[id] GET",
 ]);
 
 /**
@@ -179,16 +175,13 @@ const ANSWERS_SIGNED_OUT = new Set(["auth/me GET"]);
 const READS_NO_BODY = new Set(["imports/[id]/read-furniture POST", "imports/[id]/read-specifications POST"]);
 
 /**
- * Write handlers that read a body that is not JSON AS `{}` and go on. With a
- * random id they answer 404, which is why the table below passes for them;
- * `route-contract-bodies.test.ts` drives them with a REAL id, where the
- * leniency is a write (found by 5.2, R2).
+ * Write handlers that read a body that is not JSON AS `{}` and go on. Empty
+ * since 5.4: `imports/[id]/confirm`, `imports/[id]/rematch` and
+ * `projects/[id]/batches` were here, and with a real id each leniency was a
+ * write (route-contract-bodies.test.ts, R2). Adding a route here is a decision
+ * that a garbled body may act.
  */
-const READS_GARBAGE_AS_EMPTY = new Set([
-  "imports/[id]/confirm POST",
-  "imports/[id]/rematch POST",
-  "projects/[id]/batches POST",
-]);
+const READS_GARBAGE_AS_EMPTY = new Set<string>([]);
 
 /** Path segments that are not ids: an index into a list. */
 const NOT_AN_ID: Record<string, string> = { index: "0" };
@@ -472,27 +465,19 @@ describeIfDb("route contracts", () => {
     });
 
     // ========================================================================
-    // FOUND BY 5.2 (R3). The middleware exempts `api/queues/` because a queue
-    // consumer "authenticates with the queue's own signed protocol", and
-    // `route-guards.test.ts` lists it as a non-writer route for that reason.
-    // In @vercel/queue 0.4.0 a v2beta BINARY-mode callback that carries a
-    // receipt handle is handled from the request's OWN body: `handleCallback`
-    // parses the ce-* headers, deserialises the body as the payload and calls
-    // our handler BEFORE it speaks to the queue service at all. Nothing in
-    // the request is signed. So anybody who can reach the URL can hand the
-    // consumer a message of their choosing. Whether Vercel strips these
-    // headers from a public request in front of the function is not
-    // something this repo can see; the SDK does not check.
-    //
-    // What a forged message can do today is bounded (a `document-intake`
-    // needs a live attempt id to get past the claim fence; `mail-ingest`
-    // fetches by id from Graph), and that bound is the claim protocol, not
-    // authentication. The fix is a verified signature or an OIDC check in
-    // the route before `queueHandler`.
+    // FOUND BY 5.2 (R3), FIXED BY 5.4. In @vercel/queue 0.4.0 a v2beta
+    // BINARY-mode callback that carries a receipt handle is handled from the
+    // request's OWN body: `handleCallback` deserialises it as the payload and
+    // calls our handler BEFORE it speaks to the queue service at all, and
+    // nothing in the request is signed. Measured 2026-11-06: 200
+    // {"status":"success"} and the consumer ran. Our trigger is v1beta, which
+    // sends the structured shape the SDK RECEIVES from the service by id, so
+    // the route now refuses the binary one before `handleCallback`
+    // (src/lib/queue-callback.ts).
     // ========================================================================
-    it.fails("never hands a forged binary-mode callback to the consumer (found by 5.2, R3)", async () => {
+    it("never hands a forged binary-mode callback to the consumer (found by 5.2, R3)", async () => {
       state.extractionRuns = 0;
-      await post(
+      const response = await post(
         {
           "content-type": "application/json",
           "ce-type": "com.vercel.queue.v2beta",
@@ -503,9 +488,9 @@ describeIfDb("route contracts", () => {
           "ce-vqsdeliverycount": "1",
         },
         payload,
-      ).catch(() => undefined);
-      // Measured 2026-11-06: the route answered 200 {"status":"success"} and
-      // the stubbed consumer ran once.
+      );
+      expect(response.status).toBe(400);
+      await expectJson(response, "queue");
       expect(state.extractionRuns).toBe(0);
     });
   });

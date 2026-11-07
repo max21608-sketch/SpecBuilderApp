@@ -22,6 +22,7 @@
 // Silently dropping a question the user explicitly asked for would produce an
 // email they believe covers something it does not.
 // ============================================================================
+import { insertCoverageRows } from "@/lib/draft-coverage-write";
 import { z } from "zod";
 import { json, type Row } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
@@ -39,13 +40,6 @@ import { ANSWER_STATE_LABELS } from "@/lib/spec-vocab";
 import { requireWriter } from "@/lib/route-guards";
 
 export const maxDuration = 60;
-
-// Coverage rows per insert. One statement is one round trip and this
-// transaction holds the project row lock for every one of them, so the loop
-// that wrote a row at a time set the lock's duration to the question count.
-// Bounded rather than unlimited so a 300-line project's snapshots never go up
-// as a single multi-megabyte parameter.
-const COVERAGE_CHUNK = 500;
 
 /**
  * `.strict()` so a body carrying a `tier` is a 400 rather than being ignored.
@@ -185,7 +179,12 @@ export async function POST(request: Request): Promise<Response> {
       }
       const contactById = new Map(contactRows.map((row) => [String(row.id), row]));
 
-      // 6. Every selected question, validated against live locked rows.
+      // 6. Every selected question, validated against its live state, READ
+      // through this transaction while the project row is held. The answer
+      // rows are read, not locked (audit F14: this said "locked rows", which
+      // it never was). What holds is the project lock against a second
+      // generate, and the coverage snapshot: an answer that moves after this
+      // read makes the draft stale, and the send gate refuses a stale draft.
       const allQuestions = input.selections.flatMap((s) => s.questions);
       // SCOPED TO THIS PROJECT (audit A3/F11): a record of another project, a
       // question its category does not ask, a heading and a retired phase all
@@ -314,72 +313,10 @@ export async function POST(request: Request): Promise<Response> {
         const draftId = String(draft.id);
 
         // Coverage, snapshotted in the SAME transaction as the body, so the
-        // email and the versions it froze can never disagree.
-        //
-        // IN BATCHES, BECAUSE THIS TRANSACTION HOLDS THE PROJECT ROW LOCK.
-        // It was one statement per coverage row, and a coverage row is a
-        // round trip: measured on the local dev server 2026-09-23, one
-        // generate was 492 inserts and 22.3s of a 24.9s transaction, all of
-        // it holding `projects … for update`. Every other writer on that
-        // project fails its own `lock_timeout` after 5s, and the one that
-        // did was the infill screen -- `insert into change_sets` needs a key
-        // share on the same project row. See found-in-use, "An answer typed
-        // on the infill screen is refused while a chase draft is being
-        // generated".
-        //
-        // Nothing about WHAT is written changed: the same rows, the same
-        // `sort_order`, the same transaction. A chunk is 500 rows so one
-        // parameter never has to carry a whole 300-line project's snapshots.
-        // `sort_order` is the position in `covered`, taken BEFORE anything is
-        // chunked: a chunk boundary that restarted the count would reorder the
-        // email's questions and be invisible in the row count.
-        const coverageRows = covered.map((item, index) => ({
-          record_id: item.recordId,
-          requirement_id: item.requirementId,
-          answer_id: item.answerId,
-          snapshot_answer_version: item.answerVersion,
-          record_version: item.recordVersion,
-          context_snapshot: item.context,
-          prompt_text: item.prompt,
-          field_label: item.fieldLabel,
-          current_value_text: item.currentValueText ?? ANSWER_STATE_LABELS[item.context.state],
-          sort_order: index + 1,
-          tier: item.tier,
-          record_no: item.recordNo,
-          requirement_sort: item.requirementSort,
-        }));
-
-        for (let from = 0; from < coverageRows.length; from += COVERAGE_CHUNK) {
-          const chunk = coverageRows.slice(from, from + COVERAGE_CHUNK);
-          // `jsonb_to_recordset` rather than 14 parallel arrays: the snapshot
-          // is already an object, so it stays jsonb the whole way and is
-          // never re-encoded into an array literal. Key order is not
-          // preserved by jsonb and never was -- `canonicalJson` is what
-          // compares a snapshot, for that reason.
-          const inserted = await sql`
-            insert into email_draft_items
-              (draft_id, record_id, requirement_id, revision_no, answer_id, snapshot_answer_version,
-               record_version, context_snapshot, prompt_text, field_label, current_value_text,
-               sort_order, tier, record_no, requirement_sort, created_by)
-            select
-              ${draftId}, x.record_id, x.requirement_id, 0,
-              x.answer_id, x.snapshot_answer_version, x.record_version,
-              x.context_snapshot, x.prompt_text, x.field_label, x.current_value_text,
-              x.sort_order, x.tier, x.record_no, x.requirement_sort, ${user.email}
-            from jsonb_to_recordset(${JSON.stringify(chunk)}::jsonb) as x(
-              record_id uuid, requirement_id uuid, answer_id uuid,
-              snapshot_answer_version integer, record_version integer,
-              context_snapshot jsonb, prompt_text text, field_label text,
-              current_value_text text, sort_order integer, tier text,
-              record_no integer, requirement_sort integer)
-            returning id
-          `;
-          // The row count is the guard the per-row `if (!inserted[0])` was:
-          // a chunk that lands short has dropped a question the email asks.
-          if (inserted.length !== chunk.length) {
-            throw new Error(`coverage rows failed to insert: expected ${chunk.length}, wrote ${inserted.length}`);
-          }
-        }
+        // email and the versions it froze can never disagree. In batches,
+        // because this transaction holds the project row lock
+        // (`insertCoverageRows` says what one row at a time cost).
+        await insertCoverageRows(sql, { draftId, covered, actor: user.email });
 
         created.push({ ...draft, questionCount: questions.length });
       }

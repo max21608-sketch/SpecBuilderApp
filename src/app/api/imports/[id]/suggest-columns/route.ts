@@ -90,7 +90,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!body.success) return json({ ok: false, error: body.error.issues[0]?.message ?? "That request is not valid." }, 400);
 
   const run = await loadBoqRun(id);
-  if (!run) return json({ ok: false, error: "No such import." }, 404);
+  if (!run) return json({ ok: false, error: "No such bill." }, 404);
   if (run.sourceKind !== "boq_xlsx") {
     return json({ ok: false, code: "wrong_kind", error: "Only a bill of quantities has columns to read." }, 400);
   }

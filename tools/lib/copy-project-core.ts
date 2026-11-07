@@ -75,12 +75,16 @@ export type Handling =
 
 // Requirement identity. `requirements_category_sort_key` is unique, but a sort
 // order is a position, and a re-seed that renumbers a sheet would move every
-// answer onto its neighbour. This is what the question IS: its sheet, its
-// kind, the BWS field or local key it answers, and its words. Measured
-// 2026-10-11: all 797 rows match one-to-one between pilot and the local stack
-// on this key, and it is unique on both. Uniqueness is CHECKED at run time
-// anyway (`buildSeedMap`): a duplicated key maps nothing.
-const REQUIREMENT_KEY = `c.slug || ' | ' || r.kind || ' | ' || coalesce(f.json_id::text, '-') || ' | ' || coalesce(r.local_key, '-') || ' | ' || r.prompt`;
+// answer onto its neighbour. This used to build its own identity (sheet, kind,
+// field or local key, words); since 0057 the seeds themselves match on
+// `requirements.seed_key`, unique within a category, and this uses THAT
+// (audit 5.4 A7): two identities for one question is how the copy and the
+// seed come to disagree about which row an answer is on. A row with no key (a
+// test fixture's category; nothing the seeds write) gets one no other
+// database can hold, so it maps nothing and says so, rather than every keyless
+// row sharing one null key. Uniqueness is still CHECKED at run time
+// (`buildSeedMap`): a duplicated key maps nothing.
+const REQUIREMENT_KEY = `c.slug || ' | ' || coalesce(r.seed_key, 'unkeyed:' || r.id::text)`;
 
 /**
  * Every table in the schema, and what the copy does with it. A table missing

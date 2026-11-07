@@ -44,6 +44,10 @@ type ToQuoteQuestion = {
 };
 
 export async function GET(request: Request): Promise<Response> {
+  // The handler asks for the session itself, as every other handler does
+  // (audit R1): the middleware is the first line, never the only one.
+  const user = await getSessionUser();
+  if (!user) return json({ ok: false, error: "auth required" }, 401);
   const url = new URL(request.url);
   const projectId = url.searchParams.get("projectId");
   if (!projectId) return json({ ok: false, error: "projectId is required." }, 400);
@@ -105,6 +109,8 @@ export async function GET(request: Request): Promise<Response> {
       r.item_description,
       r.product_reference,
       r.qty,
+      -- 0059: the bill's quantity cell as printed, where it gave no count.
+      r.qty_raw,
       r.designer,
       r.area,
       r.boq_category,
@@ -255,9 +261,18 @@ export async function GET(request: Request): Promise<Response> {
   // it is the difference between work that needs doing and work that needs
   // following up. "Needed to quote" is a fourth: work that is stopping a
   // quotation going out today.
+  //
+  // SCOPED TO THE LISTED LINES (audit F13, 2026-11-06). Both used to load the
+  // WHOLE project on every phase-table load and keep the phase's share:
+  // measured on a 440-record project, 19,715 question rows read to draw a
+  // phase of 300. `loadOutstanding`'s scope is a WHERE on the same query (the
+  // one-loader rule), keyed by LINE, so a listed configuration's questions
+  // come with its bill line; coverage is keyed by the record a question is on.
+  const listedLines = [...new Set(rows.map((row) => String(row.parent_id ?? row.id)))];
+  const listedRecords = rows.map((row) => String(row.id));
   const [outstanding, coverage] = await Promise.all([
-    loadOutstanding(projectId),
-    loadSentCoverage(projectId),
+    loadOutstanding(projectId, { lineIds: listedLines }),
+    loadSentCoverage(projectId, { recordIds: listedRecords }),
   ]);
   const waiting = waitingByQuestion(outstanding, coverage);
 

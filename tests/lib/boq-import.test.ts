@@ -9,7 +9,6 @@ import { readSpreadsheetSheets } from "@/lib/intake-source";
 import { guessNonFurniture } from "@/lib/non-furniture-guess";
 import {
   parseBoqSheets,
-  normaliseRef,
   assertBoqDocument,
   activeSheets,
   countLines,
@@ -831,16 +830,7 @@ describe("describeHeader", () => {
   });
 });
 
-describe("normaliseRef", () => {
-  it("makes the same reference written differently compare equal", () => {
-    expect(normaliseRef("FU06C - CG27.2")).toBe(normaliseRef("fu06c-cg27.2"));
-    expect(normaliseRef("FU06C—CG27.2")).toBe("FU06C-CG27.2");
-  });
 
-  it("keeps genuinely different references different", () => {
-    expect(normaliseRef("SX11A")).not.toBe(normaliseRef("SX11B"));
-  });
-});
 
 
 describe("a sheet the spreadsheet named proposes the file's name as its phase", () => {
