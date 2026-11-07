@@ -109,6 +109,8 @@ export async function GET(request: Request): Promise<Response> {
       r.item_description,
       r.product_reference,
       r.qty,
+      -- 0059: the bill's quantity cell as printed, where it gave no count.
+      r.qty_raw,
       r.designer,
       r.area,
       r.boq_category,

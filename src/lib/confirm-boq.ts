@@ -88,6 +88,8 @@ type StagedLine = {
   itemDescription: string;
   productReference: string | null;
   qty: number | null;
+  /** The cell as printed where it gave no count (`quantity()`), absent on a count or a blank. */
+  qtyRaw?: string;
   qtyUnit: string | null;
   /** Present only where the bill has the column (v4). See `BoqLine`. */
   subArea?: string | null;
@@ -205,6 +207,16 @@ export type ConfirmMockupResult = {
   message: string;
 };
 
+
+/**
+ * `spec_records.qty_raw` (0059): the quantity cell as printed, only where the
+ * bill gave no count. Never beside a quantity: a staged line carrying both is
+ * one this reader did not write, and the count is what the bill said.
+ */
+function qtyRawToWrite(line: Pick<StagedLine, "qty" | "qtyRaw">): string | null {
+  if (line.qty !== null && line.qty !== undefined) return null;
+  return typeof line.qtyRaw === "string" && line.qtyRaw.trim() !== "" ? line.qtyRaw : null;
+}
 export async function confirmBoqImport(
   txn: TxnSql,
   { runId, expectedVersion, actor }: { runId: string; expectedVersion: number; actor: string },
@@ -618,6 +630,9 @@ export async function confirmBoqImport(
               -- NOT the notes column: internal notes are a person's once the
               -- record exists, and a revised bill never writes over them.
               qty_unit = ${line.qtyUnit ?? null},
+              -- 0059: the cell as printed where it gave no count, written over
+              -- like the quantity, so a revision that now prints a count clears it.
+              qty_raw = ${qtyRawToWrite(line)},
               source_import_id = ${runId},
               source_line_no = ${line.lineNo},
               run_id = ${specRunId},
@@ -724,11 +739,11 @@ export async function confirmBoqImport(
       const inserted = await txn`
         insert into spec_records
           (project_id, run_id, record_no, status, category_id, item_description, product_reference, qty,
-           qty_unit, designer, area, boq_category, level, level_suggested, level_suggested_reason,
+           qty_unit, qty_raw, designer, area, boq_category, level, level_suggested, level_suggested_reason,
            internal_notes, source_import_id, source_line_no, created_by, updated_by)
         values
           (${projectId}, ${specRunId}, ${recordNo}, 'active', ${categoryToWrite(line)}, ${plan?.name ?? line.itemDescription},
-           ${line.productReference}, ${line.qty}, ${line.qtyUnit ?? null}, ${line.designer},
+           ${line.productReference}, ${line.qty}, ${line.qtyUnit ?? null}, ${qtyRawToWrite(line)}, ${line.designer},
            ${effectiveArea(line)}, ${line.boqCategory ?? null},
            ${decided.level}, ${decided.suggested}, ${decided.reason},
            ${composeBillNotes(line.notes, keptWithFinishCode(line, sheet.columns?.finishCode?.heading))}, ${runId},

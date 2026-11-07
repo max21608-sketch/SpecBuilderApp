@@ -34,6 +34,7 @@
 // ============================================================================
 import { recordShortLabel } from "@/lib/record-label";
 import { clampText } from "@/lib/shout";
+import { quantityNotGiven } from "@/lib/printed-number";
 import { ClientRefs } from "@/components/ui/ClientRefs";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -89,6 +90,8 @@ export type SpecRecord = {
   variant_ordinal?: number | null; parent_record_no?: number | null;
   status: string; retired_at: string | null; retired_by: string | null;
   qty: number | null; designer: string | null; area: string | null; boq_category: string | null;
+  /** 0059: the bill's quantity cell as printed where it gave no count. Absent from an older response. */
+  qty_raw?: string | null;
   /**
    * EVERY ref system this record holds. Searchable, and NOT what the Code
    * column prints: see `client_code`.
@@ -1291,7 +1294,7 @@ export default function SpecTable({
                               className="text-xs text-amber-800"
                               title="The bill gave no quantity for this line. Nothing is assumed."
                             >
-                              quantity not given
+                              {quantityNotGiven(record.qty_raw)}
                             </span>
                           )
                         ) : (

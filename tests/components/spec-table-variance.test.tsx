@@ -320,4 +320,10 @@ describe("a configuration with no quantity (row d4)", () => {
     expect(within(row).getByText("quantity not given")).toBeTruthy();
     expect(within(row).queryByText("not allocated")).toBeNull();
   });
+
+  it("prints what the bill wrote where it gave no count (0059, audit 5.4 A5)", async () => {
+    mountWith([record({ item_description: "Undecided bench", qty: null, qty_raw: "1,200" } as never)]);
+    const row = await rowFor("Undecided bench");
+    expect(within(row).getByText("quantity not given (the bill says “1,200”, which reads as a thousand or as a decimal)")).toBeTruthy();
+  });
 });
