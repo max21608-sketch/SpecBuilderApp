@@ -344,6 +344,43 @@ Three things are load-bearing:
   full height and looking exactly like the bug it was fixing. Measured in the
   browser: 320px with the CSS clamp, 100px with `clampText`.
 
+### A page split keeps state where it lived
+
+`src/components/projects/{DocumentsTab,NotesCard,PhaseTabs,HistoryCard,LevelsBanner,SummaryRow}.tsx`,
+`src/components/records/{use-attribute-actions.ts,record-payload.ts,ConfigurationPanel,ChecklistTab,SpecsTab,RecordHeader}.tsx`,
+`src/components/imports/{use-boq-import.ts,BoqReview,BillLineRow,SheetHeader,RevisionPanel,StructureRead}.tsx`,
+`tests/components/{project-page-sections,record-page-sections}.test.tsx`
+
+Audit 5.3, 2026-11-07. The three giant pages (the import review 3,118 lines,
+the project overview 1,826, the record 2,238) are composed from those files;
+the pages keep the header, the URL tab and the data. Three rules were learned
+by splitting them, and each is a trap:
+
+- **A component rendered twice, or unmounted by a tab change, must NOT own
+  its state.** The Documents and History cards render on the Overview AND on
+  their own tab beside the hidden Overview; everything on the record's Specs
+  tab unmounts when another tab is chosen. A hook the page calls holds the
+  state, or two copies disagree and a half-typed rename or correction is lost
+  on a visit to another tab — found when `ConfigurationPanel` lost a rename
+  at its first cut, and held by `record-page-sections.test.tsx`.
+- **The load stays where one GET serves several screens.** The import page
+  calls `useBoqImport` itself because one GET serves all five review screens
+  and the dispatch needs it; `useStructureRead` is called AFTER the next-step
+  and pack effects, because effects run in declaration order and the
+  automatic structure read must go out where it always did.
+- **The proof is a settled-DOM snapshot per rendering test**, byte-identical
+  before and after (83 for the import page, 84 for the other two), with the
+  characterisation tests written FIRST where the pages had few — and no test
+  file changed by the split itself.
+
+The overview's documents poll asks `GET /api/projects/[id]?only=documents`
+(audit G13): the same documents query and failed count answered alone, any
+other slice a 400 in words; `tests/db/project-documents-only.test.ts` holds
+it. The chase screen asks `GET /api/drafts?questions=once` and unpacks the
+groups (`chase-inventory.ts`): each question shipped once, 62.9 MB → 21.3 MB
+on a 440-record project; the page takes either shape, recognising the packed
+one by its `questions` list, never assuming it.
+
 ### Every screen is three bands, and the primitives are the language
 
 `docs/design-language.md`, `docs/design/spec-builder-mockups.html`,

@@ -118,7 +118,27 @@ both passed and the second died on the slot index as a 500. Each now calls
 The lock is `for update`, which fires no trigger, so `spec_records.version`
 never moves. The test forces each interleaving with `pg_blocking_pids`, never
 a sleep. `attribute-standard.ts` (`setAttributeStandard`) is the one writer
-still attribute-first (Stage 5.4).
+locks the record too since 5.4 (2026-11-07), and an agreement made inside an
+open change joins that change but points only at evidence given WITH the
+agreement (`agreementEvidenceId`, shared by the item and the finish
+agreement), never at the change's own, because the change's evidence may be
+an unrelated email.
+
+**The migration ledger and the scripts, since 5.4:** `requireScriptEnvironment`
+refuses a host the declaration does not own (`hostRefusal`, `KNOWN_HOSTS`:
+this machine may only ever be sandbox; a host another environment owns is
+refused; a host not on its own environment's list is refused where that list
+has entries). **The sandbox and pilot lists are EMPTY until Max pastes the two
+Neon hosts in**, because `docs/environments.md` records none; until then
+those two print "[host unchecked …]". `db:backfill-ref-norm` re-folds
+`ref_value_norm` with the one `normaliseRef` (the `boq-import` copy is
+retired; a revision deletes an old boq_code by its words, not its fold, or
+`S.201` re-spelt `S-201` would keep the old spelling) and reports a pair that
+now collides, never merging it (local: 1,279 refs, 1,255 to re-fold, 0
+collisions). `tools/orphan-blobs.ts` is a read-only list of stored files
+nothing names — `attachments`, `email_messages` or staged
+`intake_runs.parsed`, where bill row pictures live until confirm (local: 684
+files, 151 unnamed, 26 under deleted projects); deletion is a later decision.
 
 **Changing a record's category** deletes its old category's answers, so two
 things are refused in words BEFORE anything is written (`record-category.ts`,

@@ -164,6 +164,31 @@ drops, and minting a new one charges twice. Files: `src/lib/anthropic.ts`,
 `tests/lib/extraction-timing.test.ts`, `extraction-restart.test.ts`,
 `anthropic-timeout.test.ts`.
 
+### The queue consumer runs only on what the service handed it
+
+`src/lib/queue-callback.ts` (`unverifiableCallbackReason`),
+`src/app/api/queues/[topic]/route.ts`, `tests/lib/queue-callback.test.ts`
+
+Audit R3, found by the route contracts (5.2) and closed in 5.4, 2026-11-07.
+Nothing in a queue callback is signed, and this file and the middleware used
+to say "authenticated by the queue's own signed protocol". With
+`@vercel/queue` 0.4.0 the v1beta structured callback is safe for a different
+reason: the SDK fetches the payload by message id FROM the queue service with
+the deployment's OIDC token, so a forged request can at most name an id that
+does not exist. The v2beta binary callback (ce-* headers and a receipt handle)
+deserialises the payload from the request's OWN body and runs the consumer on
+it before the service is asked anything — measured: a forged one answered 200
+and ran the stubbed consumer, and a forged message naming a pending run would
+have started a CHARGED read if a claim was free; only the claim fence limited
+it. `unverifiableCallbackReason` refuses that shape (a v2beta ce-type, any
+other ce-type, a receipt-handle header) before `handleCallback` runs, so the
+consumer only ever runs on a payload the SDK received from the service. The
+test pins `vercel.json`'s trigger type (`queue/v1beta`) beside the guard: a
+move to v2beta would refuse every small message, so the two change together,
+and that move needs this section read first. The local queue
+(`local-queue.ts`) mirrors `redeliveryDelaySeconds` and the 24-hour dedup
+window, so the stack reads are verified on behaves as the real one.
+
 ### A failure names its reason on the row, and the panel stays open
 
 `src/lib/classify-failure.ts`, `src/lib/document-classify.ts`,

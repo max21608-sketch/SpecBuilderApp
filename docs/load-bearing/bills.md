@@ -42,9 +42,16 @@ cell is words, never a number. `Ø`, `ø` and `⌀` reach `normaliseDimensionSlo
 from a combined line, and a v4 drawing figure printed with `ft` or a feet mark
 rejoins its mark before the split, so it reads as inches or is refused whole
 rather than voting as 8 cm. Do not add a seventh reader; the PDF row ANCHOR
-regex is geometry, not value, and stays separate. Not yet moved onto it:
-`pdf-bill-checks.ts`'s `printedNumber`, and `DIAM` is still unknown to the slot
-normaliser.
+regex is geometry, not value, and stays separate. Since 5.4 (2026-11-07)
+`pdf-bill-checks.ts`'s `printedNumber` is `readPrintedNumber` too — a `1,200`
+total is refused in its own sentence, and lines with no quantity are counted
+as none and the summary says so; `DIAM` is a diameter; a slot word after the
+LAST figure of a combined line is the slot, not the line's unit (`600 Ø x
+750 H`); and a bill size in METRES is placed (the Stage 1 walk's `W1,5 x D0,9
+x H0,8 m` failed on the metre, not the comma). `spec_records.qty_raw` (0059)
+is the bill's quantity cell as printed where it gave no count, written by the
+confirm and cleared by a revision that prints a count, so the phase table and
+the record header print `quantityNotGiven(qty_raw)` too.
 
 ### A BOQ has tabs, and each tab is a sub-quote
 
