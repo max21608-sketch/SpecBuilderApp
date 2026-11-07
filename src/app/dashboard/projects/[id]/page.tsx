@@ -26,22 +26,22 @@
 // already think about them. Overview holds everything that is true of the
 // project as a whole.
 // ============================================================================
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import ContactsPanel, { type Contact, type ContactsOutstanding } from "@/components/projects/ContactsPanel";
-import IntakeBatchUpload from "@/components/projects/IntakeBatchUpload";
-import SpecTable, { FOCUSES, type Focus, type RunTally } from "@/components/records/SpecTable";
+import { FOCUSES, type Focus, type RunTally } from "@/components/records/SpecTable";
+import PhaseTabs, { type SpecRun } from "@/components/projects/PhaseTabs";
 import ExportMenu from "@/components/records/ExportMenu";
-import ProjectHistory from "@/components/history/ProjectHistory";
+import SummaryRow from "@/components/projects/SummaryRow";
+import LevelsBanner from "@/components/projects/LevelsBanner";
+import HistoryCard, { useHistoryCard } from "@/components/projects/HistoryCard";
 import OpenChangeBar from "@/components/history/OpenChangeBar";
 import FinishesLibrary from "@/components/finishes/FinishesLibrary";
 import AddRun from "@/components/projects/AddRun";
 import { daysUntilSpecsAgreed, todayLocal } from "@/lib/project-programme";
-import { intakeStatusLabel, intakeStatusTone, isIntakeRunInFlight, isIntakeRunWorking } from "@/lib/intake-status";
-import { usePoll } from "@/lib/use-poll";
 import Button, { buttonClass } from "@/components/ui/Button";
 import {
   completionSentence,
@@ -63,15 +63,14 @@ import Card from "@/components/ui/Card";
 import PageBody from "@/components/ui/PageBody";
 import PageHeader from "@/components/ui/PageHeader";
 import Tabs from "@/components/ui/Tabs";
-import { Table, Td, Tr } from "@/components/ui/Table";
+import { Table } from "@/components/ui/Table";
 import { useUrlTab } from "@/lib/use-url-tab";
 import ProjectWideCard from "@/components/projects/ProjectWideCard";
 import ProjectDetailsCard from "@/components/projects/ProjectDetailsCard";
 import { inboxBuckets, type InboxOutcomeFields } from "@/lib/inbox-outcome";
 import { formatDay } from "@/lib/format-day";
-import BillColumnsAction, { isStuckBill, type StuckBill } from "@/components/imports/BillColumnsAction";
-import ReadBillSpecsAction from "@/components/imports/ReadBillSpecsAction";
-import { NO_CODES_PHASE_SENTENCE } from "@/lib/bill-sheet-notices";
+import NotesCard, { type ProjectNote } from "@/components/projects/NotesCard";
+import DocumentsTab, { useDocumentsPoll, useProjectDocuments, type DocumentRun } from "@/components/projects/DocumentsTab";
 
 type Project = {
   id: string;
@@ -91,165 +90,6 @@ type Project = {
   version: number;
 };
 
-type DocumentRun = {
-  id: string;
-  source_kind: string;
-  document_kind: string | null;
-  status: string;
-  error: string | null;
-  created_at: string;
-  created_by: string | null;
-  filename: string | null;
-  source_preserved: boolean;
-  /** A bill waiting for somebody to say which column is which. */
-  needs_columns?: boolean | null;
-  structure_read?: boolean | null;
-  // Null on anything uploaded before 0007, which is why the grouping below
-  // keeps a home for runs that belong to no pack.
-  batch_id: string | null;
-  batch_label: string | null;
-  batch_created_at: string | null;
-  /** Promised a read and waiting for a slot: it will start on its own. */
-  waiting_for_slot?: boolean | null;
-  /** A confirmed bill's specification read, where one was asked for. */
-  bill_specs_run_id?: string | null;
-  /** A confirmed bill whose confirm read its description cells: no charged read is offered. */
-  descriptions_read?: boolean;
-  /** What this document PRODUCED, counted off the FKs the confirm wrote. */
-  specs_applied: string | number | null;
-  runs_created: string | number | null;
-  records_created: string | number | null;
-};
-
-/** A document row, as the bill action reads it. */
-function billOf(run: DocumentRun): StuckBill {
-  return {
-    id: run.id,
-    sourceKind: run.source_kind,
-    status: run.status,
-    needsColumns: run.needs_columns,
-    structureRead: run.structure_read,
-    sourcePreserved: run.source_preserved,
-  };
-}
-
-/** One delivery, and the runs that arrived in it. */
-type Pack = {
-  id: string | null;
-  label: string | null;
-  createdAt: string;
-  runs: DocumentRun[];
-};
-
-type SpecRun = {
-  id: string;
-  name: string;
-  /** Sent back when the phase is retired, so a phase changed since this load is refused (audit A16). */
-  version: number;
-  source_sheet: string | null;
-  boq_revision: string | null;
-  boq_date: string | null;
-  header_notes: string[];
-  /** A bill made this phase and none of its items carries a code (`NO_CODES_PHASE_SENTENCE`). */
-  bill_without_codes?: boolean;
-  record_count: string;
-  attribute_count: string;
-};
-
-type ProjectNote = {
-  id: string;
-  topic: string | null;
-  title: string | null;
-  body: string;
-  flagged: boolean;
-  source_page: number | null;
-  source_filename: string | null;
-  version: number;
-};
-
-/**
- * One line of the Specifications card: a count, what it means, and the control
- * that acts on it.
- *
- * THE FIGURE AND ITS FIX TRAVEL TOGETHER. A number with no action beside it
- * makes somebody go and find the screen it belongs to, which is the whole
- * complaint about this page — and the count itself is the link, so there are
- * two ways to the same place rather than one.
- *
- * A ROW WITH A COUNT OF ZERO STILL RENDERS, and that is the change worth
- * stating: every one of these is a CHECK, and a check that disappears when it
- * passes is a check nobody knows is being made. It renders plain instead —
- * no colour, no button — so the eye goes to the rows that want something.
- */
-function SummaryRow({
-  label,
-  count,
-  meaning,
-  tone,
-  action,
-  href,
-}: {
-  label: string;
-  count: number;
-  meaning: React.ReactNode;
-  tone: "danger" | "warn" | "info";
-  /** The control beside the figure. Only rendered when there is something to do. */
-  action?: React.ReactNode;
-  href?: string | null;
-}) {
-  const live = count > 0;
-  const colour =
-    !live
-      ? "text-neutral-400"
-      : tone === "danger"
-        ? "text-red-700"
-        : tone === "warn"
-          ? "text-amber-700"
-          : "text-blue-700";
-  return (
-    <Tr>
-      <Td className="w-[26%] align-top">
-        {href && live ? (
-          <Link href={href} className="font-semibold text-neutral-900 no-underline hover:underline">
-            {label}
-          </Link>
-        ) : (
-          <span className={`font-semibold ${live ? "text-neutral-900" : "text-neutral-500"}`}>{label}</span>
-        )}
-      </Td>
-      <Td num className={`w-[10%] align-top text-[15px] font-semibold ${colour}`}>
-        {href && live ? (
-          <Link href={href} className="text-inherit no-underline hover:underline">
-            {count.toLocaleString()}
-          </Link>
-        ) : (
-          count.toLocaleString()
-        )}
-      </Td>
-      <Td className={`align-top ${live ? "text-neutral-600" : "text-neutral-400"}`}>{meaning}</Td>
-      <Td className="w-[24%] align-top">
-        <div className="flex flex-wrap justify-end gap-1.5">{live ? action : null}</div>
-      </Td>
-    </Tr>
-  );
-}
-
-const SOURCE_LABELS: Record<string, string> = { boq_xlsx: "BOQ", spec_document: "Specification document" };
-
-// A document's kind is what a person calls it; the source kind is only which
-// pipeline read it.
-const KIND_LABELS: Record<string, string> = {
-  preamble: "Preamble",
-  shop_drawings: "Shop drawings",
-  ffe_schedule: "FF&E schedule",
-  spec_bible: "Specification bible",
-  finishes_schedule: "Finishes schedule",
-  fabric_schedule: "Fabric schedule",
-  other: "Other document",
-};
-
-/** How many files a pack shows before the rest fold behind a link. */
-const PACK_FILES_SHOWN = 5;
 
 function ProjectOverview() {
   const projectId = String(useParams().id ?? "");
@@ -273,13 +113,10 @@ function ProjectOverview() {
     return FOCUSES.find((value) => value === rawFocus) ?? null;
   })();
   const [project, setProject] = useState<Project | null>(null);
-  const [documents, setDocuments] = useState<DocumentRun[] | null>(null);
+  const docs = useProjectDocuments();
+  const { documents, setDocuments, setFailedDocuments, failedDocuments, packs } = docs;
   const [runs, setRuns] = useState<SpecRun[]>([]);
   const [notes, setNotes] = useState<ProjectNote[]>([]);
-  // Collapsed by default. A real preamble states thirty things, each a
-  // paragraph, and all of them expanded is why this section could not be read.
-  const [openNotes, setOpenNotes] = useState<Set<string>>(new Set());
-  const [notesOpen, setNotesOpen] = useState(false);
   /**
    * WHICH TAB, AND IT LIVES IN THE URL.
    *
@@ -310,9 +147,6 @@ function ProjectOverview() {
       return runs.some((run) => run.id === raw) ? raw : null;
     },
   });
-  const [retiringRun, setRetiringRun] = useState<string | null>(null);
-  const [retireRunReason, setRetireRunReason] = useState("");
-  const [retiringBusy, setRetiringBusy] = useState(false);
   const [contacts, setContacts] = useState<Contact[] | null>(null);
   const [contactsOutstanding, setContactsOutstanding] = useState<ContactsOutstanding | null>(null);
   /** This project's mail still to review; null until counted (plan any-bill, step 7). */
@@ -321,13 +155,8 @@ function ProjectOverview() {
   const [suggestedCodes, setSuggestedCodes] = useState<string[]>([]);
   const [codeCounts, setCodeCounts] = useState<Record<string, number>>({});
   const [unlinkedFinishCodes, setUnlinkedFinishCodes] = useState<{ code: string; records: number }[]>([]);
-  const [failedDocuments, setFailedDocuments] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [expandedPacks, setExpandedPacks] = useState<Set<string>>(new Set());
-  const [retryingDocument, setRetryingDocument] = useState<string | null>(null);
-  const [acceptingLevels, setAcceptingLevels] = useState(false);
   // Derived on the server and re-read on every load, because it changes when
   // an answer changes rather than when the project row does.
   const [completion, setCompletion] = useState<ProjectCompletion>(EMPTY_COMPLETION);
@@ -344,12 +173,7 @@ function ProjectOverview() {
    * how a header comes to disagree with the rows under it.
    */
   const [runTallies, setRunTallies] = useState<Record<string, RunTally>>({});
-  // The history card's three controls live in its heading, so the page holds
-  // their state and the component is told.
-  const [historyCount, setHistoryCount] = useState<number | null>(null);
-  const [historyNaming, setHistoryNaming] = useState(false);
-  const [historyComparing, setHistoryComparing] = useState(false);
-  const [historyShowAll, setHistoryShowAll] = useState(false);
+  const history = useHistoryCard();
 
   const load = useCallback(async () => {
     const res = await apiFetch<{
@@ -386,75 +210,8 @@ function ProjectOverview() {
     setSuggestedCodes(Object.keys(counts).sort());
     // NOT the details form: `ProjectDetailsCard` owns it, and a reload here
     // never reaches what somebody is typing there (audit G6).
-  }, [projectId]);
+  }, [projectId, setDocuments, setFailedDocuments]);
 
-  async function retireRun(run: SpecRun) {
-    if (!retireRunReason.trim()) return;
-    const runId = run.id;
-    setRetiringBusy(true);
-    try {
-      const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/runs/${runId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ status: "retired", reason: retireRunReason.trim(), version: run.version }),
-      });
-      // Reload first, then report. This screen clears its banner on a
-      // successful load, so setting the message first would show a refusal for
-      // a few milliseconds and then nothing at all.
-      await load();
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      setError(null);
-      setRetiringRun(null);
-      setRetireRunReason("");
-      // The retired run has left the tabs, so the tab it was on no longer
-      // exists. Back to the overview rather than a blank panel.
-      setTab("overview");
-    } finally {
-      // Always reset: a non-JSON error must not leave the dialog frozen.
-      setRetiringBusy(false);
-    }
-  }
-
-  /**
-   * Ask for a failed document to be read again.
-   *
-   * IT CHARGES. The read was dispatched on arrival and the queue refused it, so
-   * this is a second billed model call and the button says so on hover. There
-   * is no exactly-once billing guarantee anywhere in this pipeline.
-   */
-  async function retryDocument(run: DocumentRun) {
-    setRetryingDocument(run.id);
-    try {
-      const res = await apiFetch(`/api/imports/${run.id}/extract`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      await load();
-      if (!res.ok) setError(res.error);
-    } finally {
-      setRetryingDocument(null);
-    }
-  }
-
-  /** Agree with every level this project's records were guessed, in one act. */
-  async function acceptLevels() {
-    setAcceptingLevels(true);
-    try {
-      const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/levels/accept`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ runId: null }),
-      });
-      await load();
-      if (!res.ok) setError(res.error);
-    } finally {
-      setAcceptingLevels(false);
-    }
-  }
 
   /**
    * WHO OWES US WHAT, fetched ALONGSIDE the project rather than inside it.
@@ -534,25 +291,7 @@ function ProjectOverview() {
     void loadInboxCount();
   }, [projectId, load, loadContacts, loadContactsOutstanding, loadInboxCount]);
 
-  // THE OVERVIEW POLLS ITS DOCUMENTS while any is being read or waiting for a
-  // slot (found-in-use 2026-09-23: "you have to reload the page to get it to
-  // switch ... to ready"). It refreshes the DOCUMENTS ONLY, never through
-  // load(). That used to be because load() reset the details form; the form
-  // is now its own component and out of load()'s reach (audit G6), and a
-  // poll still sets only what it came for, so nothing else on the screen
-  // moves every five seconds.
-  const documentsInFlight = (documents ?? []).some((run) =>
-    isIntakeRunInFlight({ status: run.status, waitingForSlot: run.waiting_for_slot }),
-  );
-  const pollDocuments = useCallback(async () => {
-    const res = await apiFetch<{ documents: DocumentRun[]; failedDocuments: number }>(
-      `/api/projects/${encodeURIComponent(projectId)}`,
-    );
-    if (!res.ok) return; // a failed tick is retried by the next one; load() owns the banner
-    setDocuments(res.data.documents);
-    setFailedDocuments(Number(res.data.failedDocuments ?? 0));
-  }, [projectId]);
-  usePoll(pollDocuments, { intervalMs: 5000, active: documentsInFlight });
+  useDocumentsPoll(projectId, docs);
 
   // THE NUMBERS ONLY, after the Project-wide card writes: the summary and the
   // completion move, and nothing else should. Never through `load()`, which
@@ -567,41 +306,6 @@ function ProjectOverview() {
     setState(res.data.state ?? "active");
   }, [projectId]);
 
-  // Runs grouped into the packs they arrived in, newest first, each pack's own
-  // runs oldest first so they read in the order the work happens.
-  //
-  // Pre-0007 runs have no batch and are collected under a single null pack at
-  // the end -- they are real documents somebody imported and must not vanish
-  // because a later migration gave their successors a grouping.
-  const packs = useMemo<Pack[]>(() => {
-    if (!documents) return [];
-    const byBatch = new Map<string, Pack>();
-    const loose: DocumentRun[] = [];
-    for (const run of documents) {
-      if (!run.batch_id) {
-        loose.push(run);
-        continue;
-      }
-      const existing = byBatch.get(run.batch_id);
-      if (existing) {
-        existing.runs.push(run);
-        continue;
-      }
-      byBatch.set(run.batch_id, {
-        id: run.batch_id,
-        label: run.batch_label,
-        createdAt: run.batch_created_at ?? run.created_at,
-        runs: [run],
-      });
-    }
-    const grouped = [...byBatch.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    for (const pack of grouped) pack.runs.sort((a, b) => a.created_at.localeCompare(b.created_at));
-    if (loose.length > 0) {
-      grouped.push({ id: null, label: null, createdAt: loose[loose.length - 1]?.created_at ?? "", runs: loose });
-    }
-    return grouped;
-  }, [documents]);
-
 
   // Reported up by whichever run table is mounted. Stored by run id so
   // switching tabs does not blank the header while the next table loads.
@@ -612,34 +316,6 @@ function ProjectOverview() {
       return { ...current, [runId]: tally };
     });
   }, []);
-
-  const toggleNote = (noteId: string) =>
-    setOpenNotes((current) => {
-      const next = new Set(current);
-      if (next.has(noteId)) next.delete(noteId);
-      else next.add(noteId);
-      return next;
-    });
-
-  /**
-   * Marking a note load-bearing. Independent of `status`, which is whether the
-   * note is a correct reading of the document -- "this is wrong" and "this
-   * matters" are different answers and must not share a field.
-   */
-  async function setNoteFlag(note: ProjectNote, flagged: boolean) {
-    setError(null);
-    const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/notes/${note.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ flagged, version: note.version }),
-    });
-    if (!res.ok) {
-      setError(res.error);
-      return;
-    }
-    await load();
-  }
-
   /**
    * Archiving, and its opposite.
    *
@@ -669,20 +345,6 @@ function ProjectOverview() {
     }
   }
 
-  async function retireNote(note: ProjectNote) {
-    setError(null);
-    const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/notes/${note.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: "retired", version: note.version }),
-    });
-    if (!res.ok) {
-      setError(res.error);
-      return;
-    }
-    await load();
-  }
-
   if (error && !project)
     return (
       <PageBody>
@@ -696,8 +358,6 @@ function ProjectOverview() {
       </PageBody>
     );
 
-  const flaggedCount = notes.filter((note) => note.flagged).length;
-  const allNotesOpen = notes.length > 0 && notes.every((note) => openNotes.has(note.id));
 
   const today = todayLocal();
   const untilSpecs = daysUntilSpecsAgreed(project.specs_agreed_by, today);
@@ -782,264 +442,15 @@ function ProjectOverview() {
    * tab starts saying something the card does not.
    */
   const historyCard = (
-    <Card
-      title="History"
-      flush
-      actions={
-        <>
-          <Button size="xs" onClick={() => setHistoryNaming((open) => !open)}>
-            Name this point
-          </Button>
-          <Button size="xs" onClick={() => setHistoryComparing((open) => !open)}>
-            Compare two points
-          </Button>
-          {historyCount !== null && historyCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setHistoryShowAll((open) => !open)}
-              className="text-[12px] font-medium normal-case tracking-normal text-blue-700 hover:underline"
-            >
-              {historyShowAll ? "Show fewer" : `All ${historyCount}`}
-            </button>
-          )}
-        </>
-      }
-    >
-      <ProjectHistory
-        projectId={project.id}
-        specsAgreedBy={project.specs_agreed_by}
-        toQuote={summary.toQuote}
-        onLoaded={setHistoryCount}
-        naming={historyNaming}
-        onNamingChange={setHistoryNaming}
-        comparing={historyComparing}
-        onComparingChange={setHistoryComparing}
-        showAll={historyShowAll}
-        onShowAllChange={setHistoryShowAll}
-      />
-    </Card>
+    <HistoryCard
+      projectId={project.id}
+      specsAgreedBy={project.specs_agreed_by}
+      toQuote={summary.toQuote}
+      history={history}
+    />
   );
 
-  const documentsCard = (
-    <Card
-      title={
-        <>
-          Source documents
-          <Tip>
-            {/* IT SAID "each file's kind is declared on upload", which is the
-                impression 4a.3 exists to remove: the name is read the moment a
-                file lands, the document is read at the press, and what a person
-                picks beats both. The declaring still happens — at registration,
-                where it always has. */}
-            Drop a pack and the app works out what each file is — from its name straight away, then from the document
-            itself when you press. Every answer says what it was read from, and your own choice always wins.
-          </Tip>
-        </>
-      }
-      flush
-      actions={
-        <Button size="xs" variant={uploading ? "secondary" : "primary"} onClick={() => setUploading((v) => !v)}>
-          {uploading ? "Close" : "Add documents"}
-        </Button>
-      }
-    >
-      {uploading && (
-        <div className="border-b border-neutral-200 px-4 py-3">
-          <IntakeBatchUpload
-            projectId={project.id}
-            onUploaded={() => {
-              setUploading(false);
-              void load();
-            }}
-            onRegistered={() => void load()}
-          />
-        </div>
-      )}
-      {/* GROUPED BY PACK, and each pack links to its own screen.
-          A delivery's runs used to be listed flat, so the two screens that
-          read a whole pack -- the pack screen with its Read all, and the
-          combined drawings review, which is the ONLY place a record described
-          by two documents is named -- were reachable solely from the redirect
-          that fires once after upload. Navigate away and there was no route
-          back to either except browser history. */}
-      {documents === null ? (
-        <div className="p-4"><Spinner label="Loading documents" /></div>
-      ) : packs.length === 0 ? (
-        <p className="px-4 py-3 text-sm text-neutral-600">
-          Nothing imported yet. Start with the bill of quantities — it creates this project&rsquo;s spec records.
-        </p>
-      ) : (
-        packs.map((pack) => {
-          const drawings = pack.runs.filter((run) => run.document_kind === "shop_drawings");
-          const reading = pack.runs.filter((run) => isIntakeRunWorking(run.status) || run.status === "pending");
-          const ready = pack.runs.filter((run) => run.status === "parsed");
-          const key = pack.id ?? "unpacked";
-          const expanded = expandedPacks.has(key);
-          const shown = expanded ? pack.runs : pack.runs.slice(0, PACK_FILES_SHOWN);
-          const folded = pack.runs.length - shown.length;
-          return (
-            <div key={key}>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-neutral-200 bg-[#fcfcfc] px-4 py-2.5">
-                <b className="text-[13px]">
-                  {pack.id
-                    ? (pack.label ?? `${pack.runs.length} document${pack.runs.length === 1 ? "" : "s"}`)
-                    : "Not part of a pack"}
-                </b>
-                <span className="text-xs text-neutral-500">
-                  {pack.id ? (
-                    <>
-                      delivered {formatDay(String(pack.createdAt).slice(0, 10))}
-                      {reading.length > 0 && (
-                        <span className="text-blue-700"> · {reading.length} still being read</span>
-                      )}
-                      {ready.length > 0 && <> · {ready.length} ready to review</>}
-                    </>
-                  ) : (
-                    <>Uploaded before deliveries were grouped. Nothing is wrong with them.</>
-                  )}
-                </span>
-                {pack.id && (
-                  <span className="ml-auto flex flex-wrap items-center gap-2">
-                    {/* Only when there is more than one, because the combined
-                        screen exists for what can only be seen ACROSS
-                        documents. One drawing has nothing to compare. */}
-                    {drawings.length > 1 && (
-                      <Link
-                        href={`/dashboard/projects/${project.id}/intake/${pack.id}/drawings`}
-                        className={buttonClass("primary", "xs", "no-underline")}
-                      >
-                        Review all {drawings.length} drawings together
-                      </Link>
-                    )}
-                    <Link
-                      href={`/dashboard/projects/${project.id}/intake/${pack.id}`}
-                      className={buttonClass("secondary", "xs", "no-underline")}
-                    >
-                      Open the pack
-                    </Link>
-                  </span>
-                )}
-              </div>
-              <Table>
-                <tbody>
-                  {shown.map((run) => {
-                    const specs = Number(run.specs_applied ?? 0);
-                    const madeRuns = Number(run.runs_created ?? 0);
-                    const madeRecords = Number(run.records_created ?? 0);
-                    /* WHAT IT PRODUCED. A state says what the app did to the
-                       file; this says what the file did to the project, which
-                       is the question somebody scanning eleven filenames has.
-                       Each branch is counted, never guessed, and a document
-                       that produced nothing yet says which of the two reasons
-                       that is. */
-                    const produced =
-                      run.status === "failed"
-                        ? (run.error ?? "the queue refused it")
-                        : isIntakeRunWorking(run.status) || run.status === "pending"
-                          ? `started ${new Date(run.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} · nothing to do`
-                          : madeRuns > 0
-                            ? `${madeRuns} phase${madeRuns === 1 ? "" : "s"} · ${madeRecords} record${madeRecords === 1 ? "" : "s"}`
-                            : specs > 0
-                              ? `${specs} spec${specs === 1 ? "" : "s"} applied`
-                              : run.status === "parsed"
-                                ? "staged, nothing applied yet"
-                                : "nothing applied";
-                    return (
-                      <Tr key={run.id}>
-                        <Td className="w-[46%]">
-                          <Link
-                            href={`/dashboard/imports/${run.id}`}
-                            className="text-blue-700 no-underline hover:underline"
-                          >
-                            {run.filename ?? "Unnamed file"}
-                          </Link>
-                          <p className="text-xs text-neutral-500">
-                            {(run.document_kind && KIND_LABELS[run.document_kind]) ??
-                              SOURCE_LABELS[run.source_kind] ??
-                              run.source_kind}
-                            {" · "}
-                            {new Date(run.created_at).toLocaleString("en-GB")}
-                            {run.created_by ? ` · ${run.created_by}` : ""}
-                            {run.source_preserved ? "" : " · original not kept"}
-                          </p>
-                        </Td>
-                        <Td className="w-[16%]">
-                          <Chip tone={intakeStatusTone(run.status)} dot={isIntakeRunWorking(run.status)}>
-                            {intakeStatusLabel(run.status)}
-                          </Chip>
-                        </Td>
-                        <Td muted className="w-[22%]">
-                          {produced}
-                        </Td>
-                        <Td>
-                          <div className="flex justify-end">
-                            {/* A BILL IS NEVER RETRIED THROUGH /extract, which
-                                refuses one: a stuck bill goes to its review. */}
-                            {isStuckBill(billOf(run)) ? (
-                              <BillColumnsAction run={billOf(run)} />
-                            ) : run.status === "failed" ? (
-                              <Button
-                                size="xs"
-                                disabled={retryingDocument === run.id}
-                                title="Reads the document again. This is a second charged model call."
-                                onClick={() => void retryDocument(run)}
-                              >
-                                {retryingDocument === run.id ? "Trying…" : "Try again"}
-                              </Button>
-                            ) : run.status === "parsed" ? (
-                              <Link
-                                href={`/dashboard/imports/${run.id}`}
-                                className={buttonClass("secondary", "xs", "no-underline")}
-                              >
-                                Review
-                              </Link>
-                            ) : run.source_kind === "boq_xlsx" && run.status === "confirmed" && run.source_preserved ? (
-                              <ReadBillSpecsAction
-                                billRunId={run.id}
-                                specsRunId={run.bill_specs_run_id ?? null}
-                                descriptionsRead={run.descriptions_read === true}
-                                onRead={() => void load()}
-                              />
-                            ) : isIntakeRunWorking(run.status) || run.status === "pending" ? (
-                              <span className="text-[11.5px] text-neutral-500">it will appear here</span>
-                            ) : (
-                              <Link
-                                href={`/dashboard/imports/${run.id}`}
-                                className={buttonClass("quiet", "xs", "no-underline")}
-                              >
-                                Open
-                              </Link>
-                            )}
-                          </div>
-                        </Td>
-                      </Tr>
-                    );
-                  })}
-                </tbody>
-              </Table>
-              {folded > 0 && (
-                <div className="border-b border-neutral-200 px-4 py-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setExpandedPacks((current) => {
-                        const next = new Set(current);
-                        next.add(key);
-                        return next;
-                      })
-                    }
-                    className="text-[12px] text-blue-700 hover:underline"
-                  >
-                    {folded} more in this pack
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })
-      )}
-    </Card>
-  );
+  const documentsCard = <DocumentsTab projectId={project.id} docs={docs} onReload={load} onError={setError} />;
 
   return (
     <>
@@ -1152,7 +563,7 @@ function ProjectOverview() {
               ...runs.map((run) => ({ id: run.id, label: run.name, count: Number(run.record_count) })),
               { id: "finishes", label: "Finishes", count: summary.finishes || null },
               { id: "documents", label: "Documents", count: documents?.length ? documents.length : null },
-              { id: "history", label: "History", count: historyCount },
+              { id: "history", label: "History", count: history.count },
             ]}
             trailing={
               <AddRun
@@ -1196,89 +607,16 @@ function ProjectOverview() {
             for on every visit. */}
         {tab === "finishes" && <FinishesLibrary projectId={project.id} initialQuery={finishQuery} />}
 
-        {runs.map((run) =>
-          tab === run.id ? (
-            <section key={run.id}>
-              <SpecTable
-                projectId={project.id}
-                runId={run.id}
-                onSummary={(tally) => onRunSummary(run.id, tally)}
-                initialFocus={initialFocus}
-              />
-
-              {/* WHERE THIS RUN CAME FROM, AT THE BOTTOM. It is provenance —
-                  read once when somebody asks which revision they are looking
-                  at, and never while working down the records. Above the table
-                  it cost four lines of the screen on every visit. */}
-              <p className="mt-4 text-xs text-neutral-500">
-                {run.source_sheet && <>from sheet “{run.source_sheet}”</>}
-                {run.boq_revision && <> · revision {run.boq_revision}</>}
-                {run.boq_date && <> · dated {run.boq_date}</>}
-              </p>
-              {run.header_notes?.length > 0 && (
-                <p className="mt-1 text-xs text-neutral-500">
-                  The bill said: {run.header_notes.join(" · ")}
-                </p>
-              )}
-              {/* A BILL WITH NO CODES, said once, beside what the bill said:
-                  amber, because the revision it warns about needs a person to
-                  pair every line by hand. */}
-              {run.bill_without_codes && (
-                <p className="mt-1 text-xs text-amber-800" role="note">
-                  {NO_CODES_PHASE_SENTENCE}
-                </p>
-              )}
-
-              {/* Retiring a phase takes a whole sub-quote out of the tabs and out
-                  of the export. Every record on it goes with it, and both can be
-                  brought back — but the reason is required, because whoever
-                  finds the gap later needs to know why it is there. */}
-              {retiringRun === run.id ? (
-                <div className="mt-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3">
-                  <p className="text-sm font-medium text-red-900">Retire “{run.name}”?</p>
-                  <p className="mt-0.5 text-xs text-red-800">
-                    Its {run.record_count} record{Number(run.record_count) === 1 ? "" : "s"} stop being live: they
-                    leave this project&rsquo;s export and its tabs. Nothing is deleted, and the phase can be brought
-                    back. A BWS job already created from one of these records is NOT removed by its absence from the
-                    export — check those by hand.
-                  </p>
-                  <input
-                    value={retireRunReason}
-                    autoFocus
-                    onChange={(event) => setRetireRunReason(event.target.value)}
-                    placeholder="Superseded by the Rev B bill confirmed on 16 Sep"
-                    className="mt-2 w-full rounded border border-red-300 bg-white px-2 py-1 text-sm"
-                  />
-                  <div className="mt-2 flex items-center gap-2">
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      disabled={!retireRunReason.trim() || retiringBusy}
-                      onClick={() => void retireRun(run)}
-                    >
-                      {retiringBusy ? "Retiring…" : "Retire the phase"}
-                    </Button>
-                    <Button variant="quiet" size="sm" onClick={() => setRetiringRun(null)}>
-                      Keep it
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <Button
-                  size="xs"
-                  variant="danger"
-                  className="mt-3"
-                  onClick={() => {
-                    setRetiringRun(run.id);
-                    setRetireRunReason("");
-                  }}
-                >
-                  Retire this phase
-                </Button>
-              )}
-            </section>
-          ) : null,
-        )}
+        <PhaseTabs
+          projectId={project.id}
+          runs={runs}
+          tab={tab}
+          initialFocus={initialFocus}
+          onRunSummary={onRunSummary}
+          onReload={load}
+          onError={setError}
+          onRetired={() => setTab("overview")}
+        />
 
         {/* Each on its own tab, the same JSX the Overview renders. */}
         {tab === "documents" && documentsCard}
@@ -1537,33 +875,12 @@ function ProjectOverview() {
                         level-less record in a covered category is tiered
                         perfectly well. The level still decides the placeholder
                         half, and it still picks the BWS boilerplate. */}
-                    <SummaryRow
-                      label="No level"
-                      tone="warn"
-                      count={summary.noLevel}
-                      href={firstRunHref}
-                      meaning={
-                        <>
-                          Needed by the{" "}
-                          {summary.tgqFromFallback > 0 ? "placeholder half of TGQ and by the " : ""}
-                          BWS boilerplate.
-                          {summary.levelSuggested > 0 && ` ${summary.levelSuggested} have a suggestion.`}
-                        </>
-                      }
-                      action={
-                        <>
-                          {summary.levelSuggested > 0 && (
-                            <Button size="xs" disabled={acceptingLevels} onClick={() => void acceptLevels()}>
-                              {acceptingLevels ? "Accepting…" : `Accept ${summary.levelSuggested}`}
-                            </Button>
-                          )}
-                          {firstRunHref && (
-                            <Link href={firstRunHref} className={buttonClass("quiet", "xs", "no-underline")}>
-                              Review
-                            </Link>
-                          )}
-                        </>
-                      }
+                    <LevelsBanner
+                      projectId={project.id}
+                      summary={summary}
+                      firstRunHref={firstRunHref}
+                      onReload={load}
+                      onError={setError}
                     />
                     {/* A CODE A DRAWING CARRIES THAT THE LIBRARY HAS NEVER HEARD
                         OF. Named, never counted: an unlinked code is a job, and
@@ -1688,103 +1005,7 @@ function ProjectOverview() {
               it when they want it, and it is the longest thing here by far.
               Retired, never deleted — a mis-read note is still evidence that
               somebody looked. */}
-          <Card
-            title={
-              <>
-                From the preamble
-                {flaggedCount > 0 && (
-                  <Chip tone="warn" className="normal-case tracking-normal">
-                    {flaggedCount} flagged
-                  </Chip>
-                )}
-              </>
-            }
-            actions={
-              notes.length > 0 ? (
-                <>
-                  <Button size="xs" variant="quiet" onClick={() => setNotesOpen((open) => !open)}>
-                    {notesOpen ? "Collapse" : `Show the ${notes.length}`}
-                  </Button>
-                  {notesOpen && (
-                    <Button
-                      size="xs"
-                      variant="quiet"
-                      onClick={() =>
-                        setOpenNotes(allNotesOpen ? new Set() : new Set(notes.map((note) => note.id)))
-                      }
-                    >
-                      {allNotesOpen ? "Collapse all" : "Expand all"}
-                    </Button>
-                  )}
-                </>
-              ) : undefined
-            }
-          >
-            {notes.length === 0 ? (
-              <p className="text-xs text-neutral-500">
-                Nothing yet. If the pack came with a preamble, upload it above and review what it requires. Plenty of
-                projects do not have one.
-              </p>
-            ) : !notesOpen ? (
-              <p className="text-xs text-neutral-500">
-                {notes.length} note{notes.length === 1 ? "" : "s"} from the preamble. Reference material; collapsed
-                by default.
-              </p>
-            ) : (
-              <>
-                <p className="text-xs text-neutral-500">
-                  The conditions the whole package is built under. Flag the ones that change what gets quoted &mdash;
-                  a flameproofing standard, a tolerance, a precedence clause &mdash; so they are not read at the same
-                  weight as the boilerplate.
-                </p>
-                <ul className="mt-3 divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-white">
-                  {notes.map((note) => {
-                    const open = openNotes.has(note.id);
-                    return (
-                      <li
-                        key={note.id}
-                        className={`px-4 py-3 text-sm ${note.flagged ? "border-l-2 border-l-amber-400 bg-amber-50" : ""}`}
-                      >
-                        <div className="flex items-baseline justify-between gap-3">
-                          {/* The title is the whole row's toggle: a preamble
-                              note's body runs to a paragraph, and thirty of them
-                              expanded is why this section was unreadable. */}
-                          <button
-                            type="button"
-                            onClick={() => toggleNote(note.id)}
-                            aria-expanded={open}
-                            className={`flex-1 text-left font-medium ${note.flagged ? "text-amber-900" : "text-neutral-900"}`}
-                          >
-                            {open ? "▾" : "▸"} {note.title ?? "Untitled requirement"}
-                          </button>
-                          <Button
-                            size="xs"
-                            variant="quiet"
-                            title={note.flagged ? "Stop flagging this" : "Flag this as load-bearing"}
-                            onClick={() => void setNoteFlag(note, !note.flagged)}
-                          >
-                            {note.flagged ? "★ Flagged" : "☆ Flag"}
-                          </Button>
-                          <Button size="xs" variant="quiet" onClick={() => void retireNote(note)}>
-                            Retire
-                          </Button>
-                        </div>
-                        {open && <p className="mt-1 whitespace-pre-line text-neutral-700">{note.body}</p>}
-                        <p className="mt-1 text-xs text-neutral-500">
-                          {note.topic}
-                          {note.source_filename && <> &middot; {note.source_filename}</>}
-                          {note.source_page && <> page {note.source_page}</>}
-                          {!open && note.body.length > 0 && (
-                            <> &middot; {note.body.length > 90 ? `${note.body.slice(0, 90).trimEnd()}…` : note.body}</>
-                          )}
-                        </p>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </>
-            )}
-          </Card>
+          <NotesCard projectId={project.id} notes={notes} onError={setError} onChanged={load} />
 
           {/* ARCHIVING IS THE LAST THING ON THE PAGE, on its own, and it is a
               `danger` button because it changes what the projects list shows.
