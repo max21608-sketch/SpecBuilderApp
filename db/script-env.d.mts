@@ -9,3 +9,10 @@ export function pgToolConnection(
   databaseUrl: string,
   baseEnv?: Record<string, string | undefined>,
 ): { url: string; env: Record<string, string | undefined> };
+
+export const KNOWN_HOSTS: Record<"sandbox" | "pilot" | "production", string[]>;
+export function hostRefusal(
+  environment: string,
+  host: string,
+  known?: Record<string, readonly string[]>,
+): string | null;

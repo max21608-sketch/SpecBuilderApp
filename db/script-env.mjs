@@ -30,6 +30,62 @@ const GUARDED = {
   pilot: "--yes-pilot",
 };
 
+// ============================================================================
+// THE HOST IS CHECKED AGAINST THE DECLARATION (audit 5.4 A7, 2026-11-06).
+//
+// The declaration cannot verify itself, and the printed host is how a person
+// catches a wrong one. The accident this table exists for is the one
+// `.env.example` and docs/environments.md warn about: `neon link` or `neon
+// deploy` without --no-env-pull REWRITES DATABASE_URL in an env file whose
+// DATABASE_ENVIRONMENT still says sandbox, and the next `db:*` run writes to
+// whatever Neon project the CLI picked. A host this table knows refuses a
+// declaration that does not own it.
+//
+// THE NEON HOSTS ARE NOT IN THIS REPO YET. docs/environments.md names the
+// projects (`SpecBuilder`, `SpecBuilder Pilot`) and never their endpoint
+// hosts, so the two lists below are empty until Max copies each project's
+// endpoint host (`ep-…`, the direct one; the pooler is folded onto it) out of
+// the Neon console. An empty list is UNCHECKED, said on the Target line,
+// never a refusal of everything. What holds today: this machine is the local
+// stack, which declares sandbox, and is never pilot or production.
+// ============================================================================
+export const KNOWN_HOSTS = {
+  sandbox: [],
+  pilot: [],
+  production: [],
+};
+
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/** The host without its port and case, a Neon pooler folded onto its endpoint. */
+function hostKey(host) {
+  const name = String(host)
+    .toLowerCase()
+    .replace(/^\[(.*)\](?::\d+)?$/, "[$1]")
+    .replace(/:\d+$/, "");
+  return name.replace(/^([^.]+)-pooler\./, "$1.");
+}
+
+/** Null when the host may be the declared environment; otherwise the sentence why not. Pure. */
+export function hostRefusal(environment, host, known = KNOWN_HOSTS) {
+  const key = hostKey(host);
+  if (LOCAL_HOSTS.has(key)) {
+    return environment === "sandbox"
+      ? null
+      : `DATABASE_ENVIRONMENT declares ${environment}, but the host is this machine (${host}). Only the local stack runs here, and it declares sandbox.`;
+  }
+  for (const [owner, hosts] of Object.entries(known)) {
+    if (owner !== environment && hosts.some((entry) => hostKey(entry) === key)) {
+      return `DATABASE_ENVIRONMENT declares ${environment}, but ${host} is the ${owner} database. Check which env file this ran with, and whether a Neon CLI command rewrote it.`;
+    }
+  }
+  const mine = known[environment] ?? [];
+  if (mine.length > 0 && !mine.some((entry) => hostKey(entry) === key)) {
+    return `DATABASE_ENVIRONMENT declares ${environment}, but ${host} is not one of ${environment}'s known hosts (db/script-env.mjs). Check the env file before anything is written.`;
+  }
+  return null;
+}
+
 // ONE GUARD FOR EVERY SCRIPT (audit B9). The tsx backfills each carried an
 // inline copy of this function -- six of them, already worded six ways -- so a
 // change to the rule (pilot's own flag arrived after most were written) had to
@@ -64,7 +120,13 @@ export function requireScriptEnvironment(scriptName, usage = []) {
     // A malformed URL will fail at connect time with a better message.
   }
 
-  console.log(`Target: DATABASE_ENVIRONMENT=${environment} (${host})`);
+  const checked = (KNOWN_HOSTS[environment] ?? []).length > 0 || LOCAL_HOSTS.has(hostKey(host));
+  console.log(`Target: DATABASE_ENVIRONMENT=${environment} (${host})${checked ? "" : "  [host unchecked: none recorded for " + environment + "]"}`);
+  const refused = hostRefusal(environment, host);
+  if (refused) {
+    console.error(refused);
+    process.exit(1);
+  }
 
   const flag = GUARDED[environment];
   if (flag && !process.argv.includes(flag)) {

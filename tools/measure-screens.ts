@@ -11,10 +11,19 @@
 //
 //   npx tsx --env-file-if-exists=.env.local tools/measure-screens.ts
 //   npx tsx --env-file-if-exists=.env.local tools/measure-screens.ts --project=DEMO-300
+import { requireScriptEnvironment } from "../db/script-env.mjs";
 import { sql } from "../src/lib/db";
 import { loadProjectCompletion } from "../src/lib/project-completion";
 import { loadProjectSummaries } from "../src/lib/project-summary";
 import { lineIdsForRecords, loadOutstanding, loadSentCoverage, waitingByQuestion } from "../src/lib/chase-drafts";
+
+// The one guard (audit 5.4 A7): the resolved host printed before anything is
+// read, and pilot behind --yes-pilot. Read only, but "which database answered"
+// is the point of a measurement.
+requireScriptEnvironment("../tools/measure-screens.ts", [
+  "npx tsx --env-file-if-exists=.env.local tools/measure-screens.ts",
+  "node --env-file=.env.localstack.local tools/localstack/tool.mjs tools/measure-screens.ts   (the local stack)",
+]);
 
 async function time<T>(label: string, fn: () => Promise<T>): Promise<[string, number, T]> {
   const started = Date.now();
