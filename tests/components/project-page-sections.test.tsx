@@ -283,15 +283,20 @@ describe("while a document is being read", () => {
     try {
       serve();
       await screen.findByText("First pack");
-      const before = calls.filter((call) => call.method === "GET" && call.url.startsWith(`/api/projects/${PROJECT}`) && !call.url.includes("/contacts")).length;
+      // Count the poll's OWN request, not every GET under the project: the
+      // cards mounted by the first load fetch their own slices (batches,
+      // project-wide, contacts) in effects that land before this line on a
+      // fast machine and inside the five-second advance on CI's runner, where
+      // "before + 1" read 5 and failed run #271 (2026-11-07) with nothing
+      // wrong on the page.
+      const slice = () => calls.filter((call) => call.method === "GET" && call.url === `/api/projects/${PROJECT}?only=documents`);
+      expect(slice().length).toBe(0);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5000);
       });
-      const after = calls.filter((call) => call.method === "GET" && call.url.startsWith(`/api/projects/${PROJECT}`) && !call.url.includes("/contacts"));
-      expect(after.length).toBe(before + 1);
       // The SLICE, not the whole payload (audit G13): the tick keeps the
-      // documents and the failed count, so that is all it asks for.
-      expect(after[after.length - 1]!.url).toBe(`/api/projects/${PROJECT}?only=documents`);
+      // documents and the failed count, so that is all it asks for, once.
+      expect(slice().length).toBe(1);
     } finally {
       vi.useRealTimers();
     }

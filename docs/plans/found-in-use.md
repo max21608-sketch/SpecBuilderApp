@@ -44,7 +44,11 @@ record page's "Add a configuration" called `scrollIntoView` in an animation
 frame, which jsdom lacks; it threw after the test's assertions and failed the
 component tier as an unhandled error (now optional-called, as every other
 caller already was). The trap is written up in
-`docs/load-bearing/database-and-trail.md`. Also in the annotations, not
+`docs/load-bearing/database-and-trail.md`. Run #271 on the fix then found a
+third, in `project-page-sections.test.tsx`: the documents-poll test counted
+every GET under the project, and the cards' own first fetches land inside the
+five-second advance on the slower runner (5 where 2 was expected); it now
+counts the poll's own URL. The database tier passed on #271. Also in the annotations, not
 defects: `actions/checkout@v4` and `setup-node@v4` are being forced onto
 Node 24 by the runner and `ubuntu-latest` moves to Ubuntu 26 from
 2026-10-19, so the workflow's actions want bumping to v5 when somebody is in
