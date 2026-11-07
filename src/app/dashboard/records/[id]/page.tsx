@@ -49,7 +49,6 @@ import { attributeDisplayLabel, documentLabelTitle } from "@/lib/attribute-label
 import { composeDimensionCell, toMillimetres, valueCarriesItsUnit } from "@/lib/dimensions";
 import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
 import { OpenDisagreementRow, SettledDisagreementItem } from "@/components/records/DisagreementRows";
-import type { Disagreement } from "@/lib/disagreements";
 import { NO_LEVEL_EXPLANATION } from "@/lib/tgq";
 import SpecValue from "@/components/records/SpecValue";
 import { unallocatedQty, variantName } from "@/lib/record-variants";
@@ -66,21 +65,18 @@ import {
   paletteForJsonId,
 } from "@/components/records/BwStandardControl";
 import Button, { buttonClass } from "@/components/ui/Button";
-import GatePanel, { type MatrixFieldRow } from "@/components/records/GatePanel";
+import GatePanel from "@/components/records/GatePanel";
 import RecordDetails from "@/components/records/RecordDetails";
 import RecordPicture, { type RecordPictureState } from "@/components/records/RecordPicture";
 import AddSpec from "@/components/records/AddSpec";
 import AddConfiguration from "@/components/records/AddConfiguration";
 import BillLineConfigurations from "@/components/records/BillLineConfigurations";
 import CommonChecklist from "@/components/records/CommonChecklist";
-import type { ConfigurationFamily } from "@/lib/configuration-family";
 import DifferingFields from "@/components/records/DifferingFields";
 import RecordChecklist from "@/components/records/RecordChecklist";
 import { dimensionProvenance } from "@/components/records/dimension-provenance";
-import type { Palette } from "@/lib/palettes";
-import { GATES, type Gate, type GateStatus } from "@/lib/gates";
+import { GATES } from "@/lib/gates";
 import { describeChaseCounts, summariseGateRows } from "@/lib/chase-counts";
-import type { ItemTgqRow } from "@/lib/item-tgq";
 import PageBody from "@/components/ui/PageBody";
 import PageHeader from "@/components/ui/PageHeader";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
@@ -93,90 +89,10 @@ import { TONE } from "@/components/ui/tone";
 import Tabs from "@/components/ui/Tabs";
 import { useUrlTab } from "@/lib/use-url-tab";
 import RecordTitle from "@/components/records/RecordTitle";
+import { useAttributeActions } from "@/components/records/use-attribute-actions";
 
-export type Answer = {
-  requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;
-  tgq_levels: string[] | null;
-  field_name: string | null; json_id: number | null; field_category: string | null;
-  answer_id: string | null; value: string | null; qualifier: string | null; state: AnswerState; version: number;
-  /** Ties a readiness question to a row of Matthew's matrix that has no BWS field. */
-  local_key: string | null;
-  confirmed_by: string | null; confirmed_at: string | null;
-};
-type SpecRecord = {
-  id: string; record_no: number; item_description: string; product_reference: string | null;
-  qty: number | null; designer: string | null; area: string | null; boq_category: string | null;
-  source_line_no: number | null; version: number; category_id: string | null; level: string | null;
-  /** A level this app guessed. Advisory until somebody accepts it. */
-  level_suggested: string | null; level_suggested_reason: string | null;
-  /** 0028's two free-text columns. `spec_description` is quote-facing;
-   *  `internal_notes` never leaves this app. */
-  spec_description: string | null; internal_notes: string | null;
-  /** 0034: the one sentence a person typed about the dimension cell. */
-  dimension_note: string | null;
-  bws_project_number: string; project_name: string; project_id: string;
-  run_id: string; run_name: string;
-  category_name: string | null; category_family: string | null;
-  /** A fabric split (0024). Both null on an ordinary record. */
-  parent_id: string | null; variant_label: string | null;
-  /** 0039: its number under its bill line, and that line's own number. Null on a bill line. */
-  variant_ordinal?: number | null; parent_record_no?: number | null;
-  /** `retired` for a configuration somebody took out of the export (0038). */
-  status: string;
-  /** Whether the record has a CURRENT picture — a bill's or a crop off the
-   *  drawings — so the screen can decide without asking `/image` and being
-   *  refused. */
-  has_image: boolean;
-};
-
-/** This record's bill line and every live configuration under it, parent first. */
-type FamilyMember = {
-  id: string; record_no: number; variant_label: string | null; qty: number | null;
-  item_description: string; attribute_count: string; refs: string | null;
-  /** 0039. Null on the bill line itself. */
-  variant_ordinal?: number | null; parent_record_no?: number | null;
-  version?: number;
-};
-
-type Attribute = {
-  id: string; attr_group: AttributeGroup; label: string; value: string | null; unit: string | null;
-  /** Where on the item it goes (0029): "Main body & self pipe". */
-  qualifier: string | null;
-  finish_id: string | null; finish_code: string | null; finish_description: string | null;
-  finish_state: string | null;
-  /** `internal` = a code this app minted (0036). It never reaches the export. */
-  finish_code_origin: string | null;
-  dimension_slot: DimensionSlot | null;
-  material_code: string | null; state: AttributeState; sort_order: number; version: number;
-  source_page: number | null; source_run_id: string | null; created_by: string | null;
-  field_name: string | null; json_id: number | null; field_category: string | null;
-  source_filename: string | null; source_document_kind: string | null; source_is_bill?: boolean | null;
-  /**
-   * 0041: the BW standard beside the client's words, its state, and the email
-   * that agreed it. Optional so an older payload still renders.
-   */
-  standard_value?: string | null; standard_state?: string | null;
-  standard_set_by?: string | null; standard_set_at?: string | null;
-  standard_evidence_filename?: string | null; standard_evidence_change_set_id?: string | null;
-  /** 0045: BW's own finish for the linked CODE -- the one in force on a linked spec. */
-  finish_standard_value?: string | null; finish_standard_state?: string | null;
-};
-
-/** A row in the shape `attribute-label.ts` reads: a slotted size is named by its slot. */
-function labelOf(attribute: Pick<Attribute, "label" | "dimension_slot">) {
-  return { label: attribute.label, slot: attribute.dimension_slot };
-}
-
-type Category = { id: string; slug: string; family: string; name: string; requirements_authored: boolean };
-
-type RetiredAttribute = Attribute & {
-  retired_at: string | null;
-  retired_by: string | null;
-  superseded_by_id: string | null;
-};
-
-/** Who owes us the unanswered questions, resolved from the BOQ's designer code. */
-export type DesignerContact = { id: string; name: string; email: string | null; role: string | null; designer_code: string };
+export type { Answer, DesignerContact, Payload } from "@/components/records/record-payload";
+import { labelOf, type Answer, type Payload } from "@/components/records/record-payload";
 
 /**
  * The jobs this screen does, one tab each. Documents joined on 2026-10-05
@@ -186,88 +102,7 @@ export type DesignerContact = { id: string; name: string; email: string | null; 
 const RECORD_TABS = ["specs", "checklist", "gates", "documents", "versions"] as const;
 type RecordTab = (typeof RECORD_TABS)[number];
 
-/** One end of a mock-up link (0043): a record, its number and its phase. */
-type MockupLink = { id: string; recordNo: number; runName: string; status: string };
-
 const NO_PICTURE: RecordPictureState = { current: null, offered: null };
-
-export type Payload = {
-  record: SpecRecord;
-  /**
-   * The current picture and where it came from, and the one a person may swap
-   * in (2026-10-05). Optional: a payload built before it carries none, and the
-   * panel then shows nothing rather than a picture it cannot caption.
-   */
-  picture?: RecordPictureState;
-  /**
-   * The mock-up phase, in both directions (0043). `of` is the record a mock-up
-   * item was added from; `copies` are this record's copies on the mock-up
-   * phase, a retired one included and marked. Optional: an older payload has none.
-   */
-  mockup?: { isMockup: boolean; of: MockupLink | null; copies: MockupLink[] };
-  refs: { ref_system: string; ref_value: string }[];
-  attributes: Attribute[];
-  retiredAttributes: RetiredAttribute[];
-  /**
-   * What a later document said that disagrees with a value this record holds
-   * (0046) — open and settled. Optional: an older payload carries none.
-   */
-  disagreements?: Disagreement[];
-  answers: Answer[];
-  categories: Category[];
-  specFields: { id: string; name: string; json_id: number }[];
-  /** The project's finishes library, for the Attach control on the Specs tab. */
-  finishes: {
-    id: string; code: string; code_origin: string; kind: string | null;
-    description: string | null; state: string;
-  }[];
-  /** Every palette, options included. A BWS-owned one arrives with none. */
-  palettes: (Omit<Palette, "options"> & { allows_free_text: boolean; source_note: string | null; synced_at: string | null; options: Palette["options"] })[];
-  /** Which palette a question offers, by BWS field id or by local key. */
-  paletteByQuestion: { json_id: number | null; local_key: string | null; palette_key: string }[];
-  family: FamilyMember[];
-  /**
-   * A split bill line's configurations with their live specs and answers,
-   * for what they have in common. Null on a configuration and on a line with
-   * none.
-   */
-  configurationFamily?: ConfigurationFamily | null;
-  /** Null where this record's category is not on Matthew's matrix. */
-  gates: Record<Gate, GateStatus> | null;
-  /**
-   * Which model decides this record's TGQ, as data rather than as a verdict.
-   *
-   * Null where his matrix does not cover the category, which means the 0019
-   * placeholder applies — NOT that nothing blocks a quote. Arrays because a
-   * Set does not survive JSON; the screen rebuilds them.
-   */
-  tgqMatrix: { fields: number[]; localKeys: string[] } | null;
-  /**
-   * Which questions have already been ASKED and not answered, keyed by
-   * `questionKey(recordId, requirementId, 0)` — derived, never stored.
-   */
-  waiting: Record<string, { draftId: string; sentAt: string | null; contactName: string }>;
-  designerContact: DesignerContact | null;
-  designerContactAmbiguous: boolean;
-  /** `toQuote`/`alsoOutstanding`/`toChase` are NULL where the record has no level. A dash, never a zero. */
-  quoteReadiness: {
-    toQuote: number | null;
-    /** Of `toQuote`, the ones a chase would ask — readiness rows are ours to record. */
-    toChase: number | null;
-    /** Project-wide TGQ questions on this item: answered once on the project, never in `toQuote`. */
-    projectWide?: number | null;
-    /** The rows `toQuote` counts (`itemTgq`). THE LIST IS THE COUNT. */
-    rows?: ItemTgqRow[];
-    model?: "matrix" | "placeholder";
-    alsoOutstanding: number | null;
-    outstanding: number;
-    settled: number;
-    notApplicable: number;
-    noLevel: boolean;
-  };
-  /** Matthew's matrix rows for this category. Null where his matrix does not reach it. */
-  matrixFields: MatrixFieldRow[] | null;
-};
 
 /**
  * Half a sentence on a group of captured specs, where the group carries a rule.
@@ -338,38 +173,39 @@ function RecordView() {
   // Set when the server refuses an edit for want of a reason. Holds everything
   // needed to replay the same edit once the reviewer has said why.
   const [pendingReason, setPendingReason] = useState<PendingReason | null>(null);
-  // The spec a reviewer has asked to take off this item, waiting for a reason.
-  // Retiring destroys a statement a document made, so the reason is required
-  // here rather than only on an override.
-  const [retiring, setRetiring] = useState<Attribute | null>(null);
-  const [retireReason, setRetireReason] = useState("");
-  const [retireBusy, setRetireBusy] = useState(false);
+  const {
+    retiring,
+    setRetiring,
+    retireReason,
+    setRetireReason,
+    retireBusy,
+    correcting,
+    setCorrecting,
+    correctValue,
+    setCorrectValue,
+    correctUnit,
+    setCorrectUnit,
+    correctState,
+    setCorrectState,
+    correctReason,
+    setCorrectReason,
+    correctBusy,
+    standardEditing,
+    setStandardEditing,
+    attaching,
+    setAttaching,
+    attachTo,
+    setAttachTo,
+    attachReason,
+    setAttachReason,
+    attachBusy,
+    retire,
+    beginCorrection,
+    correct,
+    attach,
+    restore,
+  } = useAttributeActions(reloadThen);
   const [showRetired, setShowRetired] = useState(false);
-  /**
-   * THE SPEC BEING CORRECTED, and the boxes it opened pre-filled.
-   *
-   * PRE-FILLING IS RIGHT HERE and the level picker's trap does not apply: that
-   * rule is about a control whose ACTION is the selection, where a select
-   * already reading "Simple" fires no change event when somebody picks Simple.
-   * The action here is the Save, which fires whatever the boxes say.
-   *
-   * A correction is a SUPERSESSION, not an edit in place — see
-   * `src/lib/attribute-correct.ts`. The old row stays under "show retired",
-   * marked as superseded, with who corrected it and why.
-   */
-  const [correcting, setCorrecting] = useState<Attribute | null>(null);
-  const [correctValue, setCorrectValue] = useState("");
-  const [correctUnit, setCorrectUnit] = useState<AttributeUnit | "">("");
-  const [correctState, setCorrectState] = useState<AttributeState>("confirmed");
-  const [correctReason, setCorrectReason] = useState("");
-  const [correctBusy, setCorrectBusy] = useState(false);
-  /** The spec whose finishes-library link is being changed, and what to. */
-  /** Which spec's BW standard is being set or agreed, and which of the two (0041). */
-  const [standardEditing, setStandardEditing] = useState<{ id: string; mode: "set" | "agree" } | null>(null);
-  const [attaching, setAttaching] = useState<Attribute | null>(null);
-  const [attachTo, setAttachTo] = useState("");
-  const [attachReason, setAttachReason] = useState("");
-  const [attachBusy, setAttachBusy] = useState(false);
   // The header's "Add a spec by hand" opens the form beside the specs it adds
   // to. One action, one button: the page-level action lives in the band.
   const [addingSpec, setAddingSpec] = useState(false);
@@ -602,139 +438,6 @@ function RecordView() {
       if (res.ok) setConfigReason(null);
     } finally {
       setConfigStatusBusy(false);
-    }
-  }
-
-  async function retire() {
-    if (!retiring || !retireReason.trim()) return;
-    setRetireBusy(true);
-    try {
-      const res = await apiFetch(`/api/attributes/${retiring.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ status: "retired", version: retiring.version, reason: retireReason.trim() }),
-      });
-      await reloadThen(res.ok ? null : res.error);
-      if (res.ok) {
-        setRetiring(null);
-        setRetireReason("");
-      }
-    } finally {
-      // Always reset: a non-JSON error must not leave the dialog stuck.
-      setRetireBusy(false);
-    }
-  }
-
-  /** Open the editor on one spec, filled in with what it currently says. */
-  function beginCorrection(attribute: Attribute) {
-    setCorrecting(attribute);
-    setCorrectValue(attribute.value ?? "");
-    setCorrectUnit((attribute.unit as AttributeUnit | null) ?? "");
-    setCorrectState(attribute.state);
-    // NOT pre-filled: the reason is the one thing nobody can guess, and a
-    // default would be twenty rows in the trail reading the same sentence.
-    setCorrectReason("");
-  }
-
-  async function correct() {
-    if (!correcting || !correctReason.trim()) return;
-    setCorrectBusy(true);
-    try {
-      const res = await apiFetch<{ finishUnlinked?: boolean }>(
-        `/api/attributes/${encodeURIComponent(correcting.id)}/correct`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            value: correctState === "tbc" && !correctValue.trim() ? null : correctValue,
-            unit: correctUnit === "" ? null : correctUnit,
-            state: correctState,
-            version: correcting.version,
-            reason: correctReason.trim(),
-          }),
-        },
-      );
-      // RELOAD FIRST, REPORT AFTER. This screen clears its banner on a
-      // successful load, so setting the message first shows a 409 for a few
-      // milliseconds and then nothing at all — the click looks as though it
-      // never registered.
-      await reloadThen(
-        res.ok
-          ? res.data?.finishUnlinked
-            ? "Corrected. The finishes library says something else about that code, so this item is no longer linked to it — the library row is untouched."
-            : null
-          : res.error,
-      );
-      if (res.ok) setCorrecting(null);
-    } finally {
-      // Always, so an HTML error page cannot leave the Save button dead.
-      setCorrectBusy(false);
-    }
-  }
-
-  /**
-   * LINKING ONE SPEC TO THE FINISHES LIBRARY, or letting it stand on its own
-   * words.
-   *
-   * ==========================================================================
-   * `PATCH /api/attributes/[id]/finish` has been built since 0018 — version-
-   * checked, reason-bearing, with its own `finish_link` / `finish_unlink`
-   * change kinds — and no screen called it. Found while tracing why the S-203
-   * fabric never reached the library (found-in-use.md, 2026-09-22): half of
-   * that entry was a keying decision and half was a route with no button.
-   *
-   * LINKING CHANGES WHAT THE FILE SAYS. `composeFinishCell` renders the
-   * LIBRARY wherever an attribute is linked, so the BWS cell, the checklist
-   * answer and this screen all move from the page's own words to the
-   * library's. That is edit-once working as designed, and it is exactly why
-   * this is a person's act with a sentence beside it rather than something a
-   * confirm does on a resemblance.
-   * ==========================================================================
-   */
-  async function attach() {
-    if (!attaching) return;
-    const unlinking = attachTo === "";
-    if (unlinking && !attachReason.trim()) return;
-    setAttachBusy(true);
-    try {
-      const res = await apiFetch(`/api/attributes/${encodeURIComponent(attaching.id)}/finish`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          finishId: unlinking ? null : attachTo,
-          version: attaching.version,
-          ...(attachReason.trim() ? { reason: attachReason.trim() } : {}),
-        }),
-      });
-      // Reload first, report after — this screen clears its banner on a
-      // successful load, so a 409 set beforehand flashes and vanishes.
-      await reloadThen(res.ok ? null : res.error);
-      if (res.ok) {
-        setAttaching(null);
-        setAttachTo("");
-        setAttachReason("");
-      }
-    } finally {
-      // Always, so an HTML error page cannot leave the button dead.
-      setAttachBusy(false);
-    }
-  }
-
-  async function restore(attribute: RetiredAttribute) {
-    setRetireBusy(true);
-    try {
-      const res = await apiFetch(`/api/attributes/${attribute.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          status: "active",
-          version: attribute.version,
-          reason: `Put back on the item after being retired${attribute.retired_by ? ` by ${attribute.retired_by}` : ""}.`,
-        }),
-      });
-      await reloadThen(res.ok ? null : res.error);
-    } finally {
-      setRetireBusy(false);
     }
   }
 
