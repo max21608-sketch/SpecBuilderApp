@@ -34,8 +34,6 @@ import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
   ATTRIBUTE_UNITS,
-  DIMENSION_SLOT_LABELS,
-  type AnswerState,
   type AttributeGroup,
   type AttributeState,
   type AttributeUnit,
@@ -55,8 +53,7 @@ import { unallocatedQty, variantName } from "@/lib/record-variants";
 import { recordLabel as formatRecordLabel, recordShortLabel } from "@/lib/record-label";
 import RecordHistory from "@/components/history/RecordHistory";
 import RecordDocuments from "@/components/records/RecordDocuments";
-import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
-import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
+import ReasonPrompt from "@/components/history/ReasonPrompt";
 import {
   BwFinishFromLibrary,
   BwStandardPanel,
@@ -70,9 +67,7 @@ import RecordPicture, { type RecordPictureState } from "@/components/records/Rec
 import AddSpec from "@/components/records/AddSpec";
 import AddConfiguration from "@/components/records/AddConfiguration";
 import BillLineConfigurations from "@/components/records/BillLineConfigurations";
-import CommonChecklist from "@/components/records/CommonChecklist";
 import DifferingFields from "@/components/records/DifferingFields";
-import RecordChecklist from "@/components/records/RecordChecklist";
 import { dimensionProvenance } from "@/components/records/dimension-provenance";
 import { GATES } from "@/lib/gates";
 import { describeChaseCounts, summariseGateRows } from "@/lib/chase-counts";
@@ -90,9 +85,10 @@ import { useUrlTab } from "@/lib/use-url-tab";
 import RecordTitle from "@/components/records/RecordTitle";
 import { useAttributeActions } from "@/components/records/use-attribute-actions";
 import ConfigurationPanel from "@/components/records/ConfigurationPanel";
+import ChecklistTab, { useChecklistSave } from "@/components/records/ChecklistTab";
 
 export type { Answer, DesignerContact, Payload } from "@/components/records/record-payload";
-import { labelOf, type Answer, type Payload } from "@/components/records/record-payload";
+import { labelOf, type Payload } from "@/components/records/record-payload";
 
 /**
  * The jobs this screen does, one tab each. Documents joined on 2026-10-05
@@ -120,7 +116,6 @@ function RecordView() {
   const { id } = useParams<{ id: string }>();
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [savingId, setSavingId] = useState<string | null>(null);
   const [savingCategory, setSavingCategory] = useState(false);
   const [savingLevel, setSavingLevel] = useState(false);
   /**
@@ -151,28 +146,13 @@ function RecordView() {
   // under the edit that caused it instead of going stale until a page reload.
   // NEVER part of an input's key (audit G2): see `refusals`.
   const [historyKey, setHistoryKey] = useState(0);
-  /**
-   * WHICH ANSWER BOXES MUST SHOW THE SERVER AGAIN, per answer (audit G2).
-   *
-   * The checklist's inputs were keyed on `historyKey`, so every save remounted
-   * every box: type in A, tab to B, type, and A's reload replaced B's typing
-   * with the server's value before any blur could save it. CLAUDE.md records
-   * the same trap for the details panel. A box now remounts only when its own
-   * answer's version moves, or when its own save was REFUSED, which is the one
-   * case where the version stays put and the typed words must still give way
-   * to what the server holds.
-   */
-  const [refusals, setRefusals] = useState<Record<string, number>>({});
-  const refused = (answerId: string) =>
-    setRefusals((current) => ({ ...current, [answerId]: (current[answerId] ?? 0) + 1 }));
   // NULL UNTIL THE TAB HAS LOADED ITS LIST. The count is the length of that
   // list rather than a second query in the record route: one loader decides
   // which documents count, and a tab number computed elsewhere is how the
   // count and the table come to disagree. Versions makes the same choice.
   const [documentCount, setDocumentCount] = useState<number | null>(null);
-  // Set when the server refuses an edit for want of a reason. Holds everything
-  // needed to replay the same edit once the reviewer has said why.
-  const [pendingReason, setPendingReason] = useState<PendingReason | null>(null);
+  const checklist = useChecklistSave({ recordId: id, answers: data?.answers ?? null, reloadThen, setError });
+  const { savingId, refusals, refused, pendingReason, setPendingReason, save, saveWithReason } = checklist;
   const {
     retiring,
     setRetiring,
@@ -251,96 +231,6 @@ function RecordView() {
   const currentPictureId = data?.picture?.current?.id ?? null;
   useEffect(() => { setImageFailed(false); }, [currentPictureId]);
 
-  async function save(
-    answer: Answer,
-    value: string,
-    state: AnswerState,
-    reason?: string,
-    evidence?: UploadedEvidence | null,
-    /** Absent keeps the qualifier the answer holds; the route reads it that way. */
-    qualifier?: string | null,
-  ) {
-    // Reachable only if a requirement was added to the category after this
-    // record was given one. Choosing the category again creates the missing
-    // rows; re-importing is no longer the only way out.
-    if (!answer.answer_id) {
-      setError("This question has no answer row yet. Set the category again to add the newer questions.");
-      return;
-    }
-    setSavingId(answer.answer_id);
-    setError(null);
-    try {
-      const res = await apiFetch(`/api/answers/${answer.answer_id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ value, state, version: answer.version, reason, evidence, qualifier }),
-      });
-      if (!res.ok) {
-        // The server asks for a reason only when the edit OVERRIDES a settled
-        // answer. It is asked for here rather than on every keystroke, and it
-        // carries the original edit so nothing has to be retyped.
-        if (res.data?.code === "reason_required") {
-          // THE QUALIFIER TRAVELS WITH IT (audit G3). It was left out, so a
-          // qualifier-only edit was replayed without the qualifier, the route
-          // kept the old one, and the box closed as though it had saved.
-          setPendingReason({
-            prompt: answer.prompt,
-            answerId: answer.answer_id,
-            value,
-            state,
-            version: answer.version,
-            ...(qualifier !== undefined ? { qualifier } : {}),
-          });
-          await reloadThen(null);
-          return;
-        }
-        await reloadThen(res.error);
-        refused(answer.answer_id);
-        return;
-      }
-      await reloadThen(null);
-    } finally {
-      setSavingId(null);
-    }
-  }
-
-  /**
-   * One dimension, recorded as an ATTRIBUTE off the Checklist tab.
-   *
-   * NOT an answer. The composed Dimensions cell is a projection of these rows
-   * — see `src/components/records/DimensionAnswer.tsx` — so a value written
-   * straight into the answer carries no slots behind it, and is marked
-   * `manual`, which puts the cell out of reach of every later recomposition.
-   * `createAttribute` joins the actor's open change, as everywhere else.
-   */
-  async function recordDimension(input: {
-    slot: DimensionSlot;
-    value: string;
-    unit: AttributeUnit;
-  }): Promise<boolean> {
-    setError(null);
-    const res = await apiFetch("/api/attributes", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        recordId: id,
-        attrGroup: "dimension",
-        // The slot's own name, so the row reads as what it is on the Specs tab
-        // and in the long-form sheet.
-        label: DIMENSION_SLOT_LABELS[input.slot],
-        value: input.value,
-        unit: input.unit,
-        dimensionSlot: input.slot,
-        state: "confirmed",
-      }),
-    });
-    // Reload first, report afterwards — a refusal (an occupied slot, a stale
-    // screen) means this screen is out of date, and `load()` would otherwise
-    // clear the sentence that explains it.
-    await reloadThen(res.ok ? null : res.error);
-    return res.ok;
-  }
-
   async function setLevel(next: string) {
     if (!data) return;
     setSavingLevel(true);
@@ -373,21 +263,6 @@ function RecordView() {
       // Always reset: an HTML error page must not leave the select disabled.
       setSavingCategory(false);
     }
-  }
-
-  /** Replays the edit the server refused, now that there is a reason for it. */
-  async function saveWithReason(reason: string, evidence: UploadedEvidence | null) {
-    if (!data || !pendingReason) return;
-    const answer = data.answers.find((row) => row.answer_id === pendingReason.answerId);
-    // The answer moved under the prompt — a stale screen, so say so rather
-    // than writing to whatever is at that id now.
-    if (!answer) {
-      setPendingReason(null);
-      await reloadThen("That question changed while the reason box was open. Nothing was saved — check it and try again.");
-      return;
-    }
-    await save(answer, pendingReason.value, pendingReason.state, reason, evidence, pendingReason.qualifier);
-    setPendingReason(null);
   }
 
   /** Opens the Add panel at the top of the Specs tab and brings it into view. */
@@ -1548,39 +1423,17 @@ function RecordView() {
           </div>
         )}
 
-        {tab === "checklist" && splitLine && configurationFamily && (
-          <div className="mb-4">
-            <CommonChecklist
-              lineId={record.id}
-              family={configurationFamily}
-              palettes={data.palettes ?? []}
-              paletteByQuestion={data.paletteByQuestion ?? []}
-              onDone={reloadThen}
-            />
-            <p className="mt-3 text-xs text-neutral-500">
-              Below: the bill line&rsquo;s OWN checklist, which is not exported while it has configurations.
-            </p>
-          </div>
-        )}
         {tab === "checklist" && (
-          <RecordChecklist
-            recordId={record.id}
-            projectId={record.project_id}
+          <ChecklistTab
+            record={record}
+            payload={data}
             answers={answers}
-            level={level}
-            tgqMatrix={data.tgqMatrix}
-            matrixFields={data.matrixFields}
-            palettes={data.palettes ?? []}
-            paletteByQuestion={data.paletteByQuestion ?? []}
-            waiting={data.waiting ?? {}}
-            designerContact={data.designerContact}
             attributes={attributes}
+            level={level}
             readiness={readiness}
-            savingId={savingId}
-            refusals={refusals}
-            dimensionNote={record.dimension_note}
-            onSave={(answer, value, state) => void save(answer as Answer, value, state)}
-            onRecordDimension={recordDimension}
+            commonFamily={splitLine ? configurationFamily : null}
+            checklist={checklist}
+            reloadThen={reloadThen}
           />
         )}
 
