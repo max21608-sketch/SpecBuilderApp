@@ -34,6 +34,7 @@
 //     and rebuilding the default selection each time silently re-ticked
 //     everything the user had just untucked.
 // ============================================================================
+import { unpackContactGroups, type PackedContactGroups } from "@/lib/chase-inventory";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import Link from "next/link";
@@ -161,6 +162,9 @@ type Inventory = {
   };
 };
 
+/** The inventory as `?questions=once` ships it: the questions once, the groups by position. */
+type PackedInventory = Omit<Inventory, "groups"> & PackedContactGroups<Contact, Question>;
+
 type Payload = {
   project: { id: string; bws_project_number: string; name: string; shared_inbox: string | null; version: number };
   contacts: Contact[];
@@ -250,16 +254,28 @@ function DraftsView() {
       setError("No project selected.");
       return;
     }
-    const res = await apiFetch<Payload>(`/api/drafts?projectId=${encodeURIComponent(projectId)}`);
+    // `questions=once` ships each question ONCE and the groups name theirs by
+    // position (audit F13 / 5.4 A1: every internal colleague's group used to
+    // carry its own copy of the whole list, 62.9 MB on a 440-record project);
+    // `unpackContactGroups` puts the groups back in the shape every reader
+    // below expects, so nothing else on this screen changed.
+    const res = await apiFetch<Omit<Payload, "inventory"> & { inventory: PackedInventory }>(
+      `/api/drafts?projectId=${encodeURIComponent(projectId)}&questions=once`,
+    );
     if (!res.ok) {
       setError(res.error);
       return;
     }
     setError(null);
-    setData(res.data);
+    const { questions: _packedQuestions, ...inventoryRest } = res.data.inventory;
+    const data: Payload = {
+      ...res.data,
+      inventory: { ...inventoryRest, groups: unpackContactGroups(res.data.inventory) },
+    };
+    setData(data);
 
     const live = new Set<string>();
-    for (const group of res.data.inventory.groups) {
+    for (const group of data.inventory.groups) {
       for (const question of group.questions) {
         live.add(key(question.recordId, question.requirementId));
       }
@@ -270,7 +286,7 @@ function DraftsView() {
       // EXACTLY WHAT BLOCKS A QUOTE for the contact on screen, which may be
       // one named in the URL. It used to be both tiers across every contact,
       // which is what Max saw: 822 ticked where four were meant.
-      setSelected(defaultSelection(flatten(res.data), effectiveContact(contactRef.current, res.data)));
+      setSelected(defaultSelection(flatten(data), effectiveContact(contactRef.current, data)));
       return;
     }
     setSelected((prev) => new Set([...prev].filter((k) => live.has(k))));

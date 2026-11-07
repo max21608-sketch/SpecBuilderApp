@@ -24,6 +24,8 @@ export type Answer = {
 export type SpecRecord = {
   id: string; record_no: number; item_description: string; product_reference: string | null;
   qty: number | null; designer: string | null; area: string | null; boq_category: string | null;
+  /** The bill's quantity cell as printed where it gave no count (0059); the header prints quantityNotGiven(qty_raw). */
+  qty_raw?: string | null;
   source_line_no: number | null; version: number; category_id: string | null; level: string | null;
   /** A level this app guessed. Advisory until somebody accepts it. */
   level_suggested: string | null; level_suggested_reason: string | null;

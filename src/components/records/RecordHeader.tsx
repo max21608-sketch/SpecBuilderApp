@@ -8,6 +8,7 @@
 //
 // The TAB BAR is the page's and arrives as `tabs`: its counts come from the
 // tabs' own data, and which tab is chosen is the page's URL state.
+import { quantityNotGiven } from "@/lib/printed-number";
 import { Fragment } from "react";
 import Link from "next/link";
 import { ITEM_LEVEL_LABELS, normaliseItemLevel, type ItemLevel } from "@/lib/spec-vocab";
@@ -77,7 +78,7 @@ export default function RecordHeader({
       ) : (
         // The phase table's words for the same state. A mock-up item (0043)
         // always reads this: the bill never said how many are in the room.
-        <span className="text-amber-800">quantity not given</span>
+        <span className="text-amber-800">{quantityNotGiven(record.qty_raw)}</span>
       )}
       {/* THE MOCK-UP, IN WHICHEVER DIRECTION THIS RECORD SITS (0043). */}
       {data.mockup?.of && (
