@@ -16,7 +16,8 @@ import { json } from "@/lib/db";
 import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
-import { restoreAttribute, retireAttribute } from "@/lib/attribute-retire";
+import { restoreAttribute } from "@/lib/attribute-retire";
+import { retireAttributeWithTwins } from "@/lib/twin-writes";
 import { verifyEvidence } from "@/lib/change-sets";
 import { requireUuid, requireWriter } from "@/lib/route-guards";
 
@@ -34,6 +35,20 @@ const Body = z
       })
       .strict()
       .nullable()
+      .optional(),
+    // 0060: the twins a person ticked. Re-read under the lock and checked
+    // against the offer the screen drew (`twin-writes.ts`), never believed.
+    alsoRecords: z
+      .array(
+        z
+          .object({
+            recordId: z.string().uuid(),
+            attributeId: z.string().uuid().nullable().optional(),
+            version: z.number().int().nonnegative().nullable().optional(),
+          })
+          .strict(),
+      )
+      .max(50)
       .optional(),
   })
   .strict();
@@ -69,17 +84,24 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     );
   }
 
+  // Putting a spec back is one item at a time: what its twin holds now may be
+  // a later value, and a restore that reached it would retire that unseen.
+  if (parsed.data.status === "active" && (parsed.data.alsoRecords?.length ?? 0) > 0) {
+    return json({ ok: false, error: "Put a spec back on one item at a time.", field: "alsoRecords" }, 400);
+  }
+
   // The store is asked about any evidence before the transaction (audit A15).
   const evidence = await verifyEvidence(parsed.data.evidence);
   try {
     const result = await withTransaction((txn) =>
       parsed.data.status === "retired"
-        ? retireAttribute(txn, {
+        ? retireAttributeWithTwins(txn, {
             attributeId: id,
             expectedVersion: parsed.data.version,
             reason: parsed.data.reason,
             evidence,
             actor: user.email,
+            alsoRecords: parsed.data.alsoRecords ?? [],
           })
         : restoreAttribute(txn, {
             attributeId: id,

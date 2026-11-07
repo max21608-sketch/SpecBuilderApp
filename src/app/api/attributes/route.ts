@@ -18,7 +18,7 @@ import { json } from "@/lib/db";
 import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
-import { createAttribute } from "@/lib/manual-capture";
+import { createAttributeWithTwins } from "@/lib/twin-writes";
 import { ATTRIBUTE_GROUPS, ATTRIBUTE_UNITS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
 import { requireWriter } from "@/lib/route-guards";
 
@@ -36,6 +36,20 @@ const Body = z
     specFieldId: z.string().uuid().nullable().optional(),
     materialCode: z.string().max(200).nullable().optional(),
     state: z.enum(["confirmed", "tbc"]),
+    // 0060: the twins a person ticked. Re-read under the lock and checked
+    // against the offer the screen drew (`twin-writes.ts`), never believed.
+    alsoRecords: z
+      .array(
+        z
+          .object({
+            recordId: z.string().uuid(),
+            attributeId: z.string().uuid().nullable().optional(),
+            version: z.number().int().nonnegative().nullable().optional(),
+          })
+          .strict(),
+      )
+      .max(50)
+      .optional(),
   })
   .strict();
 
@@ -59,7 +73,7 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const result = await withTransaction((txn) =>
-      createAttribute(txn, { ...parsed.data, actor: user.email }),
+      createAttributeWithTwins(txn, { ...parsed.data, alsoRecords: parsed.data.alsoRecords ?? [], actor: user.email }),
     );
     return json({ ok: true, ...result }, 201);
   } catch (cause) {
