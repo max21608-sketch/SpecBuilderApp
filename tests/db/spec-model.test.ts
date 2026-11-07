@@ -195,7 +195,14 @@ describeIfDb("0002 spec model", () => {
     );
     await expect(
       client.query(`delete from requirements where id = $1`, [requirement.rows[0].id]),
-    ).rejects.toThrow(/violates RESTRICT setting of foreign key constraint/);
+    ).rejects.toThrow(
+      // Postgres 18 (the local stack) words a RESTRICT violation "violates
+      // RESTRICT setting of foreign key constraint"; Postgres 17 (CI, and Neon)
+      // says only "violates foreign key constraint". The constraint's NAME is
+      // the assertion; the setting is checked by the test above it, which
+      // would pass on a CASCADE only by deleting the answer it inserted.
+      /violates (RESTRICT setting of )?foreign key constraint "spec_answers_requirement_id_fkey"/,
+    );
   });
 
   it("caps a split at one level and requires a reason", async () => {

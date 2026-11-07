@@ -416,6 +416,7 @@ traps. A new section goes in its area's file and gets one line here.**
 - [The requirement seeds match on a key, and an answered question keeps its meaning](docs/load-bearing/database-and-trail.md#the-requirement-seeds-match-on-a-key-and-an-answered-question-keeps-its-meaning)
 - [The migration ledger is written by the file's own transaction](docs/load-bearing/database-and-trail.md#the-migration-ledger-is-written-by-the-file-s-own-transaction)
 - [A backtick inside a `sql` template closes it](docs/load-bearing/database-and-trail.md#a-backtick-inside-a-sql-template-closes-it)
+- [The local stack is Postgres 18 and CI is 17, so a test asserts a constraint's NAME, not Postgres's sentence](docs/load-bearing/database-and-trail.md#the-local-stack-is-postgres-18-and-ci-is-17-so-a-test-asserts-a-constraint-s-name-not-postgres-s-sentence)
 
 **The trust boundary** — `docs/load-bearing/boundary-and-ops.md`
 - [Never fetch a client-supplied URL with a store credential](docs/load-bearing/boundary-and-ops.md#never-fetch-a-client-supplied-url-with-a-store-credential)

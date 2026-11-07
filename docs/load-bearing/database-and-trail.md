@@ -323,3 +323,21 @@ backticks — ends the tagged template literal, and esbuild reports a syntax
 error thirty lines away pointing at a word in the comment. The queries are
 tagged templates, so **no backtick may appear inside one**, including in a
 `--` comment. Name the column in plain words there.
+
+### The local stack is Postgres 18 and CI is 17, so a test asserts a constraint's NAME, not Postgres's sentence
+
+Found by the first CI run of the audit build (run #270 on `e7bec9b`,
+2026-11-07): `spec-model.test.ts` asserted that deleting a requirement with
+answers fails with "violates RESTRICT setting of foreign key constraint". It
+does, on Postgres 18, which is what Postgres.app installed for the local stack
+and what every rehearsal ran on, including `tools/localstack/ci.mjs`'s fresh
+database. Postgres 17, which the CI service container and Neon run, says only
+"violates foreign key constraint", and the whole database tier went red on a
+sentence while 744 tests passed on the machine beside it. The rule: a test
+that reads a Postgres error matches the constraint's NAME, which is ours, and
+treats the wording around it as optional, because the wording is Postgres's
+and changes between majors. The same run found `scrollIntoView` called in an
+animation frame on the record page, which jsdom does not implement and which
+fires after the click's assertions, so the tier failed with every test green;
+`scrollIntoView` is always optional-called (`?.()`), as `go-to.ts`,
+`DrawingsReview` and `RecordChecklist` already did.

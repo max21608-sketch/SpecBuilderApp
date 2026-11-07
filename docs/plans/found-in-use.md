@@ -33,6 +33,23 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-11-07: the first CI run of the audit build, on GitHub's Postgres 17
+
+### CI run #270 on `e7bec9b` failed both jobs while 4,951 tests passed locally — FIXED the same evening
+
+Two causes, neither visible on the local stack. `tests/db/spec-model.test.ts`
+matched Postgres 18's wording of a RESTRICT violation and CI runs 17 (the
+regex now matches the constraint's name with the setting optional). The
+record page's "Add a configuration" called `scrollIntoView` in an animation
+frame, which jsdom lacks; it threw after the test's assertions and failed the
+component tier as an unhandled error (now optional-called, as every other
+caller already was). The trap is written up in
+`docs/load-bearing/database-and-trail.md`. Also in the annotations, not
+defects: `actions/checkout@v4` and `setup-node@v4` are being forced onto
+Node 24 by the runner and `ubuntu-latest` moves to Ubuntu 26 from
+2026-10-19, so the workflow's actions want bumping to v5 when somebody is in
+that file.
+
 ## 2026-11-07: seen on staging, the first deploy of the audit build ahead of its migrations
 
 ### Sign-in says it "could not reach the database" when the database is reachable and merely behind the code — OPEN, wording

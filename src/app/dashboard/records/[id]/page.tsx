@@ -190,7 +190,11 @@ function RecordView() {
   function openAddConfiguration() {
     setAddingConfiguration(true);
     setTab("specs");
-    requestAnimationFrame(() => document.getElementById("add-configuration")?.scrollIntoView({ block: "start" }));
+    // Optional-called: `scrollIntoView` is not implemented in jsdom, and this
+    // runs in an animation frame AFTER the click's own assertions, so a throw
+    // here failed the whole component tier on CI (run #270, 2026-11-07) with
+    // every test in it green. The same guard as DrawingsReview and go-to.ts.
+    requestAnimationFrame(() => document.getElementById("add-configuration")?.scrollIntoView?.({ block: "start" }));
   }
 
 
