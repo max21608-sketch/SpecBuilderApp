@@ -164,7 +164,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     select id, source_kind, document_kind, parsed->>'kind' as staged_kind from intake_runs where id = ${id}
   `;
   const run = runs[0];
-  if (!run) return json({ ok: false, error: "No such import." }, 404);
+  if (!run) return json({ ok: false, error: "No such document." }, 404);
 
   try {
     if (run.source_kind === "boq_xlsx") {
@@ -203,7 +203,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     if (run.source_kind !== "spec_document") {
-      return json({ ok: false, error: "That import cannot be confirmed." }, 400);
+      return json({ ok: false, error: "That document cannot be confirmed." }, 400);
     }
 
     if (run.document_kind === "shop_drawings") {

@@ -74,9 +74,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         for update
       `;
       const run = rows[0];
-      if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+      if (!run) throw new DomainConflictError("not_found", "No such document.", { status: 404 });
       if (run.source_kind !== "spec_document") {
-        throw new DomainConflictError("wrong_kind", "That import is not a specification document.", { status: 400 });
+        throw new DomainConflictError("wrong_kind", "That document is not a specification document.", { status: 400 });
       }
       // `confirmed` is allowed: it means nothing is left to REVIEW, and a
       // proposal that never resolved was ignored rather than applied. Re-
@@ -87,13 +87,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       if (expectedVersion !== null && Number(run.version) !== expectedVersion) {
         throw new DomainConflictError(
           "import_version_stale",
-          "This import changed while you were reviewing it. Reload and try again.",
+          "This document changed while you were reviewing it. Reload and try again.",
         );
       }
 
       const staged = (run.parsed ?? null) as StagedSpecDocument | null;
       if (!staged || !Array.isArray(staged.lines)) {
-        throw new DomainConflictError("not_staged", "This import has nothing staged to review.");
+        throw new DomainConflictError("not_staged", "This document has nothing staged to review.");
       }
 
       // Read INSIDE the transaction, so the registers the re-match resolves
@@ -114,7 +114,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         where id = ${id}
         returning version
       `;
-      if (!updated[0]) throw new Error("the import was not updated");
+      if (!updated[0]) throw new Error("the document was not updated");
       return { rematched, added, version: Number(updated[0].version) };
     });
 

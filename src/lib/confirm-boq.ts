@@ -228,12 +228,12 @@ export async function confirmBoqImport(
     for update
   `;
   const run = runs[0];
-  if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+  if (!run) throw new DomainConflictError("not_found", "No such bill.", { status: 404 });
   if (run.source_kind !== "boq_xlsx") {
-    throw new DomainConflictError("wrong_kind", "That import is not a bill of quantities.", { status: 400 });
+    throw new DomainConflictError("wrong_kind", "That bill is not a bill of quantities.", { status: 400 });
   }
   if (run.status === "confirmed") {
-    throw new DomainConflictError("already_confirmed", "This import has already been confirmed.");
+    throw new DomainConflictError("already_confirmed", "This bill has already been confirmed.");
   }
   if (run.status !== "parsed") {
     throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { noun: "bill" }));
@@ -303,7 +303,7 @@ export async function confirmBoqImport(
     0,
   );
   if (lineCount === 0) {
-    throw new DomainConflictError("nothing_to_import", "Every line is ignored — there is nothing to import.", {
+    throw new DomainConflictError("nothing_to_import", "Every line is ignored, so there is nothing to confirm.", {
       status: 400,
     });
   }

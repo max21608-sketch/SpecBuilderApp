@@ -60,7 +60,7 @@ export async function registerBillSpecifications(
     for update
   `;
   const bill = rows[0];
-  if (!bill) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+  if (!bill) throw new DomainConflictError("not_found", "No such bill.", { status: 404 });
   if (bill.source_kind !== "boq_xlsx") {
     throw new DomainConflictError("wrong_kind", "Only a bill of quantities has specifications to read this way.", {
       status: 400,

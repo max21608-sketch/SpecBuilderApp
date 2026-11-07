@@ -83,7 +83,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
           where r.id = ${id}
         `;
   const run = rows[0];
-  if (!run) return json({ ok: false, error: "That import has no stored document." }, 404);
+  if (!run) return json({ ok: false, error: "That document has no stored file." }, 404);
 
   try {
     const source = await streamTrustedBlob(

@@ -82,7 +82,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const runs = await sql`select source_kind, parsed from intake_runs where id = ${importId}`;
   const run = runs[0];
-  if (!run) return json({ ok: false, error: "No such import." }, 404);
+  if (!run) return json({ ok: false, error: "No such bill." }, 404);
   if (run.source_kind !== "boq_xlsx" || !run.parsed) {
     return json({ ok: false, error: "Only a staged bill of quantities has columns to remember." }, 400);
   }

@@ -223,9 +223,21 @@ describe("screen vocabulary: a sub-quote is a phase", () => {
 // built into a variable first and passed by name, and a refusal thrown as a
 // plain `Error` that a route turns into a sentence. Both are rarer than a
 // literal and both are the next place to look if "run" comes back.
+//
+// BOTH BLIND SPOTS ARE NOW READ (audit 5.4 A8): a message passed by NAME is
+// followed to a `const` with a literal initialiser in the same file, and a
+// `new Error(...)` under `src/app/api` is read as a refusal, because a route's
+// catch turns its message into the `error` a screen prints. What is still not
+// seen: a message built from parts at run time (a `let`, a function's return).
 // ============================================================================
 
 const SERVER_DIRS = ["src/lib", "src/app/api"];
+
+/**
+ * Files whose "import" sentences wait on another coder (5.3 is splitting this
+ * route into handlers on the same day). Each entry is a debt, not a rule.
+ */
+const IMPORT_WORD_PENDING = new Set([path.join("src", "app", "api", "imports", "[id]", "route.ts")]);
 
 /**
  * The helpers that turn a status into words a person chose. A template span
@@ -277,9 +289,30 @@ function serverMessages(file: string): ServerMessage[] {
     const { line } = sf.getLineAndCharacterOfPosition(root.getStart(sf));
     found.push({ file: path.relative(ROOT, file), line: line + 1, text: texts.join(" … ").replace(/\s+/g, " ").trim(), statusSpans });
   };
+  // `const MESSAGE = "...";` anywhere in the file, for a message passed by name.
+  const constants = new Map<string, ts.Expression>();
+  const gather = (node: ts.Node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      ts.isVariableDeclarationList(node.parent) &&
+      (node.parent.flags & ts.NodeFlags.Const) !== 0 &&
+      (ts.isStringLiteral(node.initializer) || ts.isNoSubstitutionTemplateLiteral(node.initializer) || ts.isTemplateExpression(node.initializer))
+    ) {
+      constants.set(node.name.text, node.initializer);
+    }
+    ts.forEachChild(node, gather);
+  };
+  gather(sf);
+  const message = (node: ts.Expression) => (ts.isIdentifier(node) && constants.has(node.text) ? constants.get(node.text)! : node);
+  const inRoute = path.relative(ROOT, file).startsWith(path.join("src", "app", "api"));
   const visit = (node: ts.Node) => {
     if (ts.isNewExpression(node) && node.expression.getText(sf) === "DomainConflictError" && node.arguments?.[1]) {
-      collect(node.arguments[1]);
+      collect(message(node.arguments[1]));
+    }
+    if (inRoute && ts.isNewExpression(node) && node.expression.getText(sf) === "Error" && node.arguments?.[0]) {
+      collect(message(node.arguments[0]));
     }
     if (
       ts.isPropertyAssignment(node) &&
@@ -306,6 +339,17 @@ describe("server vocabulary: what a refused request says to a person", () => {
       offenders.map(where),
       `A refusal's sentence is screen text. A sub-quote is a PHASE; a document read is a "read" or a "document":\n${offenders.map(where).join("\n")}`,
     ).toEqual([]);
+  });
+
+  it("says document or bill, never import (audit 5.4 A8)", () => {
+    // "No such import." and "This import changed" were the database's word for
+    // an intake run, printed to a person who had uploaded a DOCUMENT. The
+    // split route is listed until its owner takes the one-line change.
+    const offenders = SERVER_MESSAGES.filter(
+      // "A BWS import" is BWS's own word for loading the export, and right.
+      (hit) => /\bimports?\b/i.test(hit.text.replace(/\bBWS import/g, "")) && !IMPORT_WORD_PENDING.has(hit.file),
+    );
+    expect(offenders.map(where), `Say "document" or "bill" (src/lib/intake-status.ts):\n${offenders.map(where).join("\n")}`).toEqual([]);
   });
 
   it("never blames another tab, or a person, it cannot see", () => {

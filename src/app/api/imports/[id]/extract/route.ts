@@ -108,7 +108,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       let hasSlot = true;
       if (action === "start") {
         const scope = await txn`select project_id, batch_id from intake_runs where id = ${id}`;
-        if (!scope[0]) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+        if (!scope[0]) throw new DomainConflictError("not_found", "No such document.", { status: 404 });
         hasSlot = await takeReadSlot(txn, {
           projectId: String(scope[0].project_id),
           batchId: scope[0].batch_id ? String(scope[0].batch_id) : null,
@@ -126,14 +126,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         for update
       `;
       const run = rows[0];
-      if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+      if (!run) throw new DomainConflictError("not_found", "No such document.", { status: 404 });
       if (run.source_kind !== "spec_document") {
         throw new DomainConflictError("wrong_kind", "Only a specification document is read by the model.", { status: 400 });
       }
       if (Number(run.version) !== expectedVersion) {
         throw new DomainConflictError(
           "import_version_stale",
-          "This import changed while the page was open. Reload before starting an extraction.",
+          "This document changed since this screen loaded. Reload before starting a read.",
         );
       }
 
@@ -142,7 +142,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
       if (action === "retry-dispatch") {
         if (status !== "queued" || !currentAttempt) {
-          throw new DomainConflictError("not_dispatchable", "This import is not waiting to be dispatched.");
+          throw new DomainConflictError("not_dispatchable", "This document is not waiting to be read.");
         }
         if (!run.within_deadline) {
           throw new DomainConflictError("attempt_expired", "That attempt has passed its deadline. Start a new one.");
@@ -254,7 +254,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
  */
 async function opened(txn: Txn, runId: string, attemptId: string, actor: string): Promise<string> {
   const id = await openAttempt(txn, runId, attemptId, actor);
-  if (!id) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+  if (!id) throw new DomainConflictError("not_found", "No such document.", { status: 404 });
   return id;
 }
 

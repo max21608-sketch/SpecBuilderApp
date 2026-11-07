@@ -60,7 +60,10 @@ describe("PdfTranscriptionPanel", () => {
   it("waits on another tab's transcription rather than starting a second", () => {
     const fetchMock = stubFetch(() => new Response("{}", { status: 200 }));
     panel({ record: { pending: { requestId: "r", at: new Date().toISOString() } } });
-    expect(screen.getByText(/started in another tab or a moment ago/)).toBeTruthy();
+    // It knows only that a transcription is running that this screen did not
+    // start: "another tab" sent people looking for one (audit 5.4 A8).
+    expect(screen.getByText(/It was started a moment ago; this screen shows the result when it lands/)).toBeTruthy();
+    expect(screen.queryByText(/another tab/)).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
