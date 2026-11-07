@@ -511,8 +511,25 @@ export async function unassignMessage(
 
     if (message.intake_run_id) {
       const runs = await txn`
-        select parsed from intake_runs where id = ${message.intake_run_id} for update
+        select parsed, status,
+               floor(extract(epoch from (now() - coalesce(processing_started_at, queued_at, updated_at))) / 60)::int as minutes
+          from intake_runs where id = ${message.intake_run_id} for update
       `;
+      // A READ IN FLIGHT FINISHES ON THE OLD PROJECT (audit 5.4 A9). The
+      // worker owns a queued or parsing run through its claim, so taking the
+      // message off here would leave a paid read landing on a project the
+      // message no longer names, and the next project would pay again. The
+      // screen already shows the read as running; refusing until it lands is
+      // the cheap honest answer, and Unassign works the moment it has.
+      const status = String(runs[0]?.status ?? "");
+      if (status === "queued" || status === "parsing") {
+        const minutes = Math.max(0, Number(runs[0]?.minutes ?? 0));
+        const ago = minutes === 0 ? "under a minute ago" : `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+        throw new DomainConflictError(
+          "read_in_flight",
+          `Its read is still running (started ${ago}). Wait for it, then take it off.`,
+        );
+      }
       const staged = runs[0]?.parsed as { lines?: { reviewStatus?: string }[] } | null;
       const applied = (staged?.lines ?? []).filter((line) => line.reviewStatus === "applied").length;
       if (applied > 0) {

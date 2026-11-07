@@ -198,6 +198,13 @@ describeIfDb("an uploaded email", () => {
     const { assignMessage, unassignMessage } = await import("@/lib/email-registration");
     const version = async () =>
       Number((await client.query(`select version from email_messages where id = $1`, [messageId])).rows[0].version);
+    // The upload's read has landed: an unassign waits for a read in flight
+    // (audit 5.4 A9), and the stubbed publish leaves it queued.
+    await client.query(
+      `update intake_runs set status = 'parsed', parsed = null
+        where id = (select intake_run_id from email_messages where id = $1)`,
+      [messageId],
+    );
     await unassignMessage(messageId, { actor: "__qa@example.test", expectedVersion: await version() });
 
     published.length = 0;
