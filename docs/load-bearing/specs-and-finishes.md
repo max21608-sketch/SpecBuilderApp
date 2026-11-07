@@ -825,6 +825,66 @@ words so a value stays checkable against its page; the CELL renders the library.
     does. Where nothing can be suggested the row keeps the empty picker and the
     screen says why.
 
+### One item on two bill lines is a TWIN, and a spec is offered to both
+
+`db/migrations/0060_spec_record_twins.sql`, `src/lib/record-twins.ts`,
+`src/lib/twin-offer.ts`, `src/lib/twin-writes.ts`, `src/lib/twin-suggest.ts`,
+`src/lib/bill-twins.ts`, `src/lib/drawing-document.ts` (`readTwinLines`),
+`src/components/records/{TwinTicks,TwinLinesPanel}.tsx`,
+`src/components/imports/BillTwinCell.tsx`, `docs/plans/twin-lines-2026-11-06.md`
+
+Max, 2026-10-12: GR-FUR-13 and PL-FUR-13 are one stool on two lines (Guest
+Suites, Ambassador Suite), so link them so a spec is added to both at once.
+The spec-change audit found what not having it costs: every fix to one of the
+two is made twice or missed once (finding 9). Built 2026-11-07 (audit 5.6) to
+the plan, with its defaults T1–T3.
+
+- **A twin is a LINK, never a merge.** Both lines stay records with their own
+  quantity, area, export row and specs, and one row per record each keeps its
+  own provenance. Nothing that reads specs reads `spec_record_twins`: not the
+  export, the gates, TGQ, the chase or the history. The link only decides
+  which records a person's act is OFFERED on.
+- **Shape.** One row per unordered pair (an expression unique index on
+  least/greatest, covering retired rows, so linking a pair again restores its
+  own row). Both ends are bill lines of one project — `linkTwins` says so in
+  words and a trigger enforces it; a configuration answers with its bill
+  line's twins and offers none. Retired, never deleted. `twin_link` and
+  `twin_unlink` need a reason (the CHECKs re-listed from the live text), and an
+  open change counts as one.
+- **One offer, two callers.** `twinOffer` draws the ticks on the screen;
+  `twin-writes.ts` re-runs it under the records' locks, taken in id order, and
+  refuses the whole act on any mismatch, calling the UNCHANGED writers
+  (`createAttribute`, `correctAttribute`, `retireAttribute`) once per record:
+  one change set, one version per record, `spec_records.version` untouched.
+  The writers are wrapped rather than given `alsoRecords`, to avoid an import
+  cycle. Ticked by default where the twin's slot is free or its row says the
+  same (T1). A twin that already HOLDS the slot is offered unticked with its
+  value; ticking it is the replace acknowledgement and the old row is
+  superseded. A twin whose row DIFFERS is listed and left alone, never
+  flattened ("PL-FUR-13 reads W 560mm: left alone").
+- **A drawing on two twinned lines of one phase is not SX11A.** `readTwinLines`
+  runs inside `resolveStagedItem`, so the screen and the confirm agree: all the
+  twinned lines are suggested, each untickable. That needs every line reached
+  to be a twin of every other; a mock-up copy does not count against it. It
+  applies to a code end (`FUR-13` against `GR-`/`PL-FUR-13`) and to one code
+  on two lines; an untwinned third line still asks.
+- **The bill only suggests.** `suggestTwins` (a client-safe leaf) reads a zone
+  prefix or the same ref, never descriptions (T3: "Armchair" is forty chairs);
+  accepting stages `twinOf` on the line's own version through
+  `POST /api/imports/[id]/twins`; the confirm links the accepted pairs in its
+  own change set (`linkBillTwins`, `twinsLinked` in the result). A twin whose
+  partner is no longer imported links nothing and says so on its row; it does
+  not refuse the confirm. Suggestions are within one tab; a link across tabs
+  is a person's.
+- **Screens.** The Twin lines card under Configurations (search, link with a
+  reason, unlink with a reason; `GET/POST /api/records/[id]/twins`,
+  `PATCH /api/twins/[id]`); the header's "twin of …" links; a "twin" chip on
+  the phase table (`twin_codes`); `TwinTicks` under Add a spec, Edit value and
+  Retire. NOT built, by scope: the fill-in's dimension row offers no twins;
+  level and category "also set on its twin"; "Add a configuration" offering
+  the twin; the configuration review cards' twin sentence; emails and spec
+  documents do not read twins.
+
 ### A line's common specs are a reading, and an edit to one fans out
 
 `src/lib/configuration-common.ts`, `src/lib/configuration-family.ts`,

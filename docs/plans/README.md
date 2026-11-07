@@ -21,6 +21,56 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-11-07 — The audit build is complete: all five stages on `audit-int` (v1.14)
+
+- **Landed (Stage 5):** CI runs the database tier on a fresh Postgres 17 and
+  its first rehearsal found two tests that passed only on the shared
+  database's history (0058 and a fixture fix close them); the route
+  contracts (every handler driven from outside; three defects found and
+  closed: seven reads trusting the middleware, a bill confirm with a broken
+  body skipping the version lock, the queue consumer running on a forged
+  callback); the three giant pages, the import route and the two confirms
+  split with no behaviour change (83 + 84 settled-DOM snapshots
+  byte-identical; the frozen v1–v3 drawing reads in `drawing-legacy.ts`); the
+  twelve one-of-each follow-ups with measured gains (`/api/records` on a
+  300-line phase 1,100 → 654 ms; the chase inventory 62.9 → 21.3 MB;
+  `qty_raw` 0059); CLAUDE.md cut to a ~700-line index over
+  `docs/load-bearing/<area>.md` with the milestone diary moved out; twin lines
+  (0060, `docs/plans/twin-lines-2026-11-06.md`).
+- **Defects found and fixed on the way, not in the audit:** a suggested
+  pairing never stored (Stage 1); `import "server-only"` breaking four pilot
+  backfills (Stage 4); cascades running in trigger-NAME order so a project
+  delete depended on creation order (Stage 5); the three route-contract
+  defects above; the category guard counting projected answers (Stage 1 walk).
+- **Checks:** every landing typecheck, lint, the pure and component tiers
+  and its db files; the integration branch the four checks with the
+  database tier required after every merge (the last full run is recorded
+  below in this entry once it finishes); one full fresh-database rehearsal
+  (744 of 744 db tests).
+- **Browser walks:** Stage 1 on the local stack (the quantity words, the
+  bracketed `1,200`, the stool's Dia, the inert quote CSV, the retired bill
+  fabric leaving the checklist and the export). The rest of the build rests on
+  its component and db tests and each coder's own walk list, which the final
+  walk below samples.
+- **Pilot, the whole order:** back up; re-check each live CHECK named in the
+  migration headers; apply 0050 → deploy → `db:backfill-answer-provenance`
+  (dry run, send Max the "confirmed over no spec" count, then `--apply`);
+  0051; 0052; 0053 (then deploying signs everyone out ONCE); 0054; 0055; 0056
+  (with the code); 0057 THEN re-seed with this branch's seed files (797 seeded
+  requirements); 0058 (after 0055); 0059; 0060. Then: paste the sandbox and
+  pilot Neon hosts into `KNOWN_HOSTS` in `db/script-env.mjs`; turn on branch
+  protection for `pilot` (`docs/environments.md`, "What holds the order, and
+  what Max turns on"); check Node 22 in the first staging build log; set
+  `GRAPH_CLIENT_STATE` before `MAIL_INGESTION_MODE=enabled` and walk "The
+  spend guards"; check P16717 and any revised phase for records the
+  suggested-pairing defect retired; optionally `db:backfill-ref-norm` (dry
+  run, then `--apply`).
+- **Still Max's / Matthew's:** the list under "Decisions awaiting somebody" in
+  CLAUDE.md's status section (Dia for W and D; TG1's re-check rows; the
+  item-review design; `origin/production`; the full CSP; pilot's audit-log
+  space; a chased record changing category; Confirm naming unaccepted
+  category suggestions; `eslint-config-next`'s range).
+
 ## 2026-11-06 (late) — The audit build, Stage 4 landed on `audit-int`; Stage 5 begun
 
 - **Landed (Stage 4, the boundary and the trail):** the write boundary in

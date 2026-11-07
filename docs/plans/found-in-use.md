@@ -33,6 +33,30 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-11-07: found by building the audit plan, each FIXED the same day
+
+### `import "server-only"` in blob-source.ts broke four pilot backfills under tsx — FIXED (removed; the import-graph test is the guard)
+
+Added by Stage 2.3 for the browser boundary; the package resolves only inside Next's bundler, and `backfill-answer-provenance`, `-bill-swatches`, `-finish-twins` and `-standards` load the module. Found by the 4.5 coder running them.
+
+### A project delete passed on the shared database and failed on a fresh one — FIXED (0058, `DELETE_ORDER`)
+
+Cascades run in trigger-NAME order (`RI_ConstraintTrigger_a_<oid>` as text), so 0055's NO ACTION keys were checked before or after the drafts cascade depending on each database's constraint oids. Found by CI's first fresh-database rehearsal. The six keys are now deferred and the script orders itself.
+
+### The queue consumer ran on a forged v2beta callback before the queue service was asked anything — FIXED (`queue-callback.ts`)
+
+Measured by the route contracts: a crafted request answered 200 and ran the stubbed consumer; a forged message naming a pending run would have started a charged read if a claim was free. The v1beta payload is fetched from the service by id; the binary shape is refused.
+
+### Seven read routes trusted the middleware alone; a bill confirm with a broken body skipped its version lock — FIXED (R1, R2)
+
+Found by the route contracts. Every handler now checks its own session; a bill confirm needs `version`; a non-JSON body is a 400.
+
+### The category guard refused every record with bill specs once E5 recomposed at once — FIXED (`record-category.ts` counts a person's answers only)
+
+Found on the Stage 1 walk: the desk could not move from Consoles to Desk chair because its projected Dimensions answer counted as "answered".
+
+---
+
 ## 2026-11-06: read in the source, during the whole-codebase audit
 
 `docs/plans/audit-2026-11-06.md` §2 holds every entry with its file and line.

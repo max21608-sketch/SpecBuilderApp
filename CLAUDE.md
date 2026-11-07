@@ -624,9 +624,9 @@ meticulously and a plan to green-light (`docs/plans/audit-2026-11-06.md`:
 twelve confirmed defects in its short version, five stages), then "run all the
 stages… use your best judgment… go with the proposed". The build ran on
 `audit-int` with Opus coders in worktrees, every landing checked on the local
-stack with the database tier required. Stages 1–4 are landed and Stage 5 is
-in progress (the dated entries in `docs/plans/README.md` list each item, its
-findings and the pilot order): answer provenance (0050); the one number
+stack with the database tier required. All five stages are landed on
+`audit-int` as of 2026-11-07 (the dated entries in `docs/plans/README.md` list
+each item, its findings and the pilot order): answer provenance (0050); the one number
 reader; the gate slot rule; configurations follow their line; the finish
 planner; the replace tick follows its row; the click's version; the checklist
 keeps what is typed; an error boundary; the chase respects the matrix (0051);
@@ -637,13 +637,14 @@ before occupancy; a deletable project and a trail without documents (0054,
 0055, 0058); the requirement seed key (0057); the migration ledger (0056);
 one version per transaction and the diff pairing supersessions (0052);
 sessions that can be ended (0053); CI running the database tier on a fresh
-Postgres; the route contracts. Still landing: the three giant pages split, the
-one-of-each follow-ups (0059), twin lines (0060,
-`docs/plans/twin-lines-2026-11-06.md`). **Pilot needs the migrations in
-order, the provenance backfill, a re-seed after 0057, and knows that deploying
-the code signs everyone out once** — the README's entries carry the exact
-order. Human acceptance is outstanding on every screen the build touched
-until Max has walked it.
+Postgres; the route contracts; the three giant pages, the import route and the
+two confirms split with the frozen reads in one file; the one-of-each
+follow-ups (0059); twin lines (0060, `docs/plans/twin-lines-2026-11-06.md`).
+**Pilot needs 0050–0060 in order, the provenance backfill after 0050, a
+re-seed after 0057, and knows that deploying the code signs everyone out
+once** — the README's entries carry the exact order. The pilot chip reads
+v1.14 once promoted. Human acceptance is outstanding on every screen the
+build touched until Max has walked it.
 
 **Explicitly excluded, so it is not built speculatively:** feeding preamble
 notes into later model calls; a BWS *import* file carrying job numbers; images
