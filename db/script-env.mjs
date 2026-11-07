@@ -50,7 +50,10 @@ const GUARDED = {
 // stack, which declares sandbox, and is never pilot or production.
 // ============================================================================
 export const KNOWN_HOSTS = {
-  sandbox: [],
+  // The sandbox's direct endpoint, read off the Target line of the first
+  // `db:migrate` against it after 0056 (Max, 2026-11-07). Pilot's is still to
+  // be pasted from the Neon console; until then pilot stays unchecked.
+  sandbox: ["ep-tiny-shadow-zaelukm4.c-2.eu-west-2.aws.neon.tech"],
   pilot: [],
   production: [],
 };
