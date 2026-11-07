@@ -413,6 +413,9 @@ export function normaliseDimensionSlot(raw: unknown): DimensionSlot | null {
     "seat ht": "SH",
     "seat h": "SH",
     dia: "DIA",
+    // `DIAM600` places a round top as printed (audit 5.4 A4). A whole label,
+    // like every other here: `DIAMOND` is not a diameter.
+    diam: "DIA",
     diameter: "DIA",
   };
   return aliases[folded] ?? null;

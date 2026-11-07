@@ -82,13 +82,19 @@ export type TranscriptionCheckResult = {
   summary: string[];
 };
 
-/** A printed figure as a number: `1,240` is 1240, `12 nr` is 12. Null when it is not one figure. */
+/**
+ * A printed total as a number, by THE ONE READER (`readPrintedNumber`, audit
+ * 5.4 A4): `12 nr` is 12, `1,240,000` is 1240000. Null when it is not one
+ * figure. This stripped every comma and space, so `1,2,0` read 120, `1 200`
+ * read 1200, and `1,240` was twelve hundred and forty in whichever convention
+ * the bill was printed; `1,240` is now refused, in its own sentence.
+ */
 export function printedNumber(raw: string): number | null {
-  const cleaned = raw.replace(/[,\s]/g, "").replace(/(nr|no|ea|pcs?|units?)$/i, "");
-  if (!/^-?\d+(\.\d+)?$/.test(cleaned)) return null;
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : null;
+  const read = readPrintedNumber(raw);
+  return read.kind === "whole" || read.kind === "decimal" ? read.value : null;
 }
+
+import { readPrintedNumber } from "@/lib/printed-number";
 
 const foldForText = (value: string) => value.replace(/\s+/g, "").toUpperCase();
 /** Lines that are not counted in a printed total of quantities. */
@@ -122,6 +128,12 @@ export function transcriptionChecks(input: {
   for (const total of qtyTotals) {
     const printed = printedNumber(total.valueRaw);
     const label = total.label ? `“${total.label}”` : "total";
+    if (readPrintedNumber(total.valueRaw).kind === "ambiguous_comma") {
+      summary.push(
+        `Page ${total.page}'s ${label} (${total.valueRaw}) reads as a thousand or as a decimal, so it was not checked. Check it against the page.`,
+      );
+      continue;
+    }
     if (printed === null) {
       summary.push(`Page ${total.page}'s ${label} (${total.valueRaw || "blank"}) is not one figure, so it was not checked.`);
       continue;
@@ -137,6 +149,12 @@ export function transcriptionChecks(input: {
     }
     covered = covered.filter((line) => !NOT_COUNTED.has(line.rowKind ?? "item"));
     const sum = covered.reduce((acc, line) => acc + (line.qty ?? 0), 0);
+    // A line with NO quantity (TBC, a word, a blank) adds nothing to the sum,
+    // and the sentence says so: "adds up" over a line the reader could not
+    // count is a total checked against a figure nobody has.
+    const notGiven = covered.filter((line) => line.qty === null).length;
+    const notGivenWords =
+      notGiven === 0 ? "" : ` ${notGiven} line${notGiven === 1 ? "" : "s"} under it give${notGiven === 1 ? "s" : ""} no quantity and ${notGiven === 1 ? "is" : "are"} counted as none.`;
     // A WHOLE-BILL TOTAL POINTS AT THE PAGES WHOSE OWN TOTAL FAILED, where every
     // page it covers prints one: a page that adds up is not where the copy went
     // wrong, and painting its lines red too teaches people to ignore red. With
@@ -162,10 +180,10 @@ export function transcriptionChecks(input: {
     const where =
       total.scope === "document" ? "the whole bill" : total.scope === "section" ? `the section ending on page ${total.page}` : `page ${total.page}`;
     if (Math.abs(sum - printed) < 1e-9) {
-      summary.push(`The ${label} for ${where} (${total.valueRaw}) equals the quantities transcribed under it.`);
+      summary.push(`The ${label} for ${where} (${total.valueRaw}) equals the quantities transcribed under it.${notGivenWords}`);
       continue;
     }
-    const why = `The PDF prints ${total.valueRaw} as the ${label} for ${where}, and the quantities transcribed under it add up to ${sum}. One of them, or the total, was copied wrong: check each against page ${total.page}.`;
+    const why = `The PDF prints ${total.valueRaw} as the ${label} for ${where}, and the quantities transcribed under it add up to ${sum}. One of them, or the total, was copied wrong: check each against page ${total.page}.${notGivenWords}`;
     summary.push(why);
     const words = `Quantities on ${total.scope === "document" ? "the bill" : `p.${total.page}`} add to ${sum}, not ${total.valueRaw}`;
     for (const line of flagged) add(line.lineNo, { code: "total_mismatch", words, why });

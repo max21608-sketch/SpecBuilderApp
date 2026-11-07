@@ -564,3 +564,27 @@ describe("feetAndInches", () => {
     expect(feetAndInches(null)).toBeNull();
   });
 });
+
+describe("the slot words the follow-ups named (audit 5.4 A4)", () => {
+  it("reads DIAM as a diameter, the whole label and never a substring", () => {
+    expect(normaliseDimensionSlot("DIAM")).toBe("DIA");
+    expect(normaliseDimensionSlot("Diam.")).toBe("DIA");
+    expect(normaliseDimensionSlot("DIAMOND")).toBeNull();
+    const line = parseCombinedDimensions("DIAM600 x H750mm");
+    expect(line.parts.map((part) => [part.slot, part.value])).toEqual([["DIA", "600"], ["H", "750"]]);
+  });
+
+  it("reads a slot letter AFTER the last figure as the slot, not as the line's unit", () => {
+    // `600 Ø x 750 H` took H as the unit of the whole line and left 750 with
+    // no slot.
+    const line = parseCombinedDimensions("600 Ø x 750 H");
+    expect(line.parts.map((part) => [part.slot, part.value])).toEqual([["DIA", "600"], ["H", "750"]]);
+    expect(line.unitRaw).toBeNull();
+  });
+
+  it("still takes a real unit off the last segment", () => {
+    const line = parseCombinedDimensions("W600 x H750 mm");
+    expect(line.unitRaw).toBe("mm");
+    expect(line.parts.map((part) => part.slot)).toEqual(["W", "H"]);
+  });
+});

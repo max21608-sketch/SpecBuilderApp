@@ -35,7 +35,6 @@ import { AMBIGUOUS_GROUP, readPrintedNumber } from "@/lib/printed-number";
 /** Multipliers to millimetres. `normaliseUnit` guarantees the key exists. */
 const TO_MM: Record<AttributeUnit, number> = { mm: 1, cm: 10, m: 1000, in: 25.4 };
 
-/** How each slot is written in a BWS cell. `Dia.` carries its own full stop. */
 /**
  * How a slot is written before its figure, on every screen and in the cell:
  * `Dia.` with its full stop, as BWS field 3 writes it. One table (audit 5.4
@@ -363,7 +362,13 @@ export function parseCombinedDimensions(raw: string): CombinedDimensions {
       const trailing = /^(.*?)[\s]*([a-zA-Z"']+\.?)$/.exec(body);
       // Only strip a trailing word that is NOT itself part of a slot prefix:
       // "H450mm" must lose "mm", "Dia.460" must not lose "Dia.".
-      if (trailing && trailing[1] && /[0-9]$/.test(trailing[1].trim())) {
+      //
+      // NOR A SLOT WORD AFTER THE FIGURE (audit 5.4 A4): `600 Ø x 750 H`
+      // took H as the unit of the whole line and left 750 with no slot. A
+      // word the slot normaliser reads is the page's label for this part, and
+      // the suffix rule below takes it as one.
+      const trailingIsSlot = trailing ? normaliseDimensionSlot(trailing[2] ?? "") !== null : false;
+      if (trailing && trailing[1] && /[0-9]$/.test(trailing[1].trim()) && !trailingIsSlot) {
         unitRaw = trailing[2] ?? null;
         body = trailing[1].trim();
       }
