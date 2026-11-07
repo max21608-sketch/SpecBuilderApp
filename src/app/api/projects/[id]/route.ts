@@ -96,10 +96,23 @@ function asDate(value: unknown): string | null {
   return String(value).slice(0, 10);
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await context.params;
   const badId = requireUuid(id);
   if (badId) return badId;
+  // `?only=documents` is THE OVERVIEW'S POLL (audit G13, 2026-11-07). While a
+  // document is being read the screen refreshes its documents every five
+  // seconds, and it used to fetch this whole payload to keep two fields of it:
+  // the completion, the summary, the finishes and the designer codes were all
+  // recomputed and thrown away on every tick. The slice is the same documents
+  // query and the same failed count below, answered alone, so what the poll
+  // paints cannot differ from what the page loaded. Any other value is refused
+  // in words: answering the whole payload to a slice nobody wrote would hide a
+  // typo behind a response that looks right.
+  const only = new URL(request.url).searchParams.get("only");
+  if (only !== null && only !== "documents") {
+    return json({ ok: false, error: "The only slice this route answers is ?only=documents." }, 400);
+  }
   const rows = await sql`
     select id, bws_project_number, name, client, shared_inbox, default_dimension_unit, finish_code_prefix,
            status, archived_at::text, archived_by,
@@ -192,6 +205,14 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   for (const doc of documents) doc.descriptions_read = readAtConfirm.has(String(doc.id));
 
+  // A document that could not be read is the one intake state where nothing
+  // else happens until somebody presses Retry. Counted in TS over the rows
+  // ALREADY LOADED, so the number and the list under it are the same set: the
+  // documents query is capped at 50, and a `count(*)` over every run would name
+  // failures the screen cannot show, which is a number nobody can act on.
+  const failedDocuments = documents.filter((row) => String(row.status) === "failed").length;
+  if (only === "documents") return json({ ok: true, documents, failedDocuments });
+
   // The runs (BOQ tabs) this project quotes. One tab each on the overview, so
   // the same item code at three different quantities reads as three sub-quotes
   // rather than as three confusing duplicates in one list.
@@ -268,13 +289,6 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // rather than counted, because an unlinked code is a job and a number is a
   // notification.
   const unlinkedFinishCodes = await loadUnlinkedFinishCodes(sql, id);
-
-  // A document that could not be read is the one intake state where nothing
-  // else happens until somebody presses Retry. Counted in TS over the rows
-  // ALREADY LOADED, so the number and the list under it are the same set: the
-  // documents query is capped at 50, and a `count(*)` over every run would name
-  // failures the screen cannot show, which is a number nobody can act on.
-  const failedDocuments = documents.filter((row) => String(row.status) === "failed").length;
 
   const record = rows[0] as Record<string, unknown>;
   // THE DESIGNER CODES THIS PROJECT'S RECORDS CARRY, with the count of items

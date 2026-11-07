@@ -545,8 +545,10 @@ function ProjectOverview() {
     isIntakeRunInFlight({ status: run.status, waitingForSlot: run.waiting_for_slot }),
   );
   const pollDocuments = useCallback(async () => {
+    // THE SLICE, NOT THE PAYLOAD (audit G13): the tick keeps the documents and
+    // the failed count, so that is all it asks the route for.
     const res = await apiFetch<{ documents: DocumentRun[]; failedDocuments: number }>(
-      `/api/projects/${encodeURIComponent(projectId)}`,
+      `/api/projects/${encodeURIComponent(projectId)}?only=documents`,
     );
     if (!res.ok) return; // a failed tick is retried by the next one; load() owns the banner
     setDocuments(res.data.documents);

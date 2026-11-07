@@ -278,7 +278,7 @@ describe("the tabs that are also cards", () => {
 });
 
 describe("while a document is being read", () => {
-  it("polls the documents on a five-second tick", async () => {
+  it("polls the documents on a five-second tick, asking for the documents only", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     try {
       serve();
@@ -289,6 +289,9 @@ describe("while a document is being read", () => {
       });
       const after = calls.filter((call) => call.method === "GET" && call.url.startsWith(`/api/projects/${PROJECT}`) && !call.url.includes("/contacts"));
       expect(after.length).toBe(before + 1);
+      // The SLICE, not the whole payload (audit G13): the tick keeps the
+      // documents and the failed count, so that is all it asks for.
+      expect(after[after.length - 1]!.url).toBe(`/api/projects/${PROJECT}?only=documents`);
     } finally {
       vi.useRealTimers();
     }
