@@ -149,19 +149,15 @@ const SESSION_FREE = new Set([...MIDDLEWARE_EXEMPT, "auth/logout"]);
  * Read handlers that do not ask for a session themselves and rely on the
  * middleware alone. FOUND BY 5.2 (R1): every other handler behind the
  * middleware asks `getSessionUser` and refuses without one (measured: 82 of
- * 89); these seven run their query for whoever reaches them. The middleware refuses them today. The A13 matcher defect
+ * 89); seven ran their query for whoever reached them, and 5.4 fixed six. The middleware refuses them today. The A13 matcher defect
  * (a prefix exempting `/login-as`, `/api/cronjobs`) shows what "today" is
  * worth: one wrong character there and these answer anybody. Each is an
  * `it.fails` below, so the day one is fixed the suite says so.
  */
 const READS_TRUSTING_THE_MIDDLEWARE = new Set([
+  // 5.4 put the session check into the other six (R1). This one's file was
+  // being split into handlers at the same time, so the line goes in there.
   "imports/[id] GET",
-  "projects GET",
-  "projects/[id] GET",
-  "projects/[id]/batches GET",
-  "projects/[id]/contacts GET",
-  "records GET",
-  "records/[id] GET",
 ]);
 
 /**

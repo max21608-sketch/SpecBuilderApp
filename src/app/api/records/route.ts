@@ -44,6 +44,10 @@ type ToQuoteQuestion = {
 };
 
 export async function GET(request: Request): Promise<Response> {
+  // The handler asks for the session itself, as every other handler does
+  // (audit R1): the middleware is the first line, never the only one.
+  const user = await getSessionUser();
+  if (!user) return json({ ok: false, error: "auth required" }, 401);
   const url = new URL(request.url);
   const projectId = url.searchParams.get("projectId");
   if (!projectId) return json({ ok: false, error: "projectId is required." }, 400);

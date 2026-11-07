@@ -27,6 +27,10 @@ import { requireWriter } from "@/lib/route-guards";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
+  // The handler asks for the session itself, as every other handler does
+  // (audit R1): the middleware is the first line, never the only one.
+  const user = await getSessionUser();
+  if (!user) return json({ ok: false, error: "auth required" }, 401);
   // Opt-in, not a filter that defaults to everything: the point of archiving is
   // that a finished project stops being in the way.
   const includeArchived = new URL(request.url).searchParams.get("includeArchived") === "true";

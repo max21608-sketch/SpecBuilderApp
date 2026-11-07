@@ -20,7 +20,11 @@
 // Rows are prefixed `__QA ` and deleted FK-safe. A change set cannot be deleted
 // directly (0014 refuses it while its project exists); deleting the project
 // cascades, which is the whole of the teardown.
-import { it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll, vi } from "vitest";
+// The route asks for a session itself since audit R1.
+vi.mock("@/lib/session", () => ({
+  getSessionUser: async () => ({ id: "00000000-0000-0000-0000-000000000001", email: "__qa@example.test", name: "QA User", role: "viewer" }),
+}));
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { GET } from "@/app/api/projects/route";
