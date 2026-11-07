@@ -38,6 +38,11 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
+  // ITS OWN SESSION CHECK (audit R1), like every other handler behind the
+  // middleware: a staged bill or drawing is client material, and a matcher
+  // one character wrong would otherwise hand it to anybody.
+  const user = await getSessionUser();
+  if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
   const badId = requireUuid(id);
   if (badId) return badId;
