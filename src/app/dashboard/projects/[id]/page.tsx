@@ -35,6 +35,8 @@ import ContactsPanel, { type Contact, type ContactsOutstanding } from "@/compone
 import { FOCUSES, type Focus, type RunTally } from "@/components/records/SpecTable";
 import PhaseTabs, { type SpecRun } from "@/components/projects/PhaseTabs";
 import ExportMenu from "@/components/records/ExportMenu";
+import SummaryRow from "@/components/projects/SummaryRow";
+import LevelsBanner from "@/components/projects/LevelsBanner";
 import HistoryCard, { useHistoryCard } from "@/components/projects/HistoryCard";
 import OpenChangeBar from "@/components/history/OpenChangeBar";
 import FinishesLibrary from "@/components/finishes/FinishesLibrary";
@@ -61,7 +63,7 @@ import Card from "@/components/ui/Card";
 import PageBody from "@/components/ui/PageBody";
 import PageHeader from "@/components/ui/PageHeader";
 import Tabs from "@/components/ui/Tabs";
-import { Table, Td, Tr } from "@/components/ui/Table";
+import { Table } from "@/components/ui/Table";
 import { useUrlTab } from "@/lib/use-url-tab";
 import ProjectWideCard from "@/components/projects/ProjectWideCard";
 import ProjectDetailsCard from "@/components/projects/ProjectDetailsCard";
@@ -88,72 +90,6 @@ type Project = {
   version: number;
 };
 
-/**
- * One line of the Specifications card: a count, what it means, and the control
- * that acts on it.
- *
- * THE FIGURE AND ITS FIX TRAVEL TOGETHER. A number with no action beside it
- * makes somebody go and find the screen it belongs to, which is the whole
- * complaint about this page — and the count itself is the link, so there are
- * two ways to the same place rather than one.
- *
- * A ROW WITH A COUNT OF ZERO STILL RENDERS, and that is the change worth
- * stating: every one of these is a CHECK, and a check that disappears when it
- * passes is a check nobody knows is being made. It renders plain instead —
- * no colour, no button — so the eye goes to the rows that want something.
- */
-function SummaryRow({
-  label,
-  count,
-  meaning,
-  tone,
-  action,
-  href,
-}: {
-  label: string;
-  count: number;
-  meaning: React.ReactNode;
-  tone: "danger" | "warn" | "info";
-  /** The control beside the figure. Only rendered when there is something to do. */
-  action?: React.ReactNode;
-  href?: string | null;
-}) {
-  const live = count > 0;
-  const colour =
-    !live
-      ? "text-neutral-400"
-      : tone === "danger"
-        ? "text-red-700"
-        : tone === "warn"
-          ? "text-amber-700"
-          : "text-blue-700";
-  return (
-    <Tr>
-      <Td className="w-[26%] align-top">
-        {href && live ? (
-          <Link href={href} className="font-semibold text-neutral-900 no-underline hover:underline">
-            {label}
-          </Link>
-        ) : (
-          <span className={`font-semibold ${live ? "text-neutral-900" : "text-neutral-500"}`}>{label}</span>
-        )}
-      </Td>
-      <Td num className={`w-[10%] align-top text-[15px] font-semibold ${colour}`}>
-        {href && live ? (
-          <Link href={href} className="text-inherit no-underline hover:underline">
-            {count.toLocaleString()}
-          </Link>
-        ) : (
-          count.toLocaleString()
-        )}
-      </Td>
-      <Td className={`align-top ${live ? "text-neutral-600" : "text-neutral-400"}`}>{meaning}</Td>
-      <Td className="w-[24%] align-top">
-        <div className="flex flex-wrap justify-end gap-1.5">{live ? action : null}</div>
-      </Td>
-    </Tr>
-  );
-}
 
 function ProjectOverview() {
   const projectId = String(useParams().id ?? "");
@@ -221,7 +157,6 @@ function ProjectOverview() {
   const [unlinkedFinishCodes, setUnlinkedFinishCodes] = useState<{ code: string; records: number }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [acceptingLevels, setAcceptingLevels] = useState(false);
   // Derived on the server and re-read on every load, because it changes when
   // an answer changes rather than when the project row does.
   const [completion, setCompletion] = useState<ProjectCompletion>(EMPTY_COMPLETION);
@@ -277,21 +212,6 @@ function ProjectOverview() {
     // never reaches what somebody is typing there (audit G6).
   }, [projectId, setDocuments, setFailedDocuments]);
 
-  /** Agree with every level this project's records were guessed, in one act. */
-  async function acceptLevels() {
-    setAcceptingLevels(true);
-    try {
-      const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/levels/accept`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ runId: null }),
-      });
-      await load();
-      if (!res.ok) setError(res.error);
-    } finally {
-      setAcceptingLevels(false);
-    }
-  }
 
   /**
    * WHO OWES US WHAT, fetched ALONGSIDE the project rather than inside it.
@@ -955,33 +875,12 @@ function ProjectOverview() {
                         level-less record in a covered category is tiered
                         perfectly well. The level still decides the placeholder
                         half, and it still picks the BWS boilerplate. */}
-                    <SummaryRow
-                      label="No level"
-                      tone="warn"
-                      count={summary.noLevel}
-                      href={firstRunHref}
-                      meaning={
-                        <>
-                          Needed by the{" "}
-                          {summary.tgqFromFallback > 0 ? "placeholder half of TGQ and by the " : ""}
-                          BWS boilerplate.
-                          {summary.levelSuggested > 0 && ` ${summary.levelSuggested} have a suggestion.`}
-                        </>
-                      }
-                      action={
-                        <>
-                          {summary.levelSuggested > 0 && (
-                            <Button size="xs" disabled={acceptingLevels} onClick={() => void acceptLevels()}>
-                              {acceptingLevels ? "Accepting…" : `Accept ${summary.levelSuggested}`}
-                            </Button>
-                          )}
-                          {firstRunHref && (
-                            <Link href={firstRunHref} className={buttonClass("quiet", "xs", "no-underline")}>
-                              Review
-                            </Link>
-                          )}
-                        </>
-                      }
+                    <LevelsBanner
+                      projectId={project.id}
+                      summary={summary}
+                      firstRunHref={firstRunHref}
+                      onReload={load}
+                      onError={setError}
                     />
                     {/* A CODE A DRAWING CARRIES THAT THE LIBRARY HAS NEVER HEARD
                         OF. Named, never counted: an unlinked code is a job, and
