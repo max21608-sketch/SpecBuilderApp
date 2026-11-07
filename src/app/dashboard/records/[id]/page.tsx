@@ -84,7 +84,7 @@ import Tabs from "@/components/ui/Tabs";
 import { useUrlTab } from "@/lib/use-url-tab";
 import RecordTitle from "@/components/records/RecordTitle";
 import { useAttributeActions } from "@/components/records/use-attribute-actions";
-import ConfigurationPanel from "@/components/records/ConfigurationPanel";
+import ConfigurationPanel, { useConfigurationPanelState } from "@/components/records/ConfigurationPanel";
 import ChecklistTab, { useChecklistSave } from "@/components/records/ChecklistTab";
 
 export type { Answer, DesignerContact, Payload } from "@/components/records/record-payload";
@@ -196,6 +196,9 @@ function RecordView() {
   // A split bill line's own pre-split specs fold away, CLOSED: they are not
   // exported, and heading the tab they read as the item.
   const [lineOwnOpen, setLineOwnOpen] = useState(false);
+  // Rename and retire on the Configurations card: the page's, so they outlive
+  // a visit to another tab, as they did when they were declared here.
+  const configurationPanel = useConfigurationPanelState();
 
   const load = useCallback(async () => {
     const res = await apiFetch<Payload>(`/api/records/${id}`);
@@ -1409,6 +1412,7 @@ function RecordView() {
               </Card>
 
               <ConfigurationPanel
+                state={configurationPanel}
                 record={record}
                 mockup={data.mockup}
                 parentRefs={parentRefs}

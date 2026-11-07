@@ -257,6 +257,21 @@ describe("a configuration", () => {
     expect(sent("PATCH", "/configuration-name")[0]?.body).toEqual({ name: "C", version: 2 });
   });
 
+  it("keeps a rename and a retire reason open across a visit to another tab", async () => {
+    // The page held this state before the split, so leaving the Specs tab and
+    // coming back found the boxes as they were left. It still must.
+    current.body = configuration();
+    const view = render(<RecordPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "New name for this configuration" }), "Z");
+    url.search = "tab=checklist";
+    view.rerender(<RecordPage />);
+    expect(screen.queryByRole("textbox", { name: "New name for this configuration" })).toBeNull();
+    url.search = "";
+    view.rerender(<RecordPage />);
+    expect(screen.getByRole("textbox", { name: "New name for this configuration" })).toHaveValue("AZ");
+  });
+
   it("retires with a reason and says what it does", async () => {
     current.body = configuration();
     render(<RecordPage />);

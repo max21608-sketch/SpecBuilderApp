@@ -19,7 +19,25 @@ import Note from "@/components/ui/Note";
 import { TONE } from "@/components/ui/tone";
 import type { FamilyMember, Payload, SpecRecord } from "@/components/records/record-payload";
 
+/**
+ * THE PANEL'S STATE IS THE PAGE'S. This panel sits on the Specs tab and is
+ * unmounted when another tab is chosen, and before the split a half-typed
+ * rename or retire reason was still there on coming back. Held here, it would
+ * be gone; the page calls this hook and passes it in.
+ */
+export function useConfigurationPanelState() {
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
+  /** The reason box for retiring a configuration; null while it is closed. */
+  const [configReason, setConfigReason] = useState<string | null>(null);
+  const [configStatusBusy, setConfigStatusBusy] = useState(false);
+  return { renaming, setRenaming, renameBusy, setRenameBusy, configReason, setConfigReason, configStatusBusy, setConfigStatusBusy };
+}
+
+export type ConfigurationPanelState = ReturnType<typeof useConfigurationPanelState>;
+
 export default function ConfigurationPanel({
+  state,
   record,
   mockup,
   parentRefs,
@@ -30,6 +48,7 @@ export default function ConfigurationPanel({
   onAddConfiguration,
   reloadThen,
 }: {
+  state: ConfigurationPanelState;
   record: SpecRecord;
   mockup: Payload["mockup"];
   /** The bill line's client refs: a configuration carries none of its own. */
@@ -42,11 +61,8 @@ export default function ConfigurationPanel({
   /** The page's reload, which reports a refusal after it. */
   reloadThen: (message: string | null) => Promise<void>;
 }) {
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [renameBusy, setRenameBusy] = useState(false);
-  /** The reason box for retiring a configuration; null while it is closed. */
-  const [configReason, setConfigReason] = useState<string | null>(null);
-  const [configStatusBusy, setConfigStatusBusy] = useState(false);
+  const { renaming, setRenaming, renameBusy, setRenameBusy, configReason, setConfigReason, configStatusBusy, setConfigStatusBusy } =
+    state;
 
   /** A configuration's name, corrected. Refused in words for one already used. */
   async function rename() {
