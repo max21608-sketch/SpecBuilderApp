@@ -33,6 +33,25 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-11-07: seen on staging, the first deploy of the audit build ahead of its migrations
+
+### Sign-in says it "could not reach the database" when the database is reachable and merely behind the code — OPEN, wording
+
+Seen by Max on staging at `e7bec9b`, minutes after the push and before 0050–0060
+were applied to the sandbox: the sign-in screen, in red, "Signing in could not
+reach the database. This is the deployment, not your password — check
+DATABASE_URL and DATABASE_ENVIRONMENT on this project. Reference 8330709b."
+Both variables were right. The cause, named separately: `verifyCredentials`
+selects `users.token_version` (0053) and the column did not exist yet, so the
+query failed and the login route's `unreachable()` wrapper
+(`src/app/api/auth/login/route.ts`) called a schema error a connection error
+and sent the reader to two variables that were fine. The sentence is wrong for
+every database error that is not a connection error, and this one is the
+expected state of EVERY deploy that lands before its migrations
+(`CLAUDE.md`: "against a database without 0053 it fails every session read").
+What it should say is not decided here; what it should not do is name a
+cause it has not checked.
+
 ## 2026-11-07: seen on the final walk of the audit build (local stack, T11071)
 
 ### A twin chip's hover lists a code once per link, so a four-line family reads "GR-FUR-22, PL-FUR-22, PL-FUR-22, GR-FUR-22, GR-FUR-22" — OPEN, cosmetic
