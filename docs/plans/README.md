@@ -21,6 +21,66 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-11-07 (evening) — Promoted to pilot at `3e96ba6` (v1.14); the first three CI runs with the database tier
+
+- **Staging first.** Max pushed `e7bec9b` (the complete audit build, 164
+  commits) and sign-in on staging failed at once: the sandbox had none of
+  0049–0060, and the sign-in path reads `users.token_version` (0053). The
+  login route called it "could not reach the database" (found-in-use, OPEN).
+  Max then ran the order on the sandbox: `db:migrate` (12 applied — 0049,
+  the trim kind, had never reached the sandbox either; its "apply to the
+  sandbox too" line from 2026-10-16 is closed), `db:seed` (13 files),
+  `db:backfill-answer-provenance` dry run then `--apply`: 279 relabelled,
+  one value change (DEMO-300-063's `W1900mm` back to missing, its spec
+  retired — E1 on a demo record), nothing needing a person; a second
+  `--apply` wrote nothing, as designed.
+- **CI, three runs.** #270 on `e7bec9b` failed BOTH jobs on GitHub's Postgres
+  17 while 4,951 tests passed on the local stack's Postgres 18: a test
+  matched 18's RESTRICT wording, and the record page's `scrollIntoView` threw
+  in jsdom inside an animation frame (`7ab4e6b`). #271 passed the database
+  tier and failed one component test that counted the cards' fetches as the
+  documents poll's (`3e96ba6`). **#272 on `3e96ba6` green, both jobs, 4 m
+  54 s** — the first green run of the database tier on a machine that is not
+  ours. The trap is `docs/load-bearing/database-and-trail.md`, "The local
+  stack is Postgres 18 and CI is 17".
+- **Pilot, in the checklist's order, by Max:** backup
+  (`~/bw-backups/spec-builder/spec-builder-pilot`); `run-migrations.mjs
+  --yes-pilot` — `Applied 11 migration(s); 49 already present`; `run-seed.mjs`
+  13 files; the provenance backfill dry run read line by line, then
+  `--apply`: **389 relabelled, 21 records recomposed, 31 value changes, none
+  needing a person**. The 31: P16717's fifteen COM answers now carry the
+  library's cloth and colour beside the code (tbc → tbc); P16717-022's
+  "Main timber finish" went from the bill's `PL DINING TABLE TO BE EXTENDABLE
+  TIMBER` (confirmed, composed from a spec since retired and superseded) to
+  `Sienna Walnut` (tbc, the live `Material 1` spec) — the one confirmed →
+  tbc, and Matthew should hear it; P18181 v2/v3's timber and metal answers
+  follow the canonical zone-twin rows (`TIM-13` → `GR-TIM-13`); and three
+  desk-chair COM answers now read GR-FAB-13's library description, which was
+  written from the stool line ("Fabric @ Stool…") — the library's one
+  description for one code, editable once in the library.
+- **The order as run differed from the entry below in one way** and it was
+  fine: all eleven migrations, THEN the re-seed, THEN the backfill — the
+  backfill recomposes against the re-keyed requirements, which is the safer
+  order where everything lands at once. The pilot branch was fast-forwarded
+  BEFORE the pilot migrations (Max pushed on the green run; the ledger was
+  read and found at 0049), so for a few minutes the deploy could have refused
+  every sign-in — on a Saturday evening, and the migrate landed within them.
+  Step 2 before step 3, as the checklist says.
+- **Fast-forward** `261d730..3e96ba6` (`git push origin 3e96ba6:pilot`). The
+  pilot login page renders the chip **PILOT v1.14** (read with curl, so a
+  deployment for the SHA exists and is Ready: steps 4, 5 and 7). Step 6
+  (`/api/auth/me` signed in) and step 8 (the first-session walk) are Max's.
+- **Also:** both Neon direct hosts are now in `KNOWN_HOSTS`
+  (`db/script-env.mjs`), read off the Target lines — a sandbox or pilot
+  script now checks its host and refuses a mismatch before writing.
+- **Still Max's:** tell Matthew and Claudia (signed out once; P16717-022);
+  check P16717 for records the suggested-pairing defect retired; branch
+  protection on `pilot`; Node 22 in the build log; `GRAPH_CLIENT_STATE` before
+  mail ingestion; bump `actions/checkout` and `setup-node` to v5 (the runner
+  forces Node 24 and `ubuntu-latest` moves to Ubuntu 26 from 2026-10-19,
+  both in #270's annotations); human acceptance of every screen the build
+  touched.
+
 ## 2026-11-07 — The audit build is complete: all five stages on `audit-int` (v1.14)
 
 - **Landed (Stage 5):** CI runs the database tier on a fresh Postgres 17 and

@@ -611,7 +611,9 @@ human. No model is fine-tuned and none will be; "flawless" is a human
 acceptance test, not a passing suite.
 
 **Where it stands (2026-11-07).** The pilot (Matthew, Claudia) works real
-enquiries on `spec-builder-pilot`, at v1.13 from `261d730`; the Ronnie Scott's
+enquiries on `spec-builder-pilot`, at v1.14 from `3e96ba6` (promoted
+2026-11-07, the audit build with 0050–0060 applied, re-seeded and
+backfilled); the Ronnie Scott's
 tender (P16717) went in on pilot on 2026-10-15 with Matthew watching, and he
 and Claudia now review its drawings there themselves. Matthew called intake
 mostly done on 2026-10-12; the next phase is a screen for reviewing specs item
@@ -641,11 +643,13 @@ sessions that can be ended (0053); CI running the database tier on a fresh
 Postgres; the route contracts; the three giant pages, the import route and the
 two confirms split with the frozen reads in one file; the one-of-each
 follow-ups (0059); twin lines (0060, `docs/plans/twin-lines-2026-11-06.md`).
-**Pilot needs 0050–0060 in order, the provenance backfill after 0050, a
-re-seed after 0057, and knows that deploying the code signs everyone out
-once** — the README's entries carry the exact order. The pilot chip reads
-v1.14 once promoted. Human acceptance is outstanding on every screen the
-build touched until Max has walked it.
+**Pilot has 0050–0060, the re-seed and the provenance backfill as of
+2026-11-07 (evening)**, and everyone was signed out once by the deploy; the
+README's evening entry carries what the backfill changed on P16717 and P18181.
+CI's database tier went green on GitHub's Postgres 17 only on the third run
+(the local stack is Postgres 18; `docs/load-bearing/database-and-trail.md`).
+Human acceptance is outstanding on every screen the build touched until Max
+has walked it.
 
 **Explicitly excluded, so it is not built speculatively:** feeding preamble
 notes into later model calls; a BWS *import* file carrying job numbers; images
