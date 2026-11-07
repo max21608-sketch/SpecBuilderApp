@@ -44,9 +44,10 @@ Anthropic Console owner.
   defects above; the category guard counting projected answers (Stage 1 walk).
 - **Checks:** every landing typecheck, lint, the pure and component tiers
   and its db files; the integration branch the four checks with the
-  database tier required after every merge (the last full run is recorded
-  below in this entry once it finishes); one full fresh-database rehearsal
-  (744 of 744 db tests).
+  database tier required after every merge; the complete branch at `c7b2e96`:
+  384 test files, 4,951 tests passed, 1 skipped by design, typecheck, lint
+  and a clean `next build`; one full fresh-database rehearsal (744 of 744 db
+  tests).
 - **Browser walks:** Stage 1 on the local stack (the quantity words, the
   bracketed `1,200`, the stool's Dia, the inert quote CSV, the retired bill
   fabric leaving the checklist and the export). The rest of the build rests on
