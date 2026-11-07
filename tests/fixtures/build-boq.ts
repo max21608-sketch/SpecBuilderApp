@@ -562,6 +562,25 @@ export async function codelessBillWorkbook(): Promise<Buffer> {
   return bytes(book);
 }
 
+/**
+ * ONE ITEM ON TWO LINES (0060) — invented, in the Aman bill's zone-prefix
+ * shape: a stool under GR (row 2) and under PL (row 4), another item between
+ * them, and a code printed twice (rows 5 and 6). Rows 4 and 6 are what the
+ * review suggests as twins; nothing is linked until a person accepts.
+ */
+export async function twinBillWorkbook(): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  addSheet(book, "Guestrooms", [
+    ["Code", "Description", "Qty", "Area"],
+    ["ZG-FUR-13", "Example stool", 40, "Example guest suites"],
+    ["ZG-FUR-14", "Example desk", 40, "Example guest suites"],
+    ["ZP-FUR-13", "Example stool", 2, "Example ambassador suite"],
+    ["ZZ-FUR-11", "Example bench", 1, "Example bathroom"],
+    ["ZZ-FUR-11", "Example bench", 1, "Example wardrobe"],
+  ]);
+  return bytes(book);
+}
+
 /** Every workbook this module can build, by the filename the CLI gives it. */
 export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "bill-two-row-header.xlsx": twoRowHeaderWorkbook,
@@ -575,6 +594,7 @@ export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "bill-in-cell-pictures.xlsx": inCellPictureBillWorkbook,
   "bill-prototype-quantity.xlsx": prototypeBillWorkbook,
   "bill-codeless.xlsx": codelessBillWorkbook,
+  "bill-twins.xlsx": twinBillWorkbook,
 };
 
 async function main(): Promise<void> {

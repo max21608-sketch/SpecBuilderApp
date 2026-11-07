@@ -77,6 +77,7 @@ import { addToMockupPhase, MOCKUP_PHASE_NAME } from "@/lib/mockup-phase";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
 import { documentClosedSentence } from "@/lib/intake-status";
 import { categoryToWrite } from "@/lib/bill-category";
+import { billTwinPairs, linkBillTwins, type TwinStagedLine } from "@/lib/bill-twins";
 
 type StagedLine = {
   index: number;
@@ -192,6 +193,8 @@ export type ConfirmBoqResult = {
    * bill put an item on the mock-up phase and none was left.
    */
   mockup: ConfirmMockupResult | null;
+  /** 0060: twin links written from lines a person accepted as twins on the review. */
+  twinsLinked: number;
 };
 
 export type ConfirmMockupResult = {
@@ -412,6 +415,7 @@ export async function confirmBoqImport(
   let imported = 0;
   let updated = 0;
   let retired = 0;
+  let twinsLinked = 0;
 
   // THE PROJECT'S FINISHES LIBRARY, read once, for the fabric lines' codes —
   // the same library, the same resolution and the same CONFLICT rule as a
@@ -831,6 +835,17 @@ export async function confirmBoqImport(
       }
     }
 
+    // ---- 0060: the twins a person accepted on this tab -------------------
+    // Only lines somebody accepted (`twinOf`, staged by `stageBillTwins`); a
+    // suggestion nobody accepted is never linked. One change set: this one.
+    twinsLinked += await linkBillTwins(txn, {
+      pairs: billTwinPairs(sheet.lines as TwinStagedLine[]),
+      recordOf: (row) => recordByRow.get(row)?.recordId ?? null,
+      lines: sheet.lines as TwinStagedLine[],
+      changeSetId,
+      actor,
+    });
+
     // ---- what the revision no longer lists ------------------------------
     // RETIRED, NEVER DELETED. A record is the only place a client ref maps to
     // a BWS job, and that job may already exist — deleting the record loses
@@ -917,6 +932,7 @@ export async function confirmBoqImport(
   await snapshotRecords(txn, recordIds, changeSetId);
 
   return {
+    twinsLinked,
     imported,
     updated,
     retired,

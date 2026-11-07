@@ -29,6 +29,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import NextStepAction from "@/components/ui/NextStepAction";
 import SuggestButton from "@/components/ui/SuggestButton";
 import { suggestedCategoryId } from "@/lib/bill-category";
+import { suggestTwins } from "@/lib/twin-suggest";
 import { Table, Th } from "@/components/ui/Table";
 import Tip from "@/components/ui/Tip";
 // Pure and type-only inside: which sheets the confirm still waits on, from
@@ -116,6 +117,7 @@ export default function BoqReview({
     setUnit,
     setUnitAll,
     setLineKind,
+    setTwins,
     readSpecifications,
     confirm,
   } = boq;
@@ -694,6 +696,13 @@ export default function BoqReview({
           // ref two records share: `GR-FAB-13` under six items is one fabric.
           const duplicates = duplicateGroups({ ...sheet, lines: sheet.lines.filter((line) => line.rowKind !== "finish_for") });
           const problemByRow = new Map(rowKindProblems(sheet.lines).map((problem) => [problem.lineNo, problem.problem]));
+          // 0060: one item on two lines (a zone prefix, or one code twice),
+          // read off the sheet by the function the twins route accepts by.
+          // A line already accepted is not offered again.
+          const twinSuggestions = suggestTwins(sheet.lines);
+          const twinsToAccept = sheet.lines.filter(
+            (line) => !line.ignored && !line.twinOf && twinSuggestions.has(line.lineNo),
+          );
           // Row, Kind, Client ref, Item, Area, Qty, Designer, (Against the
           // phase), Category, Level, Include.
           const columns = reconciliation ? 11 : 10;
@@ -824,7 +833,10 @@ export default function BoqReview({
                   }
                   actions={
                     run.status === "parsed" &&
-                    (notFurniture.length > 0 || suggested.length > 0 || suggestedCategories.length > 0) ? (
+                    (notFurniture.length > 0 ||
+                      suggested.length > 0 ||
+                      suggestedCategories.length > 0 ||
+                      twinsToAccept.length > 0) ? (
                       <span className="inline-flex flex-wrap items-center gap-4">
                         {/* FIRST, because it is the cheaper decision: whether a
                             row belongs in the bill at all comes before how
@@ -846,6 +858,14 @@ export default function BoqReview({
                             evidence={`accepts ${suggestedCategories.length} suggestion${suggestedCategories.length === 1 ? "" : "s"} · each row says what it matched`}
                             busy={busy}
                             onAccept={() => void acceptAllCategories(sheetIndex, suggestedCategories)}
+                          />
+                        )}
+                        {twinsToAccept.length > 0 && (
+                          <SuggestButton
+                            value={`Accept the ${twinsToAccept.length} suggested twin${twinsToAccept.length === 1 ? "" : "s"} on this tab`}
+                            evidence="each row says why · a spec added to one twin is then offered to the other"
+                            busy={busy}
+                            onAccept={() => void setTwins(sheetIndex, twinsToAccept, [])}
                           />
                         )}
                         {suggested.length > 0 && (
@@ -943,6 +963,9 @@ export default function BoqReview({
                             setSlot={setSlot}
                             setUnit={setUnit}
                             setLineKind={setLineKind}
+                            twinSuggestion={twinSuggestions.get(line.lineNo)}
+                            onAcceptTwin={() => void setTwins(sheetIndex, [line], [])}
+                            onClearTwin={() => void setTwins(sheetIndex, [], [line])}
                           />
                         );
                       };

@@ -1,7 +1,7 @@
 // Pure tier — the bill review's twin suggestion (T3: zone prefixes and the
 // same ref only), and the pairs an accepted set of suggestions links.
 import { describe, expect, it } from "vitest";
-import { acceptedTwinPairs, suggestTwins } from "@/lib/record-twins";
+import { acceptedTwinPairs, suggestTwins } from "@/lib/twin-suggest";
 
 describe("suggestTwins", () => {
   it("suggests one code under two zones, naming both zones", () => {

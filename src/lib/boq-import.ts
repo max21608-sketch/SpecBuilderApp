@@ -307,6 +307,19 @@ export type StagedBoqLine = BoqLine & {
    * (`LinePairing` in boq-reconcile.ts; audit 2026-11-06, C14).
    */
   replaces?: { recordId: string; recordVersion: number; restore?: boolean } | null;
+  /**
+   * 0060: A PERSON ACCEPTED that this line is a TWIN of the line on `row` (one
+   * item listed twice, `GR-FUR-13` / `PL-FUR-13`), with the evidence the
+   * suggestion showed. Only `suggestTwins` can offer one and only a click
+   * stages one (`bill-twins.ts`); the confirm links the records the two lines
+   * become, in the confirm's own change set. A suggestion nobody accepted is
+   * never here, and writes nothing.
+   *
+   * `twinOfVersion` is its own optimistic lock, `slotOverridesVersion`'s
+   * rule: absent is 0. OPTIONAL, absent on every bill staged before 0060.
+   */
+  twinOf?: { row: number; evidence: string } | null;
+  twinOfVersion?: number;
 };
 
 /**

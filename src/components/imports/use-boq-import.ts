@@ -81,6 +81,10 @@ export type Line = {
   // version, sent back with every change (`effectiveRowImage`).
   picture?: BillPictureOverride | null;
   pictureVersion?: number;
+  // 0060: a twin a person accepted on this review, and that choice's own
+  // version (`stageBillTwins`). The confirm links the two records.
+  twinOf?: { row: number; evidence: string } | null;
+  twinOfVersion?: number;
 } & RowKindFields;
 
 export type Category = { id: string; slug: string; family: string; name: string; requirements_authored: boolean };
@@ -580,6 +584,33 @@ export function useBoqImport(id: string) {
     }
   }
 
+  /**
+   * TWINS, ACCEPTED OR TAKEN BACK (0060): one row, or every suggestion on a
+   * tab in one press. The server re-reads `suggestTwins` and accepts only what
+   * it would have suggested, each line at the version it was drawn with.
+   * Reload first, then report (`reloadThen`'s rule).
+   */
+  async function setTwins(sheetIndex: number, accept: Line[], clear: Line[]) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const entry = (line: Line) => ({ index: line.index, version: line.twinOfVersion ?? 0 });
+      const res = await apiFetch<{ accepted: number }>(`/api/imports/${id}/twins`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sheetIndex, accept: accept.map(entry), clear: clear.map(entry) }),
+      });
+      await load(true);
+      if (!res.ok) setError(res.error);
+      else if (accept.length > 1) {
+        setNotice(`${res.data.accepted} lines accepted as twins. Confirming the bill links each pair; each row can be taken back.`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function setLineKind(sheetIndex: number, index: number, rowKind: BoqRowKind, finishForRow: number | null) {
     setError(null);
     setNotice(null);
@@ -687,6 +718,7 @@ export function useBoqImport(id: string) {
     setUnit,
     setUnitAll,
     setLineKind,
+    setTwins,
     readSpecifications,
     confirm,
   };
