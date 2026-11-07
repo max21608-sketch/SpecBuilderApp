@@ -267,11 +267,14 @@ function DraftsView() {
       return;
     }
     setError(null);
-    const { questions: _packedQuestions, ...inventoryRest } = res.data.inventory;
-    const data: Payload = {
-      ...res.data,
-      inventory: { ...inventoryRest, groups: unpackContactGroups(res.data.inventory) },
-    };
+    // A response that already carries each group's questions (a fixture, or
+    // the route answering the old shape) is taken as it is: the packed shape
+    // is recognised by its `questions` list, never assumed.
+    const { questions: packedQuestions, ...inventoryRest } = res.data.inventory;
+    const groups = Array.isArray(packedQuestions)
+      ? unpackContactGroups(res.data.inventory)
+      : (res.data.inventory.groups as unknown as Inventory["groups"]);
+    const data: Payload = { ...res.data, inventory: { ...inventoryRest, groups } };
     setData(data);
 
     const live = new Set<string>();
