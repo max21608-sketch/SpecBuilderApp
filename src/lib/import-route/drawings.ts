@@ -74,7 +74,7 @@ export async function patchBulkUnit(id: string, raw: unknown, actor: string): Pr
         select id, status, parsed, version from intake_runs where id = ${id} for update
       `;
       const run = rows[0];
-      if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+      if (!run) throw new DomainConflictError("not_found", "No such document.", { status: 404 });
       if (run.status !== "parsed") {
         throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be edited here" }));
       }
@@ -85,7 +85,7 @@ export async function patchBulkUnit(id: string, raw: unknown, actor: string): Pr
       const fieldRows = await loadFieldsWithPalettes(txn);
       const staged: StagedDrawings = assertStagedDrawings(run.parsed, specFieldEntries(fieldRows));
       if (scope === "item" && !staged.items.some((item) => item.id === itemId)) {
-        throw new DomainConflictError("item_missing", "That item is no longer part of this import. Reload.");
+        throw new DomainConflictError("item_missing", "That item is no longer part of this document. Reload.");
       }
 
       let changed = 0;
@@ -123,7 +123,7 @@ export async function patchBulkUnit(id: string, raw: unknown, actor: string): Pr
         where id = ${id} and status = 'parsed'
         returning version
       `;
-      if (!written[0]) throw new DomainConflictError("not_reviewable", "This import closed while you were editing it.");
+      if (!written[0]) throw new DomainConflictError("not_reviewable", "This document closed while you were editing it.");
       // Every row this bumped, so a screen confirming next sends these and not
       // the versions it rendered with (audit G1, `acked-versions.ts`).
       return { version: Number(written[0].version), changed, versions: versionsWritten(staged.items, items) };
@@ -292,7 +292,7 @@ export async function patchDrawing(id: string, raw: unknown, actor: string): Pro
         select id, project_id, status, parsed, version from intake_runs where id = ${id} for update
       `;
       const run = rows[0];
-      if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+      if (!run) throw new DomainConflictError("not_found", "No such document.", { status: 404 });
       if (run.status !== "parsed") {
         throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be edited here" }));
       }
@@ -303,7 +303,7 @@ export async function patchDrawing(id: string, raw: unknown, actor: string): Pro
       const fieldRows = await loadFieldsWithPalettes(txn);
       const staged: StagedDrawings = assertStagedDrawings(run.parsed, specFieldEntries(fieldRows));
       const item = staged.items.find((row) => row.id === itemId);
-      if (!item) throw new DomainConflictError("item_missing", "That item is no longer part of this import. Reload.");
+      if (!item) throw new DomainConflictError("item_missing", "That item is no longer part of this document. Reload.");
 
       let items: DrawingItem[];
 
@@ -388,7 +388,7 @@ export async function patchDrawing(id: string, raw: unknown, actor: string): Pro
       } else {
         const observation = item.observations.find((row) => row.id === observationId);
         if (!observation) {
-          throw new DomainConflictError("observation_missing", "That spec is no longer part of this import. Reload.");
+          throw new DomainConflictError("observation_missing", "That spec is no longer part of this document. Reload.");
         }
         if (observation.reviewStatus !== "pending") {
           throw new DomainConflictError(
@@ -429,7 +429,7 @@ export async function patchDrawing(id: string, raw: unknown, actor: string): Pro
             where id = ${id} and status = 'parsed'
             returning version
           `;
-          if (!swapped[0]) throw new DomainConflictError("not_reviewable", "This import closed while you were editing it.");
+          if (!swapped[0]) throw new DomainConflictError("not_reviewable", "This document closed while you were editing it.");
           // A swap moves the row it displaces too; the screen learns both.
           return { version: Number(swapped[0].version), versions: versionsWritten(staged.items, items) };
         }
@@ -620,7 +620,7 @@ export async function patchDrawing(id: string, raw: unknown, actor: string): Pro
         where id = ${id} and status = 'parsed'
         returning version
       `;
-      if (!written[0]) throw new DomainConflictError("not_reviewable", "This import closed while you were editing it.");
+      if (!written[0]) throw new DomainConflictError("not_reviewable", "This document closed while you were editing it.");
       // THE VERSIONS THIS WRITE PRODUCED (audit G1). The run's own version is
       // no use to a screen confirming next: the confirm checks each row's and
       // the item's, so those are what it has to learn.

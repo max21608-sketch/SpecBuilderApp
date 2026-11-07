@@ -67,7 +67,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     where r.id = ${id}
   `;
   const row = rows[0];
-  if (!row) return json({ ok: false, error: "No such import." }, 404);
+  if (!row) return json({ ok: false, error: "No such document." }, 404);
 
   // ==========================================================================
   // `pending` COVERS TWO STATES, AND THE SCREENS SAID THE WRONG ONE.
@@ -130,7 +130,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const rows = await sql`
     select source_kind, document_kind, parsed->>'kind' as staged_kind from intake_runs where id = ${id}
   `;
-  if (!rows[0]) return json({ ok: false, error: "No such import." }, 404);
+  if (!rows[0]) return json({ ok: false, error: "No such document." }, 404);
 
   if (rows[0].document_kind === "finishes_schedule" && rows[0].staged_kind === "finishes_schedule") {
     return patchFinishScheduleEntry(id, raw, user.email);

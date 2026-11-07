@@ -52,13 +52,13 @@ export async function patchPreamble(id: string, raw: unknown, actor: string): Pr
         select id, status, parsed, version from intake_runs where id = ${id} for update
       `;
       const run = rows[0];
-      if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+      if (!run) throw new DomainConflictError("not_found", "No such document.", { status: 404 });
       if (run.status !== "parsed") {
         throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be edited here" }));
       }
       const staged: StagedPreamble = assertStagedPreamble(run.parsed);
       const note = staged.notes.find((row) => row.id === noteId);
-      if (!note) throw new DomainConflictError("note_missing", "That note is no longer part of this import. Reload.");
+      if (!note) throw new DomainConflictError("note_missing", "That note is no longer part of this document. Reload.");
       if (note.reviewStatus !== "pending") {
         throw new DomainConflictError(
           "note_reviewed",
@@ -80,7 +80,7 @@ export async function patchPreamble(id: string, raw: unknown, actor: string): Pr
         where id = ${id} and status = 'parsed'
         returning version
       `;
-      if (!written[0]) throw new DomainConflictError("not_reviewable", "This import closed while you were editing it.");
+      if (!written[0]) throw new DomainConflictError("not_reviewable", "This document closed while you were editing it.");
       return { version: Number(written[0].version) };
     });
     return json({ ok: true, ...result });
@@ -169,17 +169,17 @@ export async function patchProposal(id: string, raw: unknown, actor: string): Pr
         for update
       `;
       const run = rows[0];
-      if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+      if (!run) throw new DomainConflictError("not_found", "No such document.", { status: 404 });
       if (run.status !== "parsed") {
         throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be edited here" }));
       }
 
       const staged = (run.parsed ?? null) as StagedSpecDocument | null;
-      if (!staged?.lines) throw new DomainConflictError("not_staged", "This import has nothing staged.");
+      if (!staged?.lines) throw new DomainConflictError("not_staged", "This document has nothing staged.");
 
       // By id, in the LOCKED json. Never by position.
       const proposal = staged.lines.find((line) => line.id === proposalId);
-      if (!proposal) throw new DomainConflictError("proposal_missing", "That row is no longer part of this import.");
+      if (!proposal) throw new DomainConflictError("proposal_missing", "That row is no longer part of this document.");
       if (proposal.reviewStatus !== "pending") {
         throw new DomainConflictError(
           "proposal_reviewed",
@@ -318,7 +318,7 @@ export async function patchProposal(id: string, raw: unknown, actor: string): Pr
         where id = ${id} and status = 'parsed'
         returning version
       `;
-      if (!written[0]) throw new DomainConflictError("not_reviewable", "This import changed while you were editing.");
+      if (!written[0]) throw new DomainConflictError("not_reviewable", "This document changed while you were editing.");
 
       return { proposal: next, version: Number(written[0].version) };
     });

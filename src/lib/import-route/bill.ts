@@ -429,7 +429,7 @@ export async function patchBoqLine(
       `;
     }
     if (!rows[0]) {
-      return json({ ok: false, error: "That sheet is no longer in this import, or the import is already confirmed." }, 409);
+      return json({ ok: false, error: "That sheet is no longer in this bill, or the bill is already confirmed." }, 409);
     }
     return json({ ok: true, version: rows[0].version });
   }
@@ -524,7 +524,7 @@ export async function patchBoqLine(
     `;
     if (!rows[0]) {
       return json(
-        { ok: false, error: "That line is no longer in this import, or the import is already confirmed." },
+        { ok: false, error: "That line is no longer in this bill, or the bill is already confirmed." },
         409,
       );
     }
@@ -549,9 +549,9 @@ export async function patchBoqLine(
       const staged = await txn`
         select parsed, status from intake_runs where id = ${id} for update
       `;
-      if (!staged[0]) throw new DomainConflictError("gone", "No such import.", { status: 404 });
+      if (!staged[0]) throw new DomainConflictError("gone", "No such bill.", { status: 404 });
       if (staged[0].status !== "parsed") {
-        throw new DomainConflictError("confirmed", "This import is already confirmed.");
+        throw new DomainConflictError("confirmed", "This bill is already confirmed.");
       }
       const sheets = ((staged[0].parsed as { sheets?: CarrySheet[] } | null)?.sheets ?? []) as CarrySheet[];
       const targets = planCarry(sheets, { sheetIndex, index }, decision);
@@ -572,7 +572,7 @@ export async function patchBoqLine(
         returning version
       `;
       if (!updated[0]) {
-        throw new DomainConflictError("gone", "That line is no longer in this import.");
+        throw new DomainConflictError("gone", "That line is no longer in this bill.");
       }
 
       let version = updated[0].version as number;
@@ -592,7 +592,7 @@ export async function patchBoqLine(
           where id = ${id} and status = 'parsed'
           returning version
         `;
-        if (!rows[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
+        if (!rows[0]) throw new DomainConflictError("gone", "That line is no longer in this bill.");
         version = rows[0].version as number;
       }
       return { version, carried: targets.length, tabs: listTabs(targets) };
@@ -624,11 +624,11 @@ async function patchRowKind(
   try {
     const version = await withTransaction(async (txn) => {
       const rows = await txn`select parsed, status from intake_runs where id = ${id} for update`;
-      if (!rows[0]) throw new DomainConflictError("gone", "No such import.", { status: 404 });
-      if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This import is already confirmed.");
+      if (!rows[0]) throw new DomainConflictError("gone", "No such bill.", { status: 404 });
+      if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This bill is already confirmed.");
       const sheet = assertBoqDocument(rows[0].parsed).sheets[sheetIndex];
       const line = sheet?.lines[index];
-      if (!sheet || !line) throw new DomainConflictError("gone", "That line is no longer in this import.");
+      if (!sheet || !line) throw new DomainConflictError("gone", "That line is no longer in this bill.");
 
       let parent: { row: number; code: string | null } | null = null;
       if (rowKind === "finish_for") {
@@ -655,7 +655,7 @@ async function patchRowKind(
         where id = ${id} and status = 'parsed'
         returning version
       `;
-      if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
+      if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this bill.");
       return Number(written[0].version);
     });
     return json({ ok: true, version });
@@ -697,11 +697,11 @@ async function patchSlotOverride(
   try {
     const result = await withTransaction(async (txn) => {
       const rows = await txn`select parsed, status from intake_runs where id = ${id} for update`;
-      if (!rows[0]) throw new DomainConflictError("gone", "No such import.", { status: 404 });
-      if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This import is already confirmed.");
+      if (!rows[0]) throw new DomainConflictError("gone", "No such bill.", { status: 404 });
+      if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This bill is already confirmed.");
       const sheet = assertBoqDocument(rows[0].parsed).sheets[sheetIndex];
       const line = sheet?.lines[index];
-      if (!line) throw new DomainConflictError("gone", "That line is no longer in this import.");
+      if (!line) throw new DomainConflictError("gone", "That line is no longer in this bill.");
       const current = line.slotOverridesVersion ?? 0;
       if (current !== expectedVersion) {
         throw new DomainConflictError(
@@ -743,7 +743,7 @@ async function patchSlotOverride(
         where id = ${id} and status = 'parsed'
         returning version
       `;
-      if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
+      if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this bill.");
       return { version: Number(written[0].version), slotOverridesVersion: version };
     });
     return json({ ok: true, ...result });
@@ -781,18 +781,18 @@ async function writeLineUnit(
     where id = ${id} and status = 'parsed'
     returning version
   `;
-  if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
+  if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this bill.");
   return Number(written[0].version);
 }
 
 /** The live line, locked, and whether its placed size prints no unit. */
 async function lockedLineForUnit(txn: TxnSql, id: string, sheetIndex: number, index: number) {
   const rows = await txn`select parsed, status from intake_runs where id = ${id} for update`;
-  if (!rows[0]) throw new DomainConflictError("gone", "No such import.", { status: 404 });
-  if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This import is already confirmed.");
+  if (!rows[0]) throw new DomainConflictError("gone", "No such bill.", { status: 404 });
+  if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This bill is already confirmed.");
   const sheet = assertBoqDocument(rows[0].parsed).sheets[sheetIndex];
   const line = sheet?.lines[index];
-  if (!sheet || !line) throw new DomainConflictError("gone", "That line is no longer in this import.");
+  if (!sheet || !line) throw new DomainConflictError("gone", "That line is no longer in this bill.");
   const needsUnit = line.rowKind !== "finish_for" && lineSizeNeedsUnit(lineStatements(line, sheetColumnHeadings(sheet)));
   return { line, needsUnit };
 }
@@ -952,7 +952,7 @@ async function patchLinePicture(
   let crop: BillPictureCrop | null = null;
   if (typeof choice === "object") {
     const owner = await sql`select project_id from intake_runs where id = ${id}`;
-    if (!owner[0]) return json({ ok: false, error: "No such import." }, 404);
+    if (!owner[0]) return json({ ok: false, error: "No such bill." }, 404);
     const projectId = String(owner[0].project_id);
     let pathname: string;
     try {
@@ -978,12 +978,12 @@ async function patchLinePicture(
   try {
     const result = await withTransaction(async (txn) => {
       const rows = await txn`select parsed, status from intake_runs where id = ${id} for update`;
-      if (!rows[0]) throw new DomainConflictError("gone", "No such import.", { status: 404 });
-      if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This import is already confirmed.");
+      if (!rows[0]) throw new DomainConflictError("gone", "No such bill.", { status: 404 });
+      if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This bill is already confirmed.");
       const doc = assertBoqDocument(rows[0].parsed);
       const sheet = doc.sheets[sheetIndex];
       const line = sheet?.lines[index];
-      if (!sheet || !line) throw new DomainConflictError("gone", "That line is no longer in this import.");
+      if (!sheet || !line) throw new DomainConflictError("gone", "That line is no longer in this bill.");
       const current = line.pictureVersion ?? 0;
       if (current !== expectedVersion) {
         throw new DomainConflictError(
@@ -1012,7 +1012,7 @@ async function patchLinePicture(
         where id = ${id} and status = 'parsed'
         returning version
       `;
-      if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
+      if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this bill.");
       return { version: Number(written[0].version), pictureVersion: version };
     });
     return json({ ok: true, ...result });
