@@ -214,6 +214,18 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
     expect(row?.toQuote).toBeGreaterThan(0);
   });
 
+  it("ships each question once when asked, and unpacks to the same groups (audit F13)", async () => {
+    const { GET } = await import("@/app/api/drafts/route");
+    const { unpackContactGroups } = await import("@/lib/chase-inventory");
+    const packed = (await (await GET(new Request(`http://localhost/api/drafts?projectId=${projectId}&questions=once`))).json()) as {
+      inventory: Parameters<typeof unpackContactGroups>[0];
+    };
+    const full = await readDrafts();
+    expect(unpackContactGroups(packed.inventory)).toEqual(full.inventory.groups);
+    const distinct = new Set(full.inventory.groups.flatMap((g) => g.questions.map((q) => `${q.recordId}/${q.requirementId}`)));
+    expect(packed.inventory.questions).toHaveLength(distinct.size);
+  });
+
   it("keeps unassigned and level-less apart, and neither is a contact's debt", async () => {
     const owed = await readOwed();
     // A designer code nobody has been named for: a real question with nobody

@@ -37,6 +37,7 @@ import {
 import { isQuestionTier } from "@/lib/tgq";
 import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { loadProjectSummary } from "@/lib/project-summary";
+import { packContactGroups } from "@/lib/chase-inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +49,14 @@ export async function GET(request: Request): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
 
-  const projectId = new URL(request.url).searchParams.get("projectId");
+  const url = new URL(request.url);
+  const projectId = url.searchParams.get("projectId");
+  // `questions=once` ships each question ONCE, with the groups naming them by
+  // position (src/lib/chase-inventory.ts, audit F13). Every colleague's group
+  // holds every question on the project, so the old shape repeated the whole
+  // list per colleague: 62.9 MB on a 440-record project with two. The old
+  // shape stays the default only until the chase page asks for this one.
+  const questionsOnce = url.searchParams.get("questions") === "once";
   if (!projectId) return json({ ok: false, error: "projectId is required." }, 400);
 
   const projectRows = await sql`
@@ -262,14 +270,23 @@ export async function GET(request: Request): Promise<Response> {
       settledLines: summary.settledItems,
       uncategorisedLines: summary.uncategorised,
       // Grouped by the contact each record's designer resolves to.
-      groups: groups.map((group) => ({
-        contact: group.contact,
-        questions: group.questions.map((question) => ({
-          ...question,
-          // The client renders this; it never decides eligibility from it.
-          waiting: waiting.get(questionKey(question.recordId, question.requirementId, 0)) ?? null,
-        })),
-      })),
+      ...(() => {
+        // Each question carries its waiting state once, whichever shape ships.
+        // The client renders it; it never decides eligibility from it.
+        const withWaiting = new Map(
+          outstanding.map((question) => {
+            const key = questionKey(question.recordId, question.requirementId, 0);
+            return [key, { ...question, waiting: waiting.get(key) ?? null }] as const;
+          }),
+        );
+        const shaped = groups.map((group) => ({
+          contact: group.contact,
+          questions: group.questions.map(
+            (question) => withWaiting.get(questionKey(question.recordId, question.requirementId, 0))!,
+          ),
+        }));
+        return questionsOnce ? packContactGroups(shaped) : { groups: shaped };
+      })(),
       blocked,
       // Per record on Matthew's matrix: its TGQ count, project-wide count, and
       // the rows that are not questions (slots, record columns), which the

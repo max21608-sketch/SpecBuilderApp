@@ -1045,11 +1045,19 @@ export async function lineIdsForRecords(recordIds: string[]): Promise<string[]> 
   return rows.map((row) => String(row.line_id));
 }
 
-export async function loadSentCoverage(project: string | string[]): Promise<
-  (CoverageSnapshot & { draftId: string; sentAt: string | null; contactName: string })[]
-> {
+export async function loadSentCoverage(
+  project: string | string[],
+  // THE RECORDS A SCREEN LISTS (audit F13). Absent is the whole project; an
+  // empty list is nothing, as in `loadOutstanding`'s scope. A coverage row is
+  // only ever matched against a question by its record id, so rows for
+  // records the caller does not show are bytes and nothing else.
+  scope?: { recordIds?: string[] },
+): Promise<(CoverageSnapshot & { draftId: string; sentAt: string | null; contactName: string })[]> {
   const projectIds = Array.isArray(project) ? project : [project];
   if (projectIds.length === 0) return [];
+  const recordIds = scope?.recordIds ?? null;
+  if (recordIds?.length === 0) return [];
+  const allRecords = recordIds === null;
   const rows = await sql`
     select i.draft_id, i.record_id, i.requirement_id, i.revision_no,
            i.answer_id, i.snapshot_answer_version, i.record_version, i.context_snapshot,
@@ -1059,6 +1067,7 @@ export async function loadSentCoverage(project: string | string[]): Promise<
     join project_contacts c on c.id = d.contact_id
     where d.project_id = any(${projectIds}::uuid[])
       and d.status = 'sent'
+      and (${allRecords}::boolean or i.record_id = any(${recordIds ?? []}::uuid[]))
     order by d.sent_at desc
   `;
   return rows.map((row) => ({
