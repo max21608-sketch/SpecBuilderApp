@@ -33,6 +33,14 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-11-07: seen on the final walk of the audit build (local stack, T11071)
+
+### A twin chip's hover lists a code once per link, so a four-line family reads "GR-FUR-22, PL-FUR-22, PL-FUR-22, GR-FUR-22, GR-FUR-22" — OPEN, cosmetic
+
+The phase table's "twin" chip (`twin_codes`) names every twin's codes without de-duplicating. The links behind it are right (58 pairs from the 36 accepted suggestions on the Aman bill copy, each pair once in `spec_record_twins`). Fold the list by code.
+
+---
+
 ## 2026-11-07: found by building the audit plan, each FIXED the same day
 
 ### `import "server-only"` in blob-source.ts broke four pilot backfills under tsx — FIXED (removed; the import-graph test is the guard)
