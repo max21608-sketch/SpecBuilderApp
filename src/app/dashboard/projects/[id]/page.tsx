@@ -32,7 +32,8 @@ import { useParams, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import ContactsPanel, { type Contact, type ContactsOutstanding } from "@/components/projects/ContactsPanel";
-import SpecTable, { FOCUSES, type Focus, type RunTally } from "@/components/records/SpecTable";
+import { FOCUSES, type Focus, type RunTally } from "@/components/records/SpecTable";
+import PhaseTabs, { type SpecRun } from "@/components/projects/PhaseTabs";
 import ExportMenu from "@/components/records/ExportMenu";
 import ProjectHistory from "@/components/history/ProjectHistory";
 import OpenChangeBar from "@/components/history/OpenChangeBar";
@@ -68,7 +69,6 @@ import { inboxBuckets, type InboxOutcomeFields } from "@/lib/inbox-outcome";
 import { formatDay } from "@/lib/format-day";
 import NotesCard, { type ProjectNote } from "@/components/projects/NotesCard";
 import DocumentsTab, { useDocumentsPoll, useProjectDocuments, type DocumentRun } from "@/components/projects/DocumentsTab";
-import { NO_CODES_PHASE_SENTENCE } from "@/lib/bill-sheet-notices";
 
 type Project = {
   id: string;
@@ -86,21 +86,6 @@ type Project = {
   archived_at: string | null;
   archived_by: string | null;
   version: number;
-};
-
-type SpecRun = {
-  id: string;
-  name: string;
-  /** Sent back when the phase is retired, so a phase changed since this load is refused (audit A16). */
-  version: number;
-  source_sheet: string | null;
-  boq_revision: string | null;
-  boq_date: string | null;
-  header_notes: string[];
-  /** A bill made this phase and none of its items carries a code (`NO_CODES_PHASE_SENTENCE`). */
-  bill_without_codes?: boolean;
-  record_count: string;
-  attribute_count: string;
 };
 
 /**
@@ -226,9 +211,6 @@ function ProjectOverview() {
       return runs.some((run) => run.id === raw) ? raw : null;
     },
   });
-  const [retiringRun, setRetiringRun] = useState<string | null>(null);
-  const [retireRunReason, setRetireRunReason] = useState("");
-  const [retiringBusy, setRetiringBusy] = useState(false);
   const [contacts, setContacts] = useState<Contact[] | null>(null);
   const [contactsOutstanding, setContactsOutstanding] = useState<ContactsOutstanding | null>(null);
   /** This project's mail still to review; null until counted (plan any-bill, step 7). */
@@ -299,36 +281,6 @@ function ProjectOverview() {
     // NOT the details form: `ProjectDetailsCard` owns it, and a reload here
     // never reaches what somebody is typing there (audit G6).
   }, [projectId, setDocuments, setFailedDocuments]);
-
-  async function retireRun(run: SpecRun) {
-    if (!retireRunReason.trim()) return;
-    const runId = run.id;
-    setRetiringBusy(true);
-    try {
-      const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/runs/${runId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ status: "retired", reason: retireRunReason.trim(), version: run.version }),
-      });
-      // Reload first, then report. This screen clears its banner on a
-      // successful load, so setting the message first would show a refusal for
-      // a few milliseconds and then nothing at all.
-      await load();
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      setError(null);
-      setRetiringRun(null);
-      setRetireRunReason("");
-      // The retired run has left the tabs, so the tab it was on no longer
-      // exists. Back to the overview rather than a blank panel.
-      setTab("overview");
-    } finally {
-      // Always reset: a non-JSON error must not leave the dialog frozen.
-      setRetiringBusy(false);
-    }
-  }
 
   /** Agree with every level this project's records were guessed, in one act. */
   async function acceptLevels() {
@@ -770,89 +722,16 @@ function ProjectOverview() {
             for on every visit. */}
         {tab === "finishes" && <FinishesLibrary projectId={project.id} initialQuery={finishQuery} />}
 
-        {runs.map((run) =>
-          tab === run.id ? (
-            <section key={run.id}>
-              <SpecTable
-                projectId={project.id}
-                runId={run.id}
-                onSummary={(tally) => onRunSummary(run.id, tally)}
-                initialFocus={initialFocus}
-              />
-
-              {/* WHERE THIS RUN CAME FROM, AT THE BOTTOM. It is provenance —
-                  read once when somebody asks which revision they are looking
-                  at, and never while working down the records. Above the table
-                  it cost four lines of the screen on every visit. */}
-              <p className="mt-4 text-xs text-neutral-500">
-                {run.source_sheet && <>from sheet “{run.source_sheet}”</>}
-                {run.boq_revision && <> · revision {run.boq_revision}</>}
-                {run.boq_date && <> · dated {run.boq_date}</>}
-              </p>
-              {run.header_notes?.length > 0 && (
-                <p className="mt-1 text-xs text-neutral-500">
-                  The bill said: {run.header_notes.join(" · ")}
-                </p>
-              )}
-              {/* A BILL WITH NO CODES, said once, beside what the bill said:
-                  amber, because the revision it warns about needs a person to
-                  pair every line by hand. */}
-              {run.bill_without_codes && (
-                <p className="mt-1 text-xs text-amber-800" role="note">
-                  {NO_CODES_PHASE_SENTENCE}
-                </p>
-              )}
-
-              {/* Retiring a phase takes a whole sub-quote out of the tabs and out
-                  of the export. Every record on it goes with it, and both can be
-                  brought back — but the reason is required, because whoever
-                  finds the gap later needs to know why it is there. */}
-              {retiringRun === run.id ? (
-                <div className="mt-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3">
-                  <p className="text-sm font-medium text-red-900">Retire “{run.name}”?</p>
-                  <p className="mt-0.5 text-xs text-red-800">
-                    Its {run.record_count} record{Number(run.record_count) === 1 ? "" : "s"} stop being live: they
-                    leave this project&rsquo;s export and its tabs. Nothing is deleted, and the phase can be brought
-                    back. A BWS job already created from one of these records is NOT removed by its absence from the
-                    export — check those by hand.
-                  </p>
-                  <input
-                    value={retireRunReason}
-                    autoFocus
-                    onChange={(event) => setRetireRunReason(event.target.value)}
-                    placeholder="Superseded by the Rev B bill confirmed on 16 Sep"
-                    className="mt-2 w-full rounded border border-red-300 bg-white px-2 py-1 text-sm"
-                  />
-                  <div className="mt-2 flex items-center gap-2">
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      disabled={!retireRunReason.trim() || retiringBusy}
-                      onClick={() => void retireRun(run)}
-                    >
-                      {retiringBusy ? "Retiring…" : "Retire the phase"}
-                    </Button>
-                    <Button variant="quiet" size="sm" onClick={() => setRetiringRun(null)}>
-                      Keep it
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <Button
-                  size="xs"
-                  variant="danger"
-                  className="mt-3"
-                  onClick={() => {
-                    setRetiringRun(run.id);
-                    setRetireRunReason("");
-                  }}
-                >
-                  Retire this phase
-                </Button>
-              )}
-            </section>
-          ) : null,
-        )}
+        <PhaseTabs
+          projectId={project.id}
+          runs={runs}
+          tab={tab}
+          initialFocus={initialFocus}
+          onRunSummary={onRunSummary}
+          onReload={load}
+          onError={setError}
+          onRetired={() => setTab("overview")}
+        />
 
         {/* Each on its own tab, the same JSX the Overview renders. */}
         {tab === "documents" && documentsCard}
