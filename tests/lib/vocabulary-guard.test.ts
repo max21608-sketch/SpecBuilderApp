@@ -234,10 +234,11 @@ describe("screen vocabulary: a sub-quote is a phase", () => {
 const SERVER_DIRS = ["src/lib", "src/app/api"];
 
 /**
- * Files whose "import" sentences wait on another coder (5.3 is splitting this
- * route into handlers on the same day). Each entry is a debt, not a rule.
+ * Files whose "import" sentences wait on another coder. Each entry is a debt,
+ * not a rule. Empty since 5.3 cut D (2026-11-07): the import route's sentences
+ * moved into src/lib/import-route/ and say "bill" or "document" there.
  */
-const IMPORT_WORD_PENDING = new Set([path.join("src", "app", "api", "imports", "[id]", "route.ts")]);
+const IMPORT_WORD_PENDING = new Set<string>([]);
 
 /**
  * The helpers that turn a status into words a person chose. A template span

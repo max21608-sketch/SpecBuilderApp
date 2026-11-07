@@ -30,7 +30,8 @@
 import { it, expect, beforeAll, afterAll, describe, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
-import { stageDrawings, type SpecFieldEntry } from "@/lib/drawing-document";
+import { type SpecFieldEntry } from "@/lib/drawing-document";
+import { stageDrawings } from "@/lib/drawing-legacy";
 import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
 import { confirmingAsShown } from "./shown-targets";
 import { PATCH as importPatchRoute } from "@/app/api/imports/[id]/route";

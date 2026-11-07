@@ -287,7 +287,7 @@ describe("a bill that is already confirmed", () => {
       },
     };
     render(<ReviewImportPage />);
-    expect(await screen.findByText("This import has already been confirmed.")).toBeTruthy();
+    expect(await screen.findByText("This bill has already been confirmed.")).toBeTruthy();
     const link = await screen.findByRole("link", { name: "Categorise 6 items" });
     expect(link.getAttribute("href")).toBe(`/dashboard/projects/${PROJECT}?tab=run-1&focus=no_category`);
   });

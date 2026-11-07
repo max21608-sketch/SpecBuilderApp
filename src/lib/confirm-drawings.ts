@@ -45,7 +45,6 @@ import {
   resolveDrawingItem,
   shownTargetsDiffer,
   targetRecordIds,
-  variantLettersByItem,
   namedConfigurationPlans,
   parentVariantsOf,
   rowWriteRecords,
@@ -58,11 +57,13 @@ import {
   type SpecFieldEntry,
   type DrawingItem,
   type DrawingObservation,
+  type DrawingResolution,
   type OccupiedSlots,
   type OccupiedSlot,
   type ReplaceTarget,
   type StagedDrawings,
 } from "@/lib/drawing-document";
+import { variantLettersByItem } from "@/lib/drawing-legacy";
 import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
 import type { RecordEntry } from "@/lib/spec-document";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
@@ -349,6 +350,15 @@ function countPending(items: DrawingItem[]): number {
 }
 
 // ---- confirm ---------------------------------------------------------------
+//
+// ONE TRANSACTION, NAMED STEPS (audit 5.3, cut D, 2026-11-07). The confirm was
+// one 830-line function; it is now the steps below, called by
+// `confirmDrawingItem` in the order they always ran, inside the caller's one
+// transaction. Every refusal still happens before the first write, because the
+// steps that refuse (resolve, blockers, place, the picture's pathname) run
+// before the change set is opened. Moving one of them below `openDrawingChange`
+// would be a confirm that half-writes a card, which is the failure this file's
+// header exists to prevent.
 
 /**
  * A crop of the source drawing that the reviewer looked at before confirming.
@@ -373,46 +383,51 @@ export type ItemImage = {
   size?: number | null;
 };
 
-export async function confirmDrawingItem(
-  txn: TxnSql,
-  {
-    runId,
-    expectedVersion,
-    itemId,
-    itemVersion,
-    observations: refs,
-    shownTargets,
-    image,
-    swatches = [],
-    actor,
-  }: {
-    runId: string;
-    expectedVersion: number | null;
-    itemId: string;
-    itemVersion: number;
-    observations: ObservationRef[];
-    /**
-     * The records the card DISPLAYED as this item's targets, exactly as the
-     * screen rendered them from the review GET (`ItemResolution.targets`):
-     * ticked minus unticked, or the live suggestion on an untouched card.
-     */
-    shownTargets: readonly string[];
-    /** The crop the reviewer looked at, already uploaded. Null for none. */
-    image?: ItemImage | null;
-    /** Swatch chips cropped off the page, one per finish row. */
-    swatches?: SwatchCrop[];
-    actor: string;
-  },
-): Promise<DrawingsConfirmResult> {
-  const run = await loadRun(txn, runId, expectedVersion);
-  const item = findItem(run.staged, itemId);
-  if (item.version !== itemVersion) {
-    throw new DomainConflictError(
-      "item_version_stale",
-      "This item's targets changed while you were reviewing it. Reload before confirming.",
-    );
-  }
 
+/** What `confirmDrawingItem` is asked to write, as the confirm route sends it. */
+type ConfirmDrawingItemInput = {
+  runId: string;
+  expectedVersion: number | null;
+  itemId: string;
+  itemVersion: number;
+  observations: ObservationRef[];
+  /**
+   * The records the card DISPLAYED as this item's targets, exactly as the
+   * screen rendered them from the review GET (`ItemResolution.targets`):
+   * ticked minus unticked, or the live suggestion on an untouched card.
+   */
+  shownTargets: readonly string[];
+  /** The crop the reviewer looked at, already uploaded. Null for none. */
+  image?: ItemImage | null;
+  /** Swatch chips cropped off the page, one per finish row. */
+  swatches?: SwatchCrop[];
+  actor: string;
+};
+
+type LiveResolution = {
+  records: RecordEntry[];
+  resolution: DrawingResolution;
+  targets: string[];
+  taken: DrawingObservation[];
+  /** The records the reviewer TICKED: the bill's own, echoed back into the staged item. */
+  ordered: string[];
+  variantOf: Map<string, string>;
+  named: NamedTargets | null;
+  /** Where the specs actually land. */
+  writeIds: string[];
+};
+
+/**
+ * Step 1, RESOLVE: the card's records as they are NOW, checked against what the
+ * card showed, and the rows it submitted checked against its live pending set.
+ * Refuses; writes nothing.
+ */
+async function resolveCard(
+  txn: TxnSql,
+  run: LoadedRun,
+  item: DrawingItem,
+  { runId, refs, shownTargets }: { runId: string; refs: ObservationRef[]; shownTargets: readonly string[] },
+): Promise<LiveResolution> {
   const records = await loadRecords(txn, run.projectId);
   // The canonical code, matching `resolveStagedRun` exactly: the screen and the
   // confirm must resolve an item the same way or a card commits somewhere the
@@ -534,6 +549,24 @@ export async function confirmDrawingItem(
     : [];
   const writeIds = named ? existingNamedIds : ordered.map((parentId) => variantOf.get(parentId) ?? parentId);
 
+  return { records, resolution, targets, taken, ordered, variantOf, named, writeIds };
+}
+
+/**
+ * Step 2, BLOCKERS: the slots the write targets hold, read live, and the card's
+ * blockers recomputed over them. Returns the occupancy keyed by the record
+ * WRITTEN, which the attribute step reads for "already recorded", and the
+ * library it carries: the finishes step pushes what it creates onto that same
+ * array, so "already recorded" reads a finish this card created. Refuses;
+ * writes nothing.
+ */
+async function checkBlockers(
+  txn: TxnSql,
+  run: LoadedRun,
+  item: DrawingItem,
+  live: LiveResolution,
+): Promise<{ library: Finish[]; byWriteTarget: OccupiedSlots }> {
+  const { writeIds, named, variantOf, resolution } = live;
   // ---- the project's finishes library, for the codes this card carries ----
   //
   // Read once, before the fan-out. A code that is already in the library links
@@ -610,13 +643,29 @@ export async function confirmDrawingItem(
     });
   }
 
+  return { library, byWriteTarget };
+}
+
+/** One record a card writes to, and the replace acknowledgements' key for it. */
+type Write = { tickedId: string; recordId: string; ackKey: string; observations: DrawingObservation[] };
+
+/**
+ * Step 3, PLACE: one entry per record written (a named configuration created
+ * here if it does not exist yet), and those records locked in id order.
+ */
+async function placeWrites(
+  txn: TxnSql,
+  run: LoadedRun,
+  live: LiveResolution,
+  actor: string,
+): Promise<{ writes: Write[]; links: { recordId: string; label: string; variantId: string }[]; writtenIds: string[] }> {
+  const { named, ordered, variantOf, taken } = live;
   // ---- where each row lands ------------------------------------------------
   //
   // One entry per record written. `ackKey` is what the reviewer's replace
   // acknowledgements are keyed on: the ticked bill record for a plain or
   // lettered card (the `occupancyThrough` contract), the variant itself for a
   // named one (whose occupants the card named by variant).
-  type Write = { tickedId: string; recordId: string; ackKey: string; observations: DrawingObservation[] };
   const writes: Write[] = [];
   const links: { recordId: string; label: string; variantId: string }[] = [];
   if (named) {
@@ -678,25 +727,37 @@ export async function confirmDrawingItem(
     }
   }
 
+  return { writes, links, writtenIds };
+}
+
+/** Step 4, THE PICTURE'S PATHNAME, checked before anything is written. */
+function checkedImagePath(image: ItemImage | null | undefined, projectId: string): string | null {
   // The picture, if the reviewer kept one. Validated HERE and not trusted from
   // the screen: the pathname has to be one of THIS project's, or a signed-in
   // user could attach any blob in the store to any record by editing a request.
-  let imagePath: string | null = null;
-  if (image) {
-    try {
-      imagePath = assertProjectScopedPathname(image.pathname, run.projectId);
-    } catch {
-      throw new DomainConflictError("image_not_this_project", "That image is not one of this project's files.", {
-        status: 400,
-      });
-    }
+  if (!image) return null;
+  try {
+    return assertProjectScopedPathname(image.pathname, projectId);
+  } catch {
+    throw new DomainConflictError("image_not_this_project", "That image is not one of this project's files.", {
+      status: 400,
+    });
   }
+}
 
+/** Step 5, THE CHANGE SET, opened before the first write. */
+async function openDrawingChange(
+  txn: TxnSql,
+  run: LoadedRun,
+  item: DrawingItem,
+  taken: readonly DrawingObservation[],
+  { runId, actor }: { runId: string; actor: string },
+): Promise<string> {
   // The change this confirm is, opened before the first write so write_audit()
   // can stamp every row it produces. Its reason is generated rather than asked
   // for: the page and the document ARE the reason, and a reviewer typing "from
   // the drawings" on every card is ceremony, not consent.
-  const changeSetId = await openChangeSet(txn, {
+  return openChangeSet(txn, {
     projectId: run.projectId,
     kind: "drawing_confirm",
     actor,
@@ -707,7 +768,20 @@ export async function confirmDrawingItem(
     })()}${item.itemCodeRaw ? ` (${item.itemCodeRaw})` : ""}`,
     sourceIntakeRunId: runId,
   });
+}
 
+/**
+ * Step 6, THE FINISHES LIBRARY: each finish row's library entry, matched,
+ * created or minted. Pushes what it creates onto `library`, which is the same
+ * array the occupancy carries.
+ */
+async function fileFinishes(
+  txn: TxnSql,
+  run: LoadedRun,
+  taken: readonly DrawingObservation[],
+  library: Finish[],
+  actor: string,
+): Promise<Map<string, string | null>> {
   const finishIdByObservation = new Map<string, string | null>();
   for (const observation of taken) {
     const resolution = resolveFinishCode(observation.materialCodeRaw, observation.value, library);
@@ -797,8 +871,17 @@ export async function confirmDrawingItem(
     }
   }
 
-  const attributeIdsByObservation = new Map<string, string[]>();
-  const alreadyByObservation = new Map<string, { recordId: string; attributeId: string; sourcePage: number | null }[]>();
+  return finishIdByObservation;
+}
+
+/** Step 7, THE SWATCHES. Returns how many proposed swatches were left out. */
+async function writeSwatches(
+  txn: TxnSql,
+  run: LoadedRun,
+  swatches: readonly SwatchCrop[],
+  finishIdByObservation: ReadonlyMap<string, string | null>,
+  actor: string,
+): Promise<number> {
     // ---- the swatch chips, onto the finishes they belong to -----------------
   //
   // A SWATCH BELONGS TO THE CODE, NOT TO THE ITEM. `project_finishes` is
@@ -863,8 +946,8 @@ export async function confirmDrawingItem(
     `;
   }
 
-  /** Old row → the row that took over, linked once the new id is known. */
-  const superseded: { oldId: string; observationId: string; recordId: string }[] = [];
+  return swatchesLeftOut;
+}
 
   /**
    * Retire what an acknowledgement names, at the version the reviewer saw.
@@ -883,279 +966,317 @@ export async function confirmDrawingItem(
   // refused in words. The blocker `replace_stale` says so on the card first;
   // this is the gate behind it, so a tick that survived anything still
   // retires nothing it does not describe.
-  async function retireOccupant(attributeId: string, version: number, recordId: string, target: ReplaceTarget) {
-    const stale = () =>
-      new DomainConflictError(
-        "replace_stale",
-        "This row no longer replaces the value it was ticked for. Nothing was written: choose its slot or field again to clear the tick, or tick it afresh.",
-      );
-    if (!target) throw stale();
-    const slot = target.kind === "slot" ? target.slot : null;
-    const fieldId = target.kind === "field" ? target.fieldId : null;
-    const rows = await txn`
-      update record_attributes
-      set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
-      where id = ${attributeId}
-        and record_id = ${recordId}
-        and version = ${version}
-        and status = 'active'
-        and (${slot}::text is null or dimension_slot = ${slot})
-        and (${fieldId}::uuid is null or spec_field_id = ${fieldId}::uuid)
+async function retireOccupant(
+txn: TxnSql,
+actor: string,
+attributeId: string,
+version: number,
+recordId: string,
+target: ReplaceTarget,
+): Promise<void> {
+  const stale = () =>
+    new DomainConflictError(
+      "replace_stale",
+      "This row no longer replaces the value it was ticked for. Nothing was written: choose its slot or field again to clear the tick, or tick it afresh.",
+    );
+  if (!target) throw stale();
+  const slot = target.kind === "slot" ? target.slot : null;
+  const fieldId = target.kind === "field" ? target.fieldId : null;
+  const rows = await txn`
+    update record_attributes
+    set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
+    where id = ${attributeId}
+      and record_id = ${recordId}
+      and version = ${version}
+      and status = 'active'
+      and (${slot}::text is null or dimension_slot = ${slot})
+      and (${fieldId}::uuid is null or spec_field_id = ${fieldId}::uuid)
+    returning id
+  `;
+  if (!rows[0]) {
+    // Which of two refusals: the attribute moved under the reviewer, or it
+    // is still there and simply is not what this row writes.
+    const elsewhere = await txn`
+      select 1 from record_attributes
+      where id = ${attributeId} and record_id = ${recordId} and version = ${version} and status = 'active'
+    `;
+    if (elsewhere[0]) throw stale();
+    throw new DomainConflictError(
+      "occupant_changed",
+      "The spec this page would replace has changed since you looked at it. Nothing was written — reload and check what is there now.",
+    );
+  }
+}
+
+/** Where an attribute step records what it wrote, per observation and per record. */
+type WriteLedger = {
+  attributeIdsByObservation: Map<string, string[]>;
+  alreadyByObservation: Map<string, { recordId: string; attributeId: string; sourcePage: number | null }[]>;
+  /** Old row → the row that took over, linked once the new id is known. */
+  superseded: { oldId: string; observationId: string; recordId: string }[];
+};
+
+// One picture per target record, the same fan-out the attributes get, and
+// correct for the same reason: it is ONE drawing of one item, and the runs
+// quoting it are quoting that item.
+//
+// SUPERSEDES, NEVER DELETES, AND NEVER DISPLACES THE BILL'S PICTURE
+// (2026-10-05). This used to delete the record's picture and insert the
+// crop, on the argument that a crop can always be re-made — true of a crop
+// and false of the photograph a bill printed beside the item, which it was
+// deleting too. "We always prefer a picture over a drawing": over a bill's
+// picture the crop is stored as an alternative the record offers, and a
+// person swaps it in there if they want it. `placeDrawingCrop` carries the
+// rule; the records are already locked above.
+async function writePicture(
+  txn: TxnSql,
+  recordId: string,
+  item: DrawingItem,
+  image: ItemImage | null | undefined,
+  imagePath: string,
+  actor: string,
+): Promise<boolean> {
+  const placed = await placeDrawingCrop(
+    txn,
+    recordId,
+    {
+      storagePath: imagePath,
+      filename: itemImageFilename(item.id, image?.page, image?.filename),
+      size: image?.size ?? null,
+      width: image?.width ?? null,
+      height: image?.height ?? null,
+    },
+    actor,
+  );
+  return placed === "alternative";
+}
+
+/**
+ * Step 8, THE ATTRIBUTES on one record: a replacement retired first, a value
+ * already recorded marked rather than written, every other row inserted.
+ * Returns how many rows it inserted.
+ */
+async function writeAttributes(
+  txn: TxnSql,
+  run: LoadedRun,
+  item: DrawingItem,
+  { recordId, ackKey, landing }: { recordId: string; ackKey: string; landing: readonly DrawingObservation[] },
+  occupied: OccupiedSlots,
+  finishIdByObservation: ReadonlyMap<string, string | null>,
+  { attributeIdsByObservation, alreadyByObservation, superseded }: WriteLedger,
+  { runId, actor }: { runId: string; actor: string },
+): Promise<number> {
+  let inserts = 0;
+  const sortRows = await txn`
+    select coalesce(max(sort_order), 0) as max_sort from record_attributes where record_id = ${recordId}
+  `;
+  let sortOrder = Number(sortRows[0]?.max_sort ?? 0);
+
+  for (const observation of landing) {
+    sortOrder += 1;
+    inserts += 1;
+
+    // ---- a revised drawing replaces what is in the slot ------------------
+    // Retired BEFORE the insert, and that order is decided by the database
+    // rather than by preference: both partial unique indexes are
+    // `where status = 'active'`, so retire-then-insert commits and
+    // insert-then-retire cannot. Re-checked against the version the reviewer
+    // saw — an occupant that changed since is refused rather than replaced,
+    // because the value they agreed to drop is not the value that is there.
+    const replacement = acknowledgedReplacements(observation).get(ackKey);
+    // A DIAMETER RETIRES THE W AND D IT WAS ACKNOWLEDGED TO (brief G). The
+    // same retire as a replacement — version-checked, before the insert —
+    // and pinned to the slot the reviewer was shown, so an acknowledgement
+    // can never retire a row that has since become something else.
+    const retiredSquare: string[] = [];
+    for (const [slot, retire] of acknowledgedSquareRetirements(observation).get(ackKey) ?? []) {
+      await retireOccupant(txn, actor, retire.attributeId, retire.attributeVersion, recordId, { kind: "slot", slot });
+      retiredSquare.push(retire.attributeId);
+      superseded.push({ oldId: retire.attributeId, observationId: observation.id, recordId });
+    }
+    // ---- the same measurement, already on this record ------------------
+    // Same slot, same figure in millimetres, same state, from another page:
+    // not a replacement, and nothing to write — the unique index would
+    // refuse a second active row, and the fact is already recorded. The row
+    // is marked applied naming the EXISTING attribute, so the card and the
+    // history say where it is. Decided per record, by the same
+    // `alreadyRecorded` the blockers used.
+    // A FINISH the record already holds under the SAME client code, in the
+    // same field, is the same rule (`alreadyRecorded` reads the code).
+    const existingDimension = replacement
+      ? undefined
+      : observation.attrGroup === "dimension" && observation.dimensionSlot
+        ? occupied.dimensions.get(recordId)?.get(observation.dimensionSlot)
+        : observation.specFieldId
+          ? occupied.fields.get(recordId)?.get(observation.specFieldId)
+          : undefined;
+    if (existingDimension && alreadyRecorded(observation, existingDimension, occupied.library)) {
+      sortOrder -= 1;
+      inserts -= 1;
+      // The diameter is already there, so IT is what took the retired
+      // square's place.
+      if (retiredSquare.length > 0) {
+        await txn`
+          update record_attributes set superseded_by_id = ${existingDimension.attributeId}, updated_by = ${actor}
+          where id = any(${retiredSquare}::uuid[])
+        `;
+      }
+      const list = attributeIdsByObservation.get(observation.id) ?? [];
+      list.push(existingDimension.attributeId);
+      attributeIdsByObservation.set(observation.id, list);
+      const recorded = alreadyByObservation.get(observation.id) ?? [];
+      recorded.push({ recordId, attributeId: existingDimension.attributeId, sourcePage: existingDimension.sourcePage });
+      alreadyByObservation.set(observation.id, recorded);
+      continue;
+    }
+    if (replacement) {
+      await retireOccupant(txn, actor, replacement.attributeId, replacement.attributeVersion, recordId, replaceTargetOf(observation));
+      superseded.push({ oldId: replacement.attributeId, observationId: observation.id, recordId });
+    }
+
+    // THE TWO HALVES, INTO TWO SETS OF COLUMNS (0041). `value` is what the
+    // reviewer agrees the PAGE said; the BW standard beside it is BW's answer
+    // to that. Resolved against the field's own palette here and not trusted
+    // from the staged JSON, because the option list is the register's.
+    const standard = standardToWrite(observation, run.fields);
+
+    const inserted = await txn`
+      insert into record_attributes
+        (record_id, attr_group, dimension_slot, label, value, unit, material_code, finish_id, spec_field_id, state,
+         source_run_id, source_page, sort_order,
+         standard_value, standard_option_id, standard_state, standard_set_by, standard_set_at,
+         created_by, updated_by)
+      values
+        (${recordId}, ${observation.attrGroup},
+         -- Only a dimension carries one, and 0011's biconditional makes the
+         -- pairing unrepresentable otherwise: a dimension with no slot and a
+         -- note with one are both refused at insert. Normalised here rather
+         -- than trusted from the staged JSON, because a row staged before
+         -- 0011 carries no slot key at all.
+         ${observation.attrGroup === "dimension" ? (observation.dimensionSlot ?? null) : null},
+         ${observation.labelRaw ?? observation.attrGroup},
+         ${observation.value},
+         ${observation.unit}, ${observation.materialCodeRaw},
+         ${finishIdByObservation.get(observation.id) ?? null},
+         ${observation.specFieldId},
+         -- NO BACKTICKS IN A SQL TEMPLATE -- one closes the literal.
+         -- A row nothing reads the state of is never ASKED for one, so it
+         -- arrives here null; the state column is not null default
+         -- confirmed, and this insert names it positionally, so the default
+         -- would never fire. stateToWrite is that default, shared with the
+         -- empty_value blocker so the two cannot disagree. A row that WAS
+         -- asked writes exactly what the reviewer chose.
+         ${stateToWrite(observation)}, ${runId}, ${observation.page ?? item.page}, ${sortOrder},
+         ${standard?.value ?? null}, ${standard?.optionId ?? null}, ${standard?.state ?? null},
+         ${standard ? actor : null}, ${standard ? new Date().toISOString() : null},
+         ${actor}, ${actor})
       returning id
     `;
-    if (!rows[0]) {
-      // Which of two refusals: the attribute moved under the reviewer, or it
-      // is still there and simply is not what this row writes.
-      const elsewhere = await txn`
-        select 1 from record_attributes
-        where id = ${attributeId} and record_id = ${recordId} and version = ${version} and status = 'active'
+    const attributeId = String(inserted[0]?.id ?? "");
+    if (!attributeId) throw new Error(`observation ${observation.id} was not inserted`);
+
+    // Which row took over, so "why did the width change on the 14th" is
+    // answered by following a link rather than by guessing which of two
+    // retired rows came next.
+    const tookOver = [...(replacement ? [replacement.attributeId] : []), ...retiredSquare];
+    if (tookOver.length > 0) {
+      await txn`
+        update record_attributes set superseded_by_id = ${attributeId}, updated_by = ${actor}
+        where id = any(${tookOver}::uuid[])
       `;
-      if (elsewhere[0]) throw stale();
-      throw new DomainConflictError(
-        "occupant_changed",
-        "The spec this page would replace has changed since you looked at it. Nothing was written — reload and check what is there now.",
-      );
+    }
+
+    const list = attributeIdsByObservation.get(observation.id) ?? [];
+    list.push(attributeId);
+    attributeIdsByObservation.set(observation.id, list);
+  }
+  return inserts;
+}
+
+/** Step 9, THE CHECKLIST, recomposed from every attribute the record now holds. */
+async function promoteAnswers(txn: TxnSql, recordId: string, runId: string, actor: string): Promise<number> {
+  // ---- through to the checklist ----------------------------------------
+  // Read back from the table rather than from `taken`, because the answer
+  // has to reflect EVERY attribute the record now carries. A card supplying
+  // only the height still has to recompose the whole dimensions cell over
+  // the width and depth an earlier document confirmed -- otherwise the
+  // answer says H720 and the record says W1900 x D790 x H720.
+  // Re-read from the table rather than from `taken`, because the answer has
+  // to reflect EVERY attribute the record now carries. A card supplying only
+  // the height still has to recompose the whole dimensions cell over the
+  // width and depth an earlier document confirmed -- otherwise the answer
+  // says H720 and the record says W1900 x D790 x H720.
+  //
+  // Through loadPromotable, which also resolves each attribute's linked
+  // FINISH: the export renders a linked attribute as the library says it is,
+  // and an answer written from the attribute's own text would disagree with
+  // the file the moment somebody edited the library.
+  // AND WITH THE RECORD'S OWN DIMENSION NOTE (0034). The composed cell is a
+  // projection of the attributes AND that note; recomposing without it would
+  // quietly drop a person's qualifier out of the checklist the first time
+  // any document touched the record.
+  const promotable = await loadPromotable(txn, recordId);
+  const fills = planAnswerFills(promotable, await loadDimensionNote(txn, recordId));
+  const filled = await applyAnswerFills(txn, recordId, runId, actor, fills);
+  // Retractions too, because a REPLACEMENT can orphan an answer: the row it
+  // retired may have carried a BWS field the new row does not. Without this
+  // the checklist would go on reporting a confirmed value the record holds
+  // no statement for, and the export would still ship it.
+  await applyAnswerRetractions(txn, recordId, actor, fills);
+  return filled;
+}
+
+/** Step 10, THE LEVEL SUGGESTION, revised where nobody has decided the level. */
+async function reviseLevelSuggestion(txn: TxnSql, recordId: string, actor: string): Promise<void> {
+  // ---- a second look at the item's level -------------------------------
+  //
+  // The bill is usually silent about metalwork; the shop drawing is where a
+  // brass leg first appears. So a record whose level NOBODY HAS DECIDED gets
+  // its suggestion revised from what the drawing just said.
+  //
+  // Two things this must not do, and does not. It never touches `level`:
+  // a decision stands, and a drawing is not a person. And it only ever
+  // strengthens — `guessLevelFromAttributes` returns complex or hero or
+  // nothing, never simple, because "this page named no metal" is not
+  // evidence that the item has none.
+  const undecided = await txn`
+    select id from spec_records where id = ${recordId} and level is null for update
+  `;
+  if (undecided[0]) {
+    const held = await txn`
+      select label, value, source_page from record_attributes
+       where record_id = ${recordId} and status = 'active'
+    `;
+    const guess = guessLevelFromAttributes(
+      held.map((row) => ({
+        labelRaw: row.label === null ? null : String(row.label),
+        valueRaw: row.value === null ? null : String(row.value),
+        sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
+      })),
+    );
+    if (guess) {
+      await txn`
+        update spec_records
+           set level_suggested = ${guess.level},
+               level_suggested_reason = ${guess.reason},
+               updated_by = ${actor}
+         where id = ${recordId}
+           and level is null
+           and level_suggested is distinct from ${guess.level}
+      `;
     }
   }
-  const now = new Date().toISOString();
-  let answersFilled = 0;
+}
 
-  // BOTH IDS PER ITERATION. `recordId` is where the spec lands; `ackKey` is
-  // what the reviewer's replace acknowledgements are keyed on — the record the
-  // card named. For a code drawn once the two are the same.
-  let inserts = 0;
-  let picturesKept = 0;
-  for (const { recordId, ackKey, observations: landing } of writes) {
-    // One picture per target record, the same fan-out the attributes get, and
-    // correct for the same reason: it is ONE drawing of one item, and the runs
-    // quoting it are quoting that item.
-    //
-    // SUPERSEDES, NEVER DELETES, AND NEVER DISPLACES THE BILL'S PICTURE
-    // (2026-10-05). This used to delete the record's picture and insert the
-    // crop, on the argument that a crop can always be re-made — true of a crop
-    // and false of the photograph a bill printed beside the item, which it was
-    // deleting too. "We always prefer a picture over a drawing": over a bill's
-    // picture the crop is stored as an alternative the record offers, and a
-    // person swaps it in there if they want it. `placeDrawingCrop` carries the
-    // rule; the records are already locked above.
-    if (imagePath) {
-      const placed = await placeDrawingCrop(
-        txn,
-        recordId,
-        {
-          storagePath: imagePath,
-          filename: itemImageFilename(item.id, image?.page, image?.filename),
-          size: image?.size ?? null,
-          width: image?.width ?? null,
-          height: image?.height ?? null,
-        },
-        actor,
-      );
-      if (placed === "alternative") picturesKept += 1;
-    }
-
-    const sortRows = await txn`
-      select coalesce(max(sort_order), 0) as max_sort from record_attributes where record_id = ${recordId}
-    `;
-    let sortOrder = Number(sortRows[0]?.max_sort ?? 0);
-
-    for (const observation of landing) {
-      sortOrder += 1;
-      inserts += 1;
-
-      // ---- a revised drawing replaces what is in the slot ------------------
-      // Retired BEFORE the insert, and that order is decided by the database
-      // rather than by preference: both partial unique indexes are
-      // `where status = 'active'`, so retire-then-insert commits and
-      // insert-then-retire cannot. Re-checked against the version the reviewer
-      // saw — an occupant that changed since is refused rather than replaced,
-      // because the value they agreed to drop is not the value that is there.
-      const replacement = acknowledgedReplacements(observation).get(ackKey);
-      // A DIAMETER RETIRES THE W AND D IT WAS ACKNOWLEDGED TO (brief G). The
-      // same retire as a replacement — version-checked, before the insert —
-      // and pinned to the slot the reviewer was shown, so an acknowledgement
-      // can never retire a row that has since become something else.
-      const retiredSquare: string[] = [];
-      for (const [slot, retire] of acknowledgedSquareRetirements(observation).get(ackKey) ?? []) {
-        await retireOccupant(retire.attributeId, retire.attributeVersion, recordId, { kind: "slot", slot });
-        retiredSquare.push(retire.attributeId);
-        superseded.push({ oldId: retire.attributeId, observationId: observation.id, recordId });
-      }
-      // ---- the same measurement, already on this record ------------------
-      // Same slot, same figure in millimetres, same state, from another page:
-      // not a replacement, and nothing to write — the unique index would
-      // refuse a second active row, and the fact is already recorded. The row
-      // is marked applied naming the EXISTING attribute, so the card and the
-      // history say where it is. Decided per record, by the same
-      // `alreadyRecorded` the blockers used.
-      // A FINISH the record already holds under the SAME client code, in the
-      // same field, is the same rule (`alreadyRecorded` reads the code).
-      const existingDimension = replacement
-        ? undefined
-        : observation.attrGroup === "dimension" && observation.dimensionSlot
-          ? byWriteTarget.dimensions.get(recordId)?.get(observation.dimensionSlot)
-          : observation.specFieldId
-            ? byWriteTarget.fields.get(recordId)?.get(observation.specFieldId)
-            : undefined;
-      if (existingDimension && alreadyRecorded(observation, existingDimension, byWriteTarget.library)) {
-        sortOrder -= 1;
-        inserts -= 1;
-        // The diameter is already there, so IT is what took the retired
-        // square's place.
-        if (retiredSquare.length > 0) {
-          await txn`
-            update record_attributes set superseded_by_id = ${existingDimension.attributeId}, updated_by = ${actor}
-            where id = any(${retiredSquare}::uuid[])
-          `;
-        }
-        const list = attributeIdsByObservation.get(observation.id) ?? [];
-        list.push(existingDimension.attributeId);
-        attributeIdsByObservation.set(observation.id, list);
-        const recorded = alreadyByObservation.get(observation.id) ?? [];
-        recorded.push({ recordId, attributeId: existingDimension.attributeId, sourcePage: existingDimension.sourcePage });
-        alreadyByObservation.set(observation.id, recorded);
-        continue;
-      }
-      if (replacement) {
-        await retireOccupant(replacement.attributeId, replacement.attributeVersion, recordId, replaceTargetOf(observation));
-        superseded.push({ oldId: replacement.attributeId, observationId: observation.id, recordId });
-      }
-
-      // THE TWO HALVES, INTO TWO SETS OF COLUMNS (0041). `value` is what the
-      // reviewer agrees the PAGE said; the BW standard beside it is BW's answer
-      // to that. Resolved against the field's own palette here and not trusted
-      // from the staged JSON, because the option list is the register's.
-      const standard = standardToWrite(observation, run.fields);
-
-      const inserted = await txn`
-        insert into record_attributes
-          (record_id, attr_group, dimension_slot, label, value, unit, material_code, finish_id, spec_field_id, state,
-           source_run_id, source_page, sort_order,
-           standard_value, standard_option_id, standard_state, standard_set_by, standard_set_at,
-           created_by, updated_by)
-        values
-          (${recordId}, ${observation.attrGroup},
-           -- Only a dimension carries one, and 0011's biconditional makes the
-           -- pairing unrepresentable otherwise: a dimension with no slot and a
-           -- note with one are both refused at insert. Normalised here rather
-           -- than trusted from the staged JSON, because a row staged before
-           -- 0011 carries no slot key at all.
-           ${observation.attrGroup === "dimension" ? (observation.dimensionSlot ?? null) : null},
-           ${observation.labelRaw ?? observation.attrGroup},
-           ${observation.value},
-           ${observation.unit}, ${observation.materialCodeRaw},
-           ${finishIdByObservation.get(observation.id) ?? null},
-           ${observation.specFieldId},
-           -- NO BACKTICKS IN A SQL TEMPLATE -- one closes the literal.
-           -- A row nothing reads the state of is never ASKED for one, so it
-           -- arrives here null; the state column is not null default
-           -- confirmed, and this insert names it positionally, so the default
-           -- would never fire. stateToWrite is that default, shared with the
-           -- empty_value blocker so the two cannot disagree. A row that WAS
-           -- asked writes exactly what the reviewer chose.
-           ${stateToWrite(observation)}, ${runId}, ${observation.page ?? item.page}, ${sortOrder},
-           ${standard?.value ?? null}, ${standard?.optionId ?? null}, ${standard?.state ?? null},
-           ${standard ? actor : null}, ${standard ? new Date().toISOString() : null},
-           ${actor}, ${actor})
-        returning id
-      `;
-      const attributeId = String(inserted[0]?.id ?? "");
-      if (!attributeId) throw new Error(`observation ${observation.id} was not inserted`);
-
-      // Which row took over, so "why did the width change on the 14th" is
-      // answered by following a link rather than by guessing which of two
-      // retired rows came next.
-      const tookOver = [...(replacement ? [replacement.attributeId] : []), ...retiredSquare];
-      if (tookOver.length > 0) {
-        await txn`
-          update record_attributes set superseded_by_id = ${attributeId}, updated_by = ${actor}
-          where id = any(${tookOver}::uuid[])
-        `;
-      }
-
-      const list = attributeIdsByObservation.get(observation.id) ?? [];
-      list.push(attributeId);
-      attributeIdsByObservation.set(observation.id, list);
-    }
-
-    // ---- through to the checklist ----------------------------------------
-    // Read back from the table rather than from `taken`, because the answer
-    // has to reflect EVERY attribute the record now carries. A card supplying
-    // only the height still has to recompose the whole dimensions cell over
-    // the width and depth an earlier document confirmed -- otherwise the
-    // answer says H720 and the record says W1900 x D790 x H720.
-    // Re-read from the table rather than from `taken`, because the answer has
-    // to reflect EVERY attribute the record now carries. A card supplying only
-    // the height still has to recompose the whole dimensions cell over the
-    // width and depth an earlier document confirmed -- otherwise the answer
-    // says H720 and the record says W1900 x D790 x H720.
-    //
-    // Through loadPromotable, which also resolves each attribute's linked
-    // FINISH: the export renders a linked attribute as the library says it is,
-    // and an answer written from the attribute's own text would disagree with
-    // the file the moment somebody edited the library.
-    // AND WITH THE RECORD'S OWN DIMENSION NOTE (0034). The composed cell is a
-    // projection of the attributes AND that note; recomposing without it would
-    // quietly drop a person's qualifier out of the checklist the first time
-    // any document touched the record.
-    const promotable = await loadPromotable(txn, recordId);
-    const fills = planAnswerFills(promotable, await loadDimensionNote(txn, recordId));
-    const filled = await applyAnswerFills(txn, recordId, runId, actor, fills);
-    // Retractions too, because a REPLACEMENT can orphan an answer: the row it
-    // retired may have carried a BWS field the new row does not. Without this
-    // the checklist would go on reporting a confirmed value the record holds
-    // no statement for, and the export would still ship it.
-    await applyAnswerRetractions(txn, recordId, actor, fills);
-    answersFilled += filled;
-
-    // ---- a second look at the item's level -------------------------------
-    //
-    // The bill is usually silent about metalwork; the shop drawing is where a
-    // brass leg first appears. So a record whose level NOBODY HAS DECIDED gets
-    // its suggestion revised from what the drawing just said.
-    //
-    // Two things this must not do, and does not. It never touches `level`:
-    // a decision stands, and a drawing is not a person. And it only ever
-    // strengthens — `guessLevelFromAttributes` returns complex or hero or
-    // nothing, never simple, because "this page named no metal" is not
-    // evidence that the item has none.
-    const undecided = await txn`
-      select id from spec_records where id = ${recordId} and level is null for update
-    `;
-    if (undecided[0]) {
-      const held = await txn`
-        select label, value, source_page from record_attributes
-         where record_id = ${recordId} and status = 'active'
-      `;
-      const guess = guessLevelFromAttributes(
-        held.map((row) => ({
-          labelRaw: row.label === null ? null : String(row.label),
-          valueRaw: row.value === null ? null : String(row.value),
-          sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
-        })),
-      );
-      if (guess) {
-        await txn`
-          update spec_records
-             set level_suggested = ${guess.level},
-                 level_suggested_reason = ${guess.reason},
-                 updated_by = ${actor}
-           where id = ${recordId}
-             and level is null
-             and level_suggested is distinct from ${guess.level}
-        `;
-      }
-    }
-  }
-
-  // One version per target record, taken AFTER the answers were promoted: a
-  // version showing the new attribute but not the checklist answer it filled
-  // would be a version of a state the record was never in.
-  // The records that CHANGED, which for a configuration is the variant. A
-  // version of the bill line would describe a heading nothing was written to.
-  await snapshotRecords(txn, writtenIds, changeSetId);
-
-  const items = run.staged.items.map((row) =>
+/** Step 11, THE STAGED ITEM: its rows marked applied, its ticks echoed back. */
+function markApplied(
+  run: LoadedRun,
+  itemId: string,
+  ordered: string[],
+  { attributeIdsByObservation, alreadyByObservation }: WriteLedger,
+  { actor, now }: { actor: string; now: string },
+): DrawingItem[] {
+  return run.staged.items.map((row) =>
     row.id !== itemId
       ? row
       : {
@@ -1181,6 +1302,70 @@ export async function confirmDrawingItem(
           ),
         },
   );
+}
+
+export async function confirmDrawingItem(
+  txn: TxnSql,
+  {
+    runId,
+    expectedVersion,
+    itemId,
+    itemVersion,
+    observations: refs,
+    shownTargets,
+    image,
+    swatches = [],
+    actor,
+  }: ConfirmDrawingItemInput,
+): Promise<DrawingsConfirmResult> {
+  const run = await loadRun(txn, runId, expectedVersion);
+  const item = findItem(run.staged, itemId);
+  if (item.version !== itemVersion) {
+    throw new DomainConflictError(
+      "item_version_stale",
+      "This item's targets changed while you were reviewing it. Reload before confirming.",
+    );
+  }
+
+  const live = await resolveCard(txn, run, item, { runId, refs, shownTargets });
+  const { taken, ordered } = live;
+  const { library, byWriteTarget } = await checkBlockers(txn, run, item, live);
+  const { writes, links, writtenIds } = await placeWrites(txn, run, live, actor);
+  const imagePath = checkedImagePath(image, run.projectId);
+
+  // Nothing above this line writes; everything below it does.
+  const changeSetId = await openDrawingChange(txn, run, item, taken, { runId, actor });
+  const finishIdByObservation = await fileFinishes(txn, run, taken, library, actor);
+  const swatchesLeftOut = await writeSwatches(txn, run, swatches, finishIdByObservation, actor);
+
+  const ledger: WriteLedger = { attributeIdsByObservation: new Map(), alreadyByObservation: new Map(), superseded: [] };
+  const now = new Date().toISOString();
+  let answersFilled = 0;
+
+  // BOTH IDS PER ITERATION. `recordId` is where the spec lands; `ackKey` is
+  // what the reviewer's replace acknowledgements are keyed on — the record the
+  // card named. For a code drawn once the two are the same.
+  let inserts = 0;
+  let picturesKept = 0;
+  for (const { recordId, ackKey, observations: landing } of writes) {
+    if (imagePath && (await writePicture(txn, recordId, item, image, imagePath, actor))) picturesKept += 1;
+    inserts += await writeAttributes(txn, run, item, { recordId, ackKey, landing }, byWriteTarget, finishIdByObservation, ledger, {
+      runId,
+      actor,
+    });
+    answersFilled += await promoteAnswers(txn, recordId, runId, actor);
+    await reviseLevelSuggestion(txn, recordId, actor);
+  }
+
+  // One version per target record, taken AFTER the answers were promoted: a
+  // version showing the new attribute but not the checklist answer it filled
+  // would be a version of a state the record was never in.
+  // The records that CHANGED, which for a configuration is the variant. A
+  // version of the bill line would describe a heading nothing was written to.
+  await snapshotRecords(txn, writtenIds, changeSetId);
+
+  const items = markApplied(run, itemId, ordered, ledger, { actor, now });
+  const { alreadyByObservation, superseded } = ledger;
 
   const status = await writeStaged(txn, run, actor, items, links);
 

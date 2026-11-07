@@ -41,7 +41,7 @@ import { isMeasuredRow, measuredRows, oneLinePerPhase, toggledTargets, uncertain
 import { drawingNeedsYou, needsYouListId, runTargetsId } from "@/lib/needs-you";
 import { goToAndFlash } from "@/lib/go-to";
 import NeedsYou from "@/components/ui/NeedsYou";
-import { EMPTY_GUESS, guessSlotsFromViews } from "@/lib/dimension-guess";
+import { EMPTY_GUESS, guessSlotsFromViews } from "@/lib/drawing-legacy";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
 import LevelControl, { levelTargets, suggestLevelFromCard } from "@/components/imports/LevelControl";
 import ItemImagePicker from "@/components/imports/ItemImagePicker";

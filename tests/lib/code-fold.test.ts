@@ -31,7 +31,8 @@
 // ============================================================================
 import { describe, expect, it } from "vitest";
 import { findRecordsByRef, normaliseRef, type RecordEntry } from "@/lib/record-refs";
-import { groupItemsByCode, variantLettersByItem, type DrawingItem } from "@/lib/drawing-document";
+import { groupItemsByCode, type DrawingItem } from "@/lib/drawing-document";
+import { variantLettersByItem } from "@/lib/drawing-legacy";
 import { reconcileSheet, type ExistingRecord, type RevisedLine } from "@/lib/boq-reconcile";
 
 /** One code, as three documents of one pack spell it. */

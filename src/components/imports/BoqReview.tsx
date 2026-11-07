@@ -600,7 +600,7 @@ export default function BoqReview({
 
         {run.status === "confirmed" && (
           <Note tone="good" actions={<NextStepAction step={step} size="sm" />}>
-            This import has already been confirmed.
+            This bill has already been confirmed.
           </Note>
         )}
         {run.status === "confirmed" && mockupNotice && (

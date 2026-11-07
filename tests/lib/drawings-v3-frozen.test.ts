@@ -21,12 +21,11 @@ import {
   crossPageClaims,
   groupItemsByCode,
   namedConfigurationPlans,
-  stageDrawings,
-  variantLettersByItem,
   type OccupiedSlots,
   type SpecFieldEntry,
   type StagedDrawings,
 } from "@/lib/drawing-document";
+import { stageDrawings, variantLettersByItem } from "@/lib/drawing-legacy";
 import { resolveStagedRun } from "@/lib/drawing-resolution";
 import { DrawingsOutput } from "@/lib/extraction-schema";
 import type { RecordEntry } from "@/lib/record-refs";

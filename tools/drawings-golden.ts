@@ -37,12 +37,11 @@ import {
   groupItemsByCode,
   namedConfigurationsByCode,
   resolveDrawingTargets,
-  stageDrawings,
-  variantLettersByItem,
   type DrawingItem,
   type DrawingObservation,
   type StagedDrawings,
 } from "../src/lib/drawing-document";
+import { stageDrawings, variantLettersByItem } from "../src/lib/drawing-legacy";
 import { composeDimensionCell, toMillimetres, type DimensionRow } from "../src/lib/dimensions";
 import { endsOnSegment, normaliseRef, type RecordEntry } from "../src/lib/record-refs";
 import { normaliseFinishCode } from "../src/lib/finishes";

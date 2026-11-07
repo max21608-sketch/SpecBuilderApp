@@ -154,10 +154,11 @@ const SESSION_FREE = new Set([...MIDDLEWARE_EXEMPT, "auth/logout"]);
  * worth: one wrong character there and these answer anybody. Each is an
  * `it.fails` below, so the day one is fixed the suite says so.
  */
-const READS_TRUSTING_THE_MIDDLEWARE = new Set([
-  // 5.4 put the session check into the other six (R1). This one's file was
-  // being split into handlers at the same time, so the line goes in there.
-  "imports/[id] GET",
+const READS_TRUSTING_THE_MIDDLEWARE = new Set<string>([
+  // Empty since 5.3 cut D (2026-11-07): 5.4 put the session check into six of
+  // the seven (R1), and the import route's GET got its own when that file was
+  // split into handlers. A label added here is a read answering anybody the
+  // middleware lets through.
 ]);
 
 /**

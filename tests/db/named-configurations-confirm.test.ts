@@ -23,7 +23,8 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
-import { stageDrawings, type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
+import { type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
+import { stageDrawings } from "@/lib/drawing-legacy";
 import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
 import { confirmingAsShown } from "./shown-targets";
 import { PATCH as importPatchRoute } from "@/app/api/imports/[id]/route";

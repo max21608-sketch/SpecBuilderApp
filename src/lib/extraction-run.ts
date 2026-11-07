@@ -49,7 +49,8 @@ import {
 } from "@/lib/extraction-claim";
 import { handOffReadSlot } from "@/lib/extraction-slots";
 import { isRegisterFreeKind, normaliseUnit, type AttributeUnit, type DocumentKind } from "@/lib/spec-vocab";
-import { stageDrawings, type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
+import { type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
+import { stageDrawings } from "@/lib/drawing-legacy";
 import { stageDrawingsV4 } from "@/lib/drawing-items";
 import { stagePreamble, type StagedPreamble } from "@/lib/preamble-document";
 import { stageFinishSchedule, type StagedFinishSchedule } from "@/lib/finish-schedule";

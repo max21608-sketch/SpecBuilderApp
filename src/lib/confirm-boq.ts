@@ -33,6 +33,7 @@ import {
   assertBoqDocument,
   sheetsAwaitingColumnCheck,
   sheetsNeedingColumns,
+  type BoqDocument,
   type StagedBoqSheet,
 } from "@/lib/boq-import";
 import { effectiveArea, type LinePairing } from "@/lib/boq-reconcile";
@@ -217,10 +218,85 @@ function qtyRawToWrite(line: Pick<StagedLine, "qty" | "qtyRaw">): string | null 
   if (line.qty !== null && line.qty !== undefined) return null;
   return typeof line.qtyRaw === "string" && line.qtyRaw.trim() !== "" ? line.qtyRaw : null;
 }
-export async function confirmBoqImport(
+// ---- confirm ---------------------------------------------------------------
+//
+// ONE TRANSACTION, NAMED STEPS (audit 5.3, cut D, 2026-11-07). The confirm was
+// one 715-line function; it is now the steps below, called by
+// `confirmBoqImport` in the order they always ran, inside the caller's one
+// transaction and under the project row lock the first step takes. Every
+// refusal that reads only the staged bill still happens before the change set
+// is opened, and the finish plan's refusal still before the first row is
+// written: moving either below a write would be a confirm that half-writes a
+// bill, which is what the record-number lock above exists to prevent.
+
+/** What every step of one bill's confirm reads and never changes. */
+type BillConfirm = {
+  txn: TxnSql;
+  runId: string;
+  projectId: string;
+  actor: string;
+  parsed: BoqDocument;
+  /** The project's finishes library. The finish steps push what they create onto it. */
+  library: Finish[];
+};
+
+/** What the steps add up as they write, and what the confirm then reports. */
+type BillTally = {
+  /** The last record number allocated, project-wide, under the lock. */
+  nextNo: number;
+  nextSort: number;
+  runIds: string[];
+  recordIds: string[];
+  imported: number;
+  updated: number;
+  retired: number;
+  fabricSpecs: number;
+  descriptionSpecs: number;
+  descriptionsHeldBack: number;
+  billPictures: number;
+  inHouseFinishes: number;
+  recomposeIds: Set<string>;
+  /**
+   * Every fabric line that ended up linked to a finish, with its row's
+   * picture, BY FINISH — the swatch rule reads a code across the whole bill,
+   * so it runs once, after every sheet has filed (`planFinishSwatches`).
+   */
+  swatchGroups: Map<string, SwatchCandidate[]>;
+  /**
+   * THE ITEMS THE BILL'S PROTOTYPE QUANTITY PUTS ON THE MOCK-UP PHASE, by the
+   * record each line became or continues, with what the bill said
+   * (`readMockupQty`). Added after every sheet, in this transaction, under this
+   * change set (`addToMockupPhase` with `within`).
+   */
+  mockupQuantities: Map<string, { qty: number | null; internalNote: string | null }>;
+  /** Carried records whose line now says "not in the mock-up", for the `left` count. */
+  mockupDropped: string[];
+};
+
+/** An ITEM line's mock-up cell, read. Only where the sheet has the column. */
+function noteMockup(tally: BillTally, recordId: string, line: StagedLine) {
+  if (line.mockupQtyRaw === undefined) return;
+  const reading = readMockupQty(line.mockupQtyRaw);
+  if (reading.on) tally.mockupQuantities.set(recordId, { qty: reading.qty, internalNote: reading.note });
+  else if (line.replaces) tally.mockupDropped.push(recordId);
+}
+
+/** A line's description cell, written as attributes, and its record queued for the checklist. */
+async function writeDescription(bill: BillConfirm, tally: BillTally, recordId: string, plan: BillDescriptionPlan) {
+  const { txn, runId, projectId, actor, library } = bill;
+  tally.descriptionSpecs += await writeDescriptionAttributes(txn, { recordId, plan, runId, projectId, actor, library });
+  tally.recomposeIds.add(recordId);
+}
+
+/**
+ * THE RUN AND THE PROJECT, both locked, the project BEFORE any record
+ * number is read. Refuses a bill that is not this one to confirm.
+ */
+async function lockBill(
   txn: TxnSql,
-  { runId, expectedVersion, actor }: { runId: string; expectedVersion: number; actor: string },
-): Promise<ConfirmBoqResult> {
+  runId: string,
+  expectedVersion: number,
+): Promise<{ projectId: string; parsed: BoqDocument }> {
   // 1. The run, locked. Read the staged lines from the LOCKED row.
   const runs = await txn`
     select id, project_id, status, parsed, version, source_kind
@@ -255,7 +331,18 @@ export async function confirmBoqImport(
   if (!projects[0]) throw new DomainConflictError("not_found", "No such project.", { status: 404 });
 
   const parsed = assertBoqDocument(run.parsed);
+  return { projectId, parsed };
+}
 
+/**
+ * THE REFUSALS that read the staged bill and the live register only.
+ * Returns the phases the bill revises. Writes nothing.
+ */
+async function refuseUnconfirmable(
+  txn: TxnSql,
+  parsed: BoqDocument,
+  projectId: string,
+): Promise<{ revisedRunIds: string[] }> {
   // A LIVE SHEET NOBODY HAS MAPPED IS REFUSED, BY NAME. It has no lines, so
   // letting it through would confirm the bill without it — a tab of the bill
   // silently left out, which is the defect `parseBoqSheets` stopped doing in
@@ -385,34 +472,25 @@ export async function confirmBoqImport(
     }
   }
 
-  // The change this import is. Opened BEFORE the first write, because
-  // write_audit() reads it from the transaction: a change set created after
-  // them would leave every one belonging to nothing.
-  const changeSetId = await openChangeSet(txn, {
-    projectId,
-    kind: revisedRunIds.length > 0 ? "boq_revision" : "boq_confirm",
-    actor,
-    sourceIntakeRunId: runId,
-  });
+  return { revisedRunIds };
+}
 
-  // 4. Allocation, under the lock. `record_no` stays project-wide across runs:
-  //    it is the label a person reads, and two records called P17231-014 in
-  //    different tabs would be indistinguishable in an export or an email.
-  const startRows = await txn`
-    select coalesce(max(record_no), 0) as max_no from spec_records where project_id = ${projectId}
-  `;
-  let nextNo = Number(startRows[0]?.max_no ?? 0);
+type FinishLinePlan = {
+  library: Finish[];
+  finishSlotFields: Map<number, string>;
+  /** Per sheet: each item line's description, and whether a revision holds it back. */
+  descriptionDecisions: Map<number, BillDescriptionPlan & { held: boolean }>[];
+  finishPlan: ReturnType<typeof planBillFinishWrites>;
+  /** Planned finish ids (`planned:…`) → the library row this confirm created for each. */
+  createdFinishIds: Map<string, string>;
+};
 
-  const sortRows = await txn`
-    select coalesce(max(sort_order), 0) as max_sort from spec_runs where project_id = ${projectId}
-  `;
-  let nextSort = Number(sortRows[0]?.max_sort ?? 0);
-  const runIds: string[] = [];
-  const recordIds: string[] = [];
-  let imported = 0;
-  let updated = 0;
-  let retired = 0;
-
+/**
+ * WHAT EVERY DESCRIPTION AND FINISH LINE WILL WRITE, decided once over
+ * the whole bill before anything is written. Refuses a finish line a revision
+ * would change.
+ */
+async function planBillWrites(txn: TxnSql, parsed: BoqDocument, projectId: string): Promise<FinishLinePlan> {
   // THE PROJECT'S FINISHES LIBRARY, read once, for the fabric lines' codes —
   // the same library, the same resolution and the same CONFLICT rule as a
   // drawing's confirm (src/lib/confirm-drawings.ts).
@@ -427,37 +505,9 @@ export async function confirmBoqImport(
   const finishSlotFields = new Map<number, string>(
     finishFields.map((row) => [Number(row.json_id), String(row.id)] as const),
   );
-  const recomposeIds = new Set<string>();
-  let fabricSpecs = 0;
   // THE DESCRIPTION CELLS, planned by the function the review screen showed
   // them with, over the same staged lines, against the same register.
   const descriptionFields = await loadDescriptionFields(txn);
-  let descriptionSpecs = 0;
-  let descriptionsHeldBack = 0;
-  let billPictures = 0;
-  let inHouseFinishes = 0;
-  /**
-   * Every fabric line that ended up linked to a finish, with its row's
-   * picture, BY FINISH — the swatch rule reads a code across the whole bill,
-   * so it runs once, after every sheet has filed (`planFinishSwatches`).
-   */
-  const swatchGroups = new Map<string, SwatchCandidate[]>();
-  /**
-   * THE ITEMS THE BILL'S PROTOTYPE QUANTITY PUTS ON THE MOCK-UP PHASE, by the
-   * record each line became or continues, with what the bill said
-   * (`readMockupQty`). Added after every sheet, in this transaction, under this
-   * change set (`addToMockupPhase` with `within`).
-   */
-  const mockupQuantities = new Map<string, { qty: number | null; internalNote: string | null }>();
-  /** Carried records whose line now says "not in the mock-up", for the `left` count. */
-  const mockupDropped: string[] = [];
-  /** An ITEM line's mock-up cell, read. Only where the sheet has the column. */
-  const noteMockup = (recordId: string, line: StagedLine) => {
-    if (line.mockupQtyRaw === undefined) return;
-    const reading = readMockupQty(line.mockupQtyRaw);
-    if (reading.on) mockupQuantities.set(recordId, { qty: reading.qty, internalNote: reading.note });
-    else if (line.replaces) mockupDropped.push(recordId);
-  };
 
   // ---- WHAT EVERY FINISH LINE WILL WRITE, decided ONCE, before anything is
   // written (audit 2026-11-06, item 1.5, C5) ----------------------------------
@@ -516,6 +566,442 @@ export async function confirmBoqImport(
   /** Planned finish ids (`planned:…`) → the library row this confirm created for each. */
   const createdFinishIds = new Map<string, string>();
 
+  return { library, finishSlotFields, descriptionDecisions, finishPlan, createdFinishIds };
+}
+
+/** THE SHEET'S PHASE: the one it revises, its header rewritten, or a new one. */
+async function openSheetPhase(bill: BillConfirm, tally: BillTally, sheet: StagedBoqSheet): Promise<string> {
+  const { txn, runId, projectId, actor } = bill;
+  const replacesRunId = sheet.replacesRunId ?? null;
+  let specRunId: string;
+  if (replacesRunId) {
+    // ---- A REVISION. The run KEEPS ITS IDENTITY -----------------------
+    // Its records keep their ids, and therefore their drawings, their
+    // specs, their picture and their checklist answers. That carry-over is
+    // the entire point: a revised bill that created a second set of
+    // records would strand every bit of work done against the first.
+    specRunId = replacesRunId;
+    await txn`
+      update spec_runs
+      set boq_revision = ${sheet.metadata?.revision ?? null},
+          boq_date = ${sheet.metadata?.date ?? null},
+          header_notes = ${JSON.stringify(sheet.metadata?.notes ?? [])}::jsonb,
+          source_import_id = ${runId},
+          updated_by = ${actor}
+      where id = ${specRunId}
+    `;
+  } else {
+    tally.nextSort += 1;
+    // One run per sheet. The reviewer's name for it, not the tab's: a tab
+    // called "Feuil1" is not what anybody calls the run.
+    const runRow = await txn`
+      insert into spec_runs
+        (project_id, name, source_sheet, source_import_id, boq_revision, boq_date, header_notes,
+         sort_order, created_by, updated_by)
+      values
+        (${projectId}, ${sheet.proposedRunName.trim() || sheet.sheetName}, ${sheet.sheetName}, ${runId},
+         ${sheet.metadata?.revision ?? null}, ${sheet.metadata?.date ?? null},
+         ${JSON.stringify(sheet.metadata?.notes ?? [])}::jsonb, ${tally.nextSort}, ${actor}, ${actor})
+      returning id
+    `;
+    specRunId = String(runRow[0]?.id ?? "");
+    if (!specRunId) throw new Error(`sheet ${sheet.sheetName} produced no run`);
+  }
+  tally.runIds.push(specRunId);
+  return specRunId;
+}
+
+/** Where one sheet's line steps write, and what they leave live. */
+type SheetWrite = {
+  sheet: StagedBoqSheet;
+  specRunId: string;
+  replacesRunId: string | null;
+  plans: Map<number, BillDescriptionPlan & { held: boolean }>;
+  /** The record each item line became or continues, by its row on the sheet. */
+  recordByRow: Map<number, { recordId: string; carried: boolean }>;
+  /**
+   * Every record this sheet LEAVES LIVE — the ones it carried forward AND
+   * the ones it has just created. The retire step below subtracts this from
+   * the run's active records, so a new line omitted from it would be
+   * inserted and retired by the same confirm.
+   */
+  carriedForward: Set<string>;
+};
+
+/**
+ * A LINE THE REVIEWER PAIRED with an existing record: the bill's
+ * columns written over it, version-predicated, and nothing else touched.
+ */
+async function carryPairedLine(bill: BillConfirm, tally: BillTally, at: SheetWrite, line: StagedLine): Promise<void> {
+  const { txn, runId, projectId, actor, parsed } = bill;
+  const { sheet, specRunId, replacesRunId, plans, recordByRow, carriedForward } = at;
+  // ---- a line the reviewer PAIRED with an existing record -----------
+  // Version-predicated, so a record edited since the review refuses the
+  // whole confirm rather than silently overwriting somebody's work.
+  // Attributes, answers and the item image are NOT touched.
+  const target = line.replaces!;
+  // A pairing is only meaningful against the run this sheet revises. A
+  // line paired to a record on some OTHER run would move that record
+  // between tabs, which is not what a revision does and not what the
+  // reviewer was looking at.
+  if (!replacesRunId) {
+    throw new DomainConflictError(
+      "pairing_without_revision",
+      `Row ${line.lineNo} is paired with an existing record, but this sheet does not say which phase it revises. Reload the review and choose the phase.`,
+    );
+  }
+  // A RESTORE (audit 2026-11-06, C14): the reviewer chose to bring back
+  // a record an earlier revision retired, because its code is on the
+  // bill again. Written exactly as a pairing, keeping everything that
+  // hangs off the record, from the retired state at the version shown.
+  // When it was retired, the configurations retired with it at the same
+  // moment come back with it (`restoreRun`'s rule): restoring the line
+  // alone would make it an item again and ship it bare.
+  const restoring = target.restore === true;
+  if (restoring) {
+    // Compared in SQL, never through a JS Date: a timestamp round-tripped
+    // through one loses its microseconds and would match nothing.
+    const back = await txn`
+      update spec_records c
+      set status = 'active', retired_at = null, retired_by = null, updated_by = ${actor}
+      from spec_records p
+      where p.id = ${target.recordId} and p.status = 'retired' and p.version = ${target.recordVersion}
+        and c.parent_id = p.id and c.status = 'retired' and c.retired_at = p.retired_at
+      returning c.id
+    `;
+    for (const row of back) tally.recordIds.push(String(row.id));
+  }
+  const changed = await txn`
+    update spec_records
+    set status = 'active',
+        retired_at = null,
+        retired_by = null,
+        item_description = ${billItemName(line)},
+        product_reference = ${line.productReference},
+        qty = ${line.qty},
+        designer = ${line.designer},
+        area = ${effectiveArea(line)},
+        boq_category = ${line.boqCategory ?? null},
+        -- The bill's own unit, like its quantity: a revision writes it.
+        -- NOT the notes column: internal notes are a person's once the
+        -- record exists, and a revised bill never writes over them.
+        qty_unit = ${line.qtyUnit ?? null},
+        -- 0059: the cell as printed where it gave no count, written over
+        -- like the quantity, so a revision that now prints a count clears it.
+        qty_raw = ${qtyRawToWrite(line)},
+        source_import_id = ${runId},
+        source_line_no = ${line.lineNo},
+        run_id = ${specRunId},
+        -- A REVISION NEVER OVERRIDES A LEVEL SOMEBODY SET. It fills the
+        -- gap where there is one: a record carried forward with no level
+        -- takes the new bill's reading, and one that already has a level
+        -- — decided or suggested — keeps it. Same rule as the category
+        -- and the attributes this update deliberately leaves alone.
+        level = case
+          when spec_records.level is not null then spec_records.level
+          else ${levelDecision(line).level}
+        end,
+        level_suggested = case
+          when spec_records.level is not null or spec_records.level_suggested is not null
+            then spec_records.level_suggested
+          else ${levelDecision(line).suggested}
+        end,
+        level_suggested_reason = case
+          when spec_records.level is not null or spec_records.level_suggested is not null
+            then spec_records.level_suggested_reason
+          else ${levelDecision(line).reason}
+        end,
+        updated_by = ${actor}
+    where id = ${target.recordId}
+      and project_id = ${projectId}
+      and run_id = ${replacesRunId}
+      and status = ${restoring ? "retired" : "active"}
+      -- A configuration is never a pairing: it carries no bill code and
+      -- follows its line (audit 2026-11-06, C1).
+      and parent_id is null
+      and version = ${target.recordVersion}
+    returning id
+  `;
+  if (!changed[0]) {
+    throw new DomainConflictError(
+      "record_changed",
+      restoring
+        ? `The retired record BOQ line ${line.lineNo} brings back has changed, moved phase, or been brought back since you reviewed this revision. Nothing was written — reload and check the line.`
+        : `The record paired with BOQ line ${line.lineNo} has changed, moved phase, or been retired since you reviewed this revision. Nothing was written — reload and check the pairing.`,
+    );
+  }
+  carriedForward.add(target.recordId);
+  tally.recordIds.push(target.recordId);
+  recordByRow.set(line.lineNo, { recordId: target.recordId, carried: true });
+  noteMockup(tally, target.recordId, line);
+  tally.billPictures += await giveBillPicture(txn, {
+    recordId: target.recordId,
+    projectId,
+    lineNo: line.lineNo,
+    picture: effectiveRowImage(parsed, sheet.sheetName, line),
+    actor,
+  });
+
+  // A CARRIED RECORD KEEPS ITS SPECS. The description is written only
+  // where the record holds nothing it would duplicate or replace — the
+  // review said which, in the same words, from the same function.
+  const plan = plans.get(line.index);
+  if (plan) {
+    // Decided above, by `revisionDescriptionRefusal`, with the plan the
+    // finish lines' slots were counted against.
+    if (plan.held) tally.descriptionsHeldBack += 1;
+    else await writeDescription(bill, tally, target.recordId, plan);
+  }
+
+  // The client ref can be re-punctuated between revisions. Refs are
+  // write-once-and-delete by design (0002), so the old one goes and the
+  // new one is written rather than edited in place.
+  //
+  // DELETED BY ITS WORDS, NOT ITS FOLD (5.4 A3). The fold now folds a
+  // dot onto nothing, so `S.201` re-punctuated as `S-201` is the SAME
+  // norm, and a delete keyed on the norm left the old spelling in place
+  // while the insert below did nothing on conflict: the record would go
+  // on showing the bill's previous spelling.
+  if (line.code) {
+    await txn`
+      delete from spec_record_refs
+      where record_id = ${target.recordId} and ref_system = 'boq_code'
+        and ref_value <> ${line.code}
+    `;
+    await txn`
+      insert into spec_record_refs (record_id, project_id, ref_system, ref_value, ref_value_norm, source, created_by)
+      values (${target.recordId}, ${projectId}, 'boq_code', ${line.code}, ${normaliseRef(line.code)}, 'BOQ revision', ${actor})
+      on conflict (record_id, ref_system, ref_value_norm) do nothing
+    `;
+  }
+
+  tally.updated += 1;
+}
+
+/** A NEW LINE: its record, its ref, its checklist and its description. */
+async function insertNewLine(bill: BillConfirm, tally: BillTally, at: SheetWrite, line: StagedLine): Promise<void> {
+  const { txn, runId, projectId, actor, parsed } = bill;
+  const { sheet, specRunId, plans, recordByRow, carriedForward } = at;
+  tally.nextNo += 1;
+  const recordNo = tally.nextNo;
+
+  // `returning id` rather than re-selecting by record_no: the id is the key,
+  // and a follow-up select would be a second chance to pick the wrong row.
+  // THE LEVEL GOES IN ONE OF TWO COLUMNS, and which one is the whole
+  // point. A level the reviewer picked in the table is a decision and
+  // lands in `level`; one this app guessed lands in `level_suggested`,
+  // where `questionTier` cannot see it and no gate can rest on it.
+  const decided = levelDecision(line);
+  // THE NAME IS THE CELL'S FIRST LINE where the cell has more than one;
+  // everything the rest of it says is written below as attributes.
+  const plan = plans.get(line.index) ?? null;
+  const inserted = await txn`
+    insert into spec_records
+      (project_id, run_id, record_no, status, category_id, item_description, product_reference, qty,
+       qty_unit, qty_raw, designer, area, boq_category, level, level_suggested, level_suggested_reason,
+       internal_notes, source_import_id, source_line_no, created_by, updated_by)
+    values
+      (${projectId}, ${specRunId}, ${recordNo}, 'active', ${categoryToWrite(line)}, ${plan?.name ?? line.itemDescription},
+       ${line.productReference}, ${line.qty}, ${line.qtyUnit ?? null}, ${qtyRawToWrite(line)}, ${line.designer},
+       ${effectiveArea(line)}, ${line.boqCategory ?? null},
+       ${decided.level}, ${decided.suggested}, ${decided.reason},
+       ${composeBillNotes(line.notes, keptWithFinishCode(line, sheet.columns?.finishCode?.heading))}, ${runId},
+       ${line.lineNo}, ${actor}, ${actor})
+    returning id
+  `;
+  const recordId = String(inserted[0]?.id ?? "");
+  if (!recordId) throw new Error(`line ${line.lineNo} was not inserted`);
+  tally.recordIds.push(recordId);
+  recordByRow.set(line.lineNo, { recordId, carried: false });
+  noteMockup(tally, recordId, line);
+  tally.billPictures += await giveBillPicture(txn, {
+    recordId,
+    projectId,
+    lineNo: line.lineNo,
+    picture: effectiveRowImage(parsed, sheet.sheetName, line),
+    actor,
+  });
+  // A line new to a REVISION is on the run from this moment, and must not
+  // be swept up by the retirement of what the revision no longer lists.
+  carriedForward.add(recordId);
+
+  if (line.code) {
+    await txn`
+      insert into spec_record_refs (record_id, project_id, ref_system, ref_value, ref_value_norm, source, created_by)
+      values (${recordId}, ${projectId}, 'boq_code', ${line.code}, ${normaliseRef(line.code)}, 'BOQ import', ${actor})
+    `;
+  }
+
+  // Only where a category was CHOSEN, by a person (`categoryToWrite`,
+  // audit 2026-11-06, G8): the staging's guess is not a category until
+  // somebody accepts it, and this insert is what makes a guess
+  // consequential, because a category is what creates the checklist.
+  // An uncategorised record has no
+  // questions to be missing — the insert-select below writes nothing for it,
+  // and `PATCH /api/records/[id]` writes them when a category is set.
+  await txn`
+    insert into spec_answers (record_id, requirement_id, spec_field_id, state, source_kind, created_by, updated_by)
+    select ${recordId}, q.id, q.spec_field_id, 'missing', 'manual', ${actor}, ${actor}
+    from requirements q
+    join spec_records r on r.category_id = q.category_id
+    where r.id = ${recordId}
+  `;
+
+  if (plan) await writeDescription(bill, tally, recordId, plan);
+
+  tally.imported += 1;
+}
+
+/** THE FABRIC LINES, onto their items, by the plan. */
+async function writeSheetFinishLines(
+  bill: BillConfirm,
+  tally: BillTally,
+  at: SheetWrite,
+  { sheetIndex, fabricLines, plan }: { sheetIndex: number; fabricLines: StagedLine[]; plan: FinishLinePlan },
+): Promise<void> {
+  const { txn, runId, projectId, actor, parsed, library } = bill;
+  const { sheet, recordByRow } = at;
+  const { finishPlan, finishSlotFields } = plan;
+  const createdFinishIds = plan.createdFinishIds;
+  // ---- the fabric lines, onto their items -----------------------------
+  for (const [order, line] of fabricLines.entries()) {
+    // EVERY ITEM IT IS WRITTEN TO — its own, and any other line of this
+    // phase carrying the code it names with no finish line of its own
+    // (`finishLineTargets`, read by the plan, the decision the review's
+    // arrow reads).
+    const write = finishPlan.lines.get(`${sheetIndex}:${line.index}`);
+    if (!write || write.onRows.length === 0 || write.onRows.some((entry) => entry.row === null || !recordByRow.get(entry.row))) {
+      throw new DomainConflictError(
+        "fabric_without_item",
+        `Row ${line.lineNo}'s fabric belongs to a row that is not being imported. Reload the review.`,
+      );
+    }
+    const written = await writeFabricLine(txn, {
+      write,
+      recordOf: (row) => recordByRow.get(row)?.recordId ?? null,
+      line,
+      runId,
+      projectId,
+      actor,
+      library,
+      planned: finishPlan.planned,
+      createdFinishIds,
+      finishSlotFields,
+      sortOrder: order,
+    });
+    tally.fabricSpecs += written.written.length;
+    for (const recordId of written.written) tally.recomposeIds.add(recordId);
+    if (written.minted) tally.inHouseFinishes += 1;
+    // A PLACEHOLDER'S PICTURE IS FILED NOWHERE: it has no finish to belong to.
+    if (written.finishId) {
+      tally.swatchGroups.set(written.finishId, [
+        ...(tally.swatchGroups.get(written.finishId) ?? []),
+        { sheetName: sheet.sheetName, rowNo: line.lineNo, image: effectiveRowImage(parsed, sheet.sheetName, line) },
+      ]);
+    }
+  }
+}
+
+/** WHAT THE REVISION NO LONGER LISTS, retired with its configurations. */
+async function retireUnlisted(bill: BillConfirm, tally: BillTally, at: SheetWrite): Promise<void> {
+  const { txn, projectId, actor } = bill;
+  const { replacesRunId, carriedForward } = at;
+  // ---- what the revision no longer lists ------------------------------
+  // RETIRED, NEVER DELETED. A record is the only place a client ref maps to
+  // a BWS job, and that job may already exist — deleting the record loses
+  // the mapping for work that is already in the factory. It leaves the tabs
+  // and the export; it does not leave the history.
+  //
+  // A CONFIGURATION FOLLOWS ITS LINE (audit 2026-11-06, C1). It carries no
+  // bill code, so no revised line ever pairs with it, and this step used to
+  // retire every one on the phase: S-301 paired, its five TYPEs retired,
+  // and the bare line shipped in their place. Held TWO ways, so a later
+  // change to one leaves the other standing: the live configurations of
+  // every line this sheet keeps are carried forward with it, AND the sweep
+  // reads bill lines only. A line that IS retired takes its configurations
+  // with it, in this change, at the same moment — which is what lets a
+  // restore bring them back together.
+  if (replacesRunId) {
+    const following = await txn`
+      select id from spec_records
+      where parent_id = any(${[...carriedForward]}::uuid[]) and status = 'active'
+    `;
+    for (const row of following) carriedForward.add(String(row.id));
+    const gone = await txn`
+      update spec_records
+      set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
+      where run_id = ${replacesRunId}
+        and project_id = ${projectId}
+        and status = 'active'
+        and parent_id is null
+        and not (id = any(${[...carriedForward]}::uuid[]))
+      returning id
+    `;
+    const goneIds = gone.map((row) => String(row.id));
+    const goneWith = await txn`
+      update spec_records
+      set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
+      where parent_id = any(${goneIds}::uuid[]) and status = 'active'
+      returning id
+    `;
+    for (const id of [...goneIds, ...goneWith.map((row) => String(row.id))]) tally.recordIds.push(id);
+    tally.retired += gone.length + goneWith.length;
+  }
+}
+
+export async function confirmBoqImport(
+  txn: TxnSql,
+  { runId, expectedVersion, actor }: { runId: string; expectedVersion: number; actor: string },
+): Promise<ConfirmBoqResult> {
+  const { projectId, parsed } = await lockBill(txn, runId, expectedVersion);
+  const { revisedRunIds } = await refuseUnconfirmable(txn, parsed, projectId);
+
+  // The change this import is. Opened BEFORE the first write, because
+  // write_audit() reads it from the transaction: a change set created after
+  // them would leave every one belonging to nothing.
+  const changeSetId = await openChangeSet(txn, {
+    projectId,
+    kind: revisedRunIds.length > 0 ? "boq_revision" : "boq_confirm",
+    actor,
+    sourceIntakeRunId: runId,
+  });
+
+  // 4. Allocation, under the lock. `record_no` stays project-wide across runs:
+  //    it is the label a person reads, and two records called P17231-014 in
+  //    different tabs would be indistinguishable in an export or an email.
+  const startRows = await txn`
+    select coalesce(max(record_no), 0) as max_no from spec_records where project_id = ${projectId}
+  `;
+  const nextNo = Number(startRows[0]?.max_no ?? 0);
+
+  const sortRows = await txn`
+    select coalesce(max(sort_order), 0) as max_sort from spec_runs where project_id = ${projectId}
+  `;
+  const nextSort = Number(sortRows[0]?.max_sort ?? 0);
+  const tally: BillTally = {
+    nextNo,
+    nextSort,
+    runIds: [],
+    recordIds: [],
+    imported: 0,
+    updated: 0,
+    retired: 0,
+    fabricSpecs: 0,
+    descriptionSpecs: 0,
+    descriptionsHeldBack: 0,
+    billPictures: 0,
+    inHouseFinishes: 0,
+    recomposeIds: new Set<string>(),
+    swatchGroups: new Map(),
+    mockupQuantities: new Map(),
+    mockupDropped: [],
+  };
+
+  const plan = await planBillWrites(txn, parsed, projectId);
+  const { library, descriptionDecisions } = plan;
+  const bill: BillConfirm = { txn, runId, projectId, actor, parsed, library };
+  const allSheets = parsed.sheets as StagedBoqSheet[];
+
   for (const [sheetIndex, sheet] of allSheets.entries()) {
     if (sheet.ignored) continue;
     const live = (sheet.lines as StagedLine[]).filter((line) => !line.ignored);
@@ -523,356 +1009,39 @@ export async function confirmBoqImport(
     const lines = live.filter((line) => line.rowKind !== "finish_for");
     const fabricLines = live.filter((line) => line.rowKind === "finish_for");
     if (lines.length === 0) continue;
-    /** The record each item line became or continues, by its row on the sheet. */
-    const recordByRow = new Map<number, { recordId: string; carried: boolean }>();
-    const plans = descriptionDecisions[sheetIndex] ?? new Map<number, BillDescriptionPlan & { held: boolean }>();
-    const writeDescription = async (recordId: string, plan: BillDescriptionPlan) => {
-      descriptionSpecs += await writeDescriptionAttributes(txn, { recordId, plan, runId, projectId, actor, library });
-      recomposeIds.add(recordId);
+    const specRunId = await openSheetPhase(bill, tally, sheet);
+    const at: SheetWrite = {
+      sheet,
+      specRunId,
+      replacesRunId: sheet.replacesRunId ?? null,
+      plans: descriptionDecisions[sheetIndex] ?? new Map<number, BillDescriptionPlan & { held: boolean }>(),
+      recordByRow: new Map(),
+      carriedForward: new Set<string>(),
     };
-
-    const replacesRunId = sheet.replacesRunId ?? null;
-
-    let specRunId: string;
-    if (replacesRunId) {
-      // ---- A REVISION. The run KEEPS ITS IDENTITY -----------------------
-      // Its records keep their ids, and therefore their drawings, their
-      // specs, their picture and their checklist answers. That carry-over is
-      // the entire point: a revised bill that created a second set of
-      // records would strand every bit of work done against the first.
-      specRunId = replacesRunId;
-      await txn`
-        update spec_runs
-        set boq_revision = ${sheet.metadata?.revision ?? null},
-            boq_date = ${sheet.metadata?.date ?? null},
-            header_notes = ${JSON.stringify(sheet.metadata?.notes ?? [])}::jsonb,
-            source_import_id = ${runId},
-            updated_by = ${actor}
-        where id = ${specRunId}
-      `;
-    } else {
-      nextSort += 1;
-      // One run per sheet. The reviewer's name for it, not the tab's: a tab
-      // called "Feuil1" is not what anybody calls the run.
-      const runRow = await txn`
-        insert into spec_runs
-          (project_id, name, source_sheet, source_import_id, boq_revision, boq_date, header_notes,
-           sort_order, created_by, updated_by)
-        values
-          (${projectId}, ${sheet.proposedRunName.trim() || sheet.sheetName}, ${sheet.sheetName}, ${runId},
-           ${sheet.metadata?.revision ?? null}, ${sheet.metadata?.date ?? null},
-           ${JSON.stringify(sheet.metadata?.notes ?? [])}::jsonb, ${nextSort}, ${actor}, ${actor})
-        returning id
-      `;
-      specRunId = String(runRow[0]?.id ?? "");
-      if (!specRunId) throw new Error(`sheet ${sheet.sheetName} produced no run`);
-    }
-    runIds.push(specRunId);
-
-    /**
-     * Every record this sheet LEAVES LIVE — the ones it carried forward AND
-     * the ones it has just created. The retire step below subtracts this from
-     * the run's active records, so a new line omitted from it would be
-     * inserted and retired by the same confirm.
-     */
-    const carriedForward = new Set<string>();
-
     for (const line of lines) {
-      // ---- a line the reviewer PAIRED with an existing record -----------
-      // Version-predicated, so a record edited since the review refuses the
-      // whole confirm rather than silently overwriting somebody's work.
-      // Attributes, answers and the item image are NOT touched.
-      if (line.replaces) {
-        const target = line.replaces;
-        // A pairing is only meaningful against the run this sheet revises. A
-        // line paired to a record on some OTHER run would move that record
-        // between tabs, which is not what a revision does and not what the
-        // reviewer was looking at.
-        if (!replacesRunId) {
-          throw new DomainConflictError(
-            "pairing_without_revision",
-            `Row ${line.lineNo} is paired with an existing record, but this sheet does not say which phase it revises. Reload the review and choose the phase.`,
-          );
-        }
-        // A RESTORE (audit 2026-11-06, C14): the reviewer chose to bring back
-        // a record an earlier revision retired, because its code is on the
-        // bill again. Written exactly as a pairing, keeping everything that
-        // hangs off the record, from the retired state at the version shown.
-        // When it was retired, the configurations retired with it at the same
-        // moment come back with it (`restoreRun`'s rule): restoring the line
-        // alone would make it an item again and ship it bare.
-        const restoring = target.restore === true;
-        if (restoring) {
-          // Compared in SQL, never through a JS Date: a timestamp round-tripped
-          // through one loses its microseconds and would match nothing.
-          const back = await txn`
-            update spec_records c
-            set status = 'active', retired_at = null, retired_by = null, updated_by = ${actor}
-            from spec_records p
-            where p.id = ${target.recordId} and p.status = 'retired' and p.version = ${target.recordVersion}
-              and c.parent_id = p.id and c.status = 'retired' and c.retired_at = p.retired_at
-            returning c.id
-          `;
-          for (const row of back) recordIds.push(String(row.id));
-        }
-        const changed = await txn`
-          update spec_records
-          set status = 'active',
-              retired_at = null,
-              retired_by = null,
-              item_description = ${billItemName(line)},
-              product_reference = ${line.productReference},
-              qty = ${line.qty},
-              designer = ${line.designer},
-              area = ${effectiveArea(line)},
-              boq_category = ${line.boqCategory ?? null},
-              -- The bill's own unit, like its quantity: a revision writes it.
-              -- NOT the notes column: internal notes are a person's once the
-              -- record exists, and a revised bill never writes over them.
-              qty_unit = ${line.qtyUnit ?? null},
-              -- 0059: the cell as printed where it gave no count, written over
-              -- like the quantity, so a revision that now prints a count clears it.
-              qty_raw = ${qtyRawToWrite(line)},
-              source_import_id = ${runId},
-              source_line_no = ${line.lineNo},
-              run_id = ${specRunId},
-              -- A REVISION NEVER OVERRIDES A LEVEL SOMEBODY SET. It fills the
-              -- gap where there is one: a record carried forward with no level
-              -- takes the new bill's reading, and one that already has a level
-              -- — decided or suggested — keeps it. Same rule as the category
-              -- and the attributes this update deliberately leaves alone.
-              level = case
-                when spec_records.level is not null then spec_records.level
-                else ${levelDecision(line).level}
-              end,
-              level_suggested = case
-                when spec_records.level is not null or spec_records.level_suggested is not null
-                  then spec_records.level_suggested
-                else ${levelDecision(line).suggested}
-              end,
-              level_suggested_reason = case
-                when spec_records.level is not null or spec_records.level_suggested is not null
-                  then spec_records.level_suggested_reason
-                else ${levelDecision(line).reason}
-              end,
-              updated_by = ${actor}
-          where id = ${target.recordId}
-            and project_id = ${projectId}
-            and run_id = ${replacesRunId}
-            and status = ${restoring ? "retired" : "active"}
-            -- A configuration is never a pairing: it carries no bill code and
-            -- follows its line (audit 2026-11-06, C1).
-            and parent_id is null
-            and version = ${target.recordVersion}
-          returning id
-        `;
-        if (!changed[0]) {
-          throw new DomainConflictError(
-            "record_changed",
-            restoring
-              ? `The retired record BOQ line ${line.lineNo} brings back has changed, moved phase, or been brought back since you reviewed this revision. Nothing was written — reload and check the line.`
-              : `The record paired with BOQ line ${line.lineNo} has changed, moved phase, or been retired since you reviewed this revision. Nothing was written — reload and check the pairing.`,
-          );
-        }
-        carriedForward.add(target.recordId);
-        recordIds.push(target.recordId);
-        recordByRow.set(line.lineNo, { recordId: target.recordId, carried: true });
-        noteMockup(target.recordId, line);
-        billPictures += await giveBillPicture(txn, {
-          recordId: target.recordId,
-          projectId,
-          lineNo: line.lineNo,
-          picture: effectiveRowImage(parsed, sheet.sheetName, line),
-          actor,
-        });
-
-        // A CARRIED RECORD KEEPS ITS SPECS. The description is written only
-        // where the record holds nothing it would duplicate or replace — the
-        // review said which, in the same words, from the same function.
-        const plan = plans.get(line.index);
-        if (plan) {
-          // Decided above, by `revisionDescriptionRefusal`, with the plan the
-          // finish lines' slots were counted against.
-          if (plan.held) descriptionsHeldBack += 1;
-          else await writeDescription(target.recordId, plan);
-        }
-
-        // The client ref can be re-punctuated between revisions. Refs are
-        // write-once-and-delete by design (0002), so the old one goes and the
-        // new one is written rather than edited in place.
-        //
-        // DELETED BY ITS WORDS, NOT ITS FOLD (5.4 A3). The fold now folds a
-        // dot onto nothing, so `S.201` re-punctuated as `S-201` is the SAME
-        // norm, and a delete keyed on the norm left the old spelling in place
-        // while the insert below did nothing on conflict: the record would go
-        // on showing the bill's previous spelling.
-        if (line.code) {
-          await txn`
-            delete from spec_record_refs
-            where record_id = ${target.recordId} and ref_system = 'boq_code'
-              and ref_value <> ${line.code}
-          `;
-          await txn`
-            insert into spec_record_refs (record_id, project_id, ref_system, ref_value, ref_value_norm, source, created_by)
-            values (${target.recordId}, ${projectId}, 'boq_code', ${line.code}, ${normaliseRef(line.code)}, 'BOQ revision', ${actor})
-            on conflict (record_id, ref_system, ref_value_norm) do nothing
-          `;
-        }
-
-        updated += 1;
-        continue;
-      }
-
-      nextNo += 1;
-      const recordNo = nextNo;
-
-      // `returning id` rather than re-selecting by record_no: the id is the key,
-      // and a follow-up select would be a second chance to pick the wrong row.
-      // THE LEVEL GOES IN ONE OF TWO COLUMNS, and which one is the whole
-      // point. A level the reviewer picked in the table is a decision and
-      // lands in `level`; one this app guessed lands in `level_suggested`,
-      // where `questionTier` cannot see it and no gate can rest on it.
-      const decided = levelDecision(line);
-      // THE NAME IS THE CELL'S FIRST LINE where the cell has more than one;
-      // everything the rest of it says is written below as attributes.
-      const plan = plans.get(line.index) ?? null;
-      const inserted = await txn`
-        insert into spec_records
-          (project_id, run_id, record_no, status, category_id, item_description, product_reference, qty,
-           qty_unit, qty_raw, designer, area, boq_category, level, level_suggested, level_suggested_reason,
-           internal_notes, source_import_id, source_line_no, created_by, updated_by)
-        values
-          (${projectId}, ${specRunId}, ${recordNo}, 'active', ${categoryToWrite(line)}, ${plan?.name ?? line.itemDescription},
-           ${line.productReference}, ${line.qty}, ${line.qtyUnit ?? null}, ${qtyRawToWrite(line)}, ${line.designer},
-           ${effectiveArea(line)}, ${line.boqCategory ?? null},
-           ${decided.level}, ${decided.suggested}, ${decided.reason},
-           ${composeBillNotes(line.notes, keptWithFinishCode(line, sheet.columns?.finishCode?.heading))}, ${runId},
-           ${line.lineNo}, ${actor}, ${actor})
-        returning id
-      `;
-      const recordId = String(inserted[0]?.id ?? "");
-      if (!recordId) throw new Error(`line ${line.lineNo} was not inserted`);
-      recordIds.push(recordId);
-      recordByRow.set(line.lineNo, { recordId, carried: false });
-      noteMockup(recordId, line);
-      billPictures += await giveBillPicture(txn, {
-        recordId,
-        projectId,
-        lineNo: line.lineNo,
-        picture: effectiveRowImage(parsed, sheet.sheetName, line),
-        actor,
-      });
-      // A line new to a REVISION is on the run from this moment, and must not
-      // be swept up by the retirement of what the revision no longer lists.
-      carriedForward.add(recordId);
-
-      if (line.code) {
-        await txn`
-          insert into spec_record_refs (record_id, project_id, ref_system, ref_value, ref_value_norm, source, created_by)
-          values (${recordId}, ${projectId}, 'boq_code', ${line.code}, ${normaliseRef(line.code)}, 'BOQ import', ${actor})
-        `;
-      }
-
-      // Only where a category was CHOSEN, by a person (`categoryToWrite`,
-      // audit 2026-11-06, G8): the staging's guess is not a category until
-      // somebody accepts it, and this insert is what makes a guess
-      // consequential, because a category is what creates the checklist.
-      // An uncategorised record has no
-      // questions to be missing — the insert-select below writes nothing for it,
-      // and `PATCH /api/records/[id]` writes them when a category is set.
-      await txn`
-        insert into spec_answers (record_id, requirement_id, spec_field_id, state, source_kind, created_by, updated_by)
-        select ${recordId}, q.id, q.spec_field_id, 'missing', 'manual', ${actor}, ${actor}
-        from requirements q
-        join spec_records r on r.category_id = q.category_id
-        where r.id = ${recordId}
-      `;
-
-      if (plan) await writeDescription(recordId, plan);
-
-      imported += 1;
+      if (line.replaces) await carryPairedLine(bill, tally, at, line);
+      else await insertNewLine(bill, tally, at, line);
     }
-
-    // ---- the fabric lines, onto their items -----------------------------
-    for (const [order, line] of fabricLines.entries()) {
-      // EVERY ITEM IT IS WRITTEN TO — its own, and any other line of this
-      // phase carrying the code it names with no finish line of its own
-      // (`finishLineTargets`, read by the plan, the decision the review's
-      // arrow reads).
-      const write = finishPlan.lines.get(`${sheetIndex}:${line.index}`);
-      if (!write || write.onRows.length === 0 || write.onRows.some((entry) => entry.row === null || !recordByRow.get(entry.row))) {
-        throw new DomainConflictError(
-          "fabric_without_item",
-          `Row ${line.lineNo}'s fabric belongs to a row that is not being imported. Reload the review.`,
-        );
-      }
-      const written = await writeFabricLine(txn, {
-        write,
-        recordOf: (row) => recordByRow.get(row)?.recordId ?? null,
-        line,
-        runId,
-        projectId,
-        actor,
-        library,
-        planned: finishPlan.planned,
-        createdFinishIds,
-        finishSlotFields,
-        sortOrder: order,
-      });
-      fabricSpecs += written.written.length;
-      for (const recordId of written.written) recomposeIds.add(recordId);
-      if (written.minted) inHouseFinishes += 1;
-      // A PLACEHOLDER'S PICTURE IS FILED NOWHERE: it has no finish to belong to.
-      if (written.finishId) {
-        swatchGroups.set(written.finishId, [
-          ...(swatchGroups.get(written.finishId) ?? []),
-          { sheetName: sheet.sheetName, rowNo: line.lineNo, image: effectiveRowImage(parsed, sheet.sheetName, line) },
-        ]);
-      }
-    }
-
-    // ---- what the revision no longer lists ------------------------------
-    // RETIRED, NEVER DELETED. A record is the only place a client ref maps to
-    // a BWS job, and that job may already exist — deleting the record loses
-    // the mapping for work that is already in the factory. It leaves the tabs
-    // and the export; it does not leave the history.
-    //
-    // A CONFIGURATION FOLLOWS ITS LINE (audit 2026-11-06, C1). It carries no
-    // bill code, so no revised line ever pairs with it, and this step used to
-    // retire every one on the phase: S-301 paired, its five TYPEs retired,
-    // and the bare line shipped in their place. Held TWO ways, so a later
-    // change to one leaves the other standing: the live configurations of
-    // every line this sheet keeps are carried forward with it, AND the sweep
-    // reads bill lines only. A line that IS retired takes its configurations
-    // with it, in this change, at the same moment — which is what lets a
-    // restore bring them back together.
-    if (replacesRunId) {
-      const following = await txn`
-        select id from spec_records
-        where parent_id = any(${[...carriedForward]}::uuid[]) and status = 'active'
-      `;
-      for (const row of following) carriedForward.add(String(row.id));
-      const gone = await txn`
-        update spec_records
-        set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
-        where run_id = ${replacesRunId}
-          and project_id = ${projectId}
-          and status = 'active'
-          and parent_id is null
-          and not (id = any(${[...carriedForward]}::uuid[]))
-        returning id
-      `;
-      const goneIds = gone.map((row) => String(row.id));
-      const goneWith = await txn`
-        update spec_records
-        set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
-        where parent_id = any(${goneIds}::uuid[]) and status = 'active'
-        returning id
-      `;
-      for (const id of [...goneIds, ...goneWith.map((row) => String(row.id))]) recordIds.push(id);
-      retired += gone.length + goneWith.length;
-    }
+    await writeSheetFinishLines(bill, tally, at, { sheetIndex, fabricLines, plan });
+    await retireUnlisted(bill, tally, at);
   }
+
+  const {
+    runIds,
+    recordIds,
+    imported,
+    updated,
+    retired,
+    fabricSpecs,
+    descriptionSpecs,
+    descriptionsHeldBack,
+    billPictures,
+    inHouseFinishes,
+    recomposeIds,
+    swatchGroups,
+    mockupQuantities,
+    mockupDropped,
+  } = tally;
 
   // ---- the fabric lines' pictures, as their codes' swatches ---------------
   // After every sheet has filed, because a code's swatch is decided across
