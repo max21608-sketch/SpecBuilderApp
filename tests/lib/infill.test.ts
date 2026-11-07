@@ -5,7 +5,7 @@
 // screen's own: the summary a collapsed line carries, and the decision that
 // keeps a dimension out of the answer box.
 import { describe, expect, it } from "vitest";
-import { countStates, rowKind, summariseLines } from "@/lib/infill";
+import { countStates, gateOnlyLineSummaries, rowKind, summariseLines } from "@/lib/infill";
 import type { GroupableQuestion } from "@/lib/chase-grouping";
 import type { Palette } from "@/lib/palettes";
 
@@ -161,5 +161,64 @@ describe("rowKind", () => {
     // keeps the box free text.
     expect(rowKind({ jsonId: 55 }, palette({ options: [] }))).toBe("text");
     expect(rowKind({ jsonId: 55 }, null)).toBe("text");
+  });
+});
+
+describe("gateOnlyLineSummaries (audit 5.4 A11)", () => {
+  // Two configurations of line 12, each owing only a slot, under a bill line
+  // no question names: they were TWO lines, each carrying its configuration's
+  // own id, apart from the line they belong to. The chase lists them under it.
+  const parent = {
+    id: "line-12",
+    parentId: null,
+    recordLabel: "P1-012",
+    shortLabel: "12",
+    itemDescription: "Armchair",
+    refs: "ZZ-12",
+    qty: 45,
+    level: "simple",
+    area: "Lobby",
+    runId: "run-1",
+    runName: "Main",
+    variantLabel: null,
+  };
+  const option = (id: string, letter: string, ordinal: number) => ({
+    ...parent,
+    id,
+    parentId: "line-12",
+    recordLabel: `P1-012.${ordinal}`,
+    shortLabel: `12.${ordinal}`,
+    qty: null,
+    variantLabel: letter,
+  });
+  const item = (recordId: string, lineId: string, count: number) => ({
+    recordId,
+    lineId,
+    count,
+    projectWide: 0,
+    rows: Array.from({ length: count }, (_, index) => ({ kind: "slot" as const, where: "specs" as const, label: `Slot ${index}`, requirementId: null, section: null, state: "missing" })),
+  });
+
+  it("puts two gate-only configurations under ONE line, their bill line, each an option", () => {
+    const lines = gateOnlyLineSummaries(
+      [item("opt-a", "line-12", 2), item("opt-b", "line-12", 1)],
+      [parent, option("opt-a", "A", 1), option("opt-b", "B", 2)],
+    );
+    expect(lines).toHaveLength(1);
+    const line = lines[0]!;
+    expect(line).toMatchObject({ lineId: "line-12", recordLabel: "P1-012", code: "ZZ-12", qty: 45, optionCount: 2 });
+    expect(line.counts.toQuote).toBe(3);
+    expect(line.options.map((o) => [o.recordId, o.name, o.number, o.counts.toQuote])).toEqual([
+      ["opt-a", "ZZ-12 A", "12.1", 2],
+      ["opt-b", "ZZ-12 B", "12.2", 1],
+    ]);
+    expect(line.itemRows?.map((row) => row.recordId)).toEqual(["opt-a", "opt-a", "opt-b"]);
+  });
+
+  it("gives an item that is its own line one line, as before", () => {
+    const lines = gateOnlyLineSummaries([item("line-12", "line-12", 1)], [parent]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ lineId: "line-12", optionCount: 0, options: [] });
+    expect(lines[0]!.counts.toQuote).toBe(1);
   });
 });

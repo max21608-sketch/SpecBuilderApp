@@ -951,10 +951,10 @@ export async function loadQuestionsByKey(
   projectId: string,
   keys: { recordId: string; requirementId: string }[],
   // Defaults to the HTTP driver for screen reads. The generate route and the
-  // send gate pass their TRANSACTION's executor instead, so the rows they
-  // validate against are the rows they hold locks on -- reading them over a
-  // separate connection would reintroduce exactly the read-committed gap the
-  // transaction exists to close.
+  // send gate pass their TRANSACTION's executor instead, so the read happens
+  // while they hold the project or draft row. It READS the questions and locks
+  // none of them (audit F14 corrected "the rows they hold locks on"); what an
+  // answer does after this read is caught by the coverage snapshot.
   exec: SqlExecutor = sql,
 ): Promise<Map<string, OutstandingQuestion>> {
   if (keys.length === 0) return new Map();
