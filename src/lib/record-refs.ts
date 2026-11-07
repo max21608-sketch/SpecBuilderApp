@@ -65,6 +65,14 @@ export type RecordEntry = {
    * send a mock-up drawing anywhere.
    */
   onMockupPhase?: boolean;
+  /**
+   * The bill lines this one is linked to as TWINS (0060, `record-twins.ts`):
+   * one item on several lines. Read by the drawing resolution, which
+   * suggests every twin where it would otherwise ask SX11A's question.
+   * Optional: absent is "no twins", so a loader that never read the links
+   * resolves exactly as before.
+   */
+  twinIds?: string[];
 };
 
 // ---- refs ------------------------------------------------------------------

@@ -238,6 +238,40 @@ export async function liveTwinIds(txn: TxnSql, recordId: string): Promise<Set<st
   return new Set((await twinsOf(txn, recordId)).map((twin) => twin.recordId));
 }
 
+/**
+ * Every live twin link of a project, as record id -> the ids it is twinned
+ * with. ONE read for a whole pack, and the one way a records register learns
+ * its twins (`RecordEntry.twinIds`): the review screen's registers and the
+ * drawings confirm both call it, so the card and the confirm resolve over the
+ * same links. Both ends must be active; a retired record's links are history.
+ */
+export async function loadTwinIds(db: TxnSql, projectId: string): Promise<Map<string, string[]>> {
+  const rows = await db`
+    select t.record_a, t.record_b
+      from spec_record_twins t
+      join spec_records a on a.id = t.record_a and a.status = 'active'
+      join spec_records b on b.id = t.record_b and b.status = 'active'
+     where t.project_id = ${projectId} and t.status = 'active'
+  `;
+  const out = new Map<string, string[]>();
+  for (const row of rows) {
+    const a = String(row.record_a);
+    const b = String(row.record_b);
+    out.set(a, [...(out.get(a) ?? []), b]);
+    out.set(b, [...(out.get(b) ?? []), a]);
+  }
+  return out;
+}
+
+/** The register with each record's twins on it. A record with none keeps no key, so other payloads are unchanged. */
+export function withTwinIds<T extends { id: string }>(records: T[], twins: ReadonlyMap<string, string[]>): (T & { twinIds?: string[] })[] {
+  if (twins.size === 0) return records;
+  return records.map((record) => {
+    const ids = twins.get(record.id);
+    return ids ? { ...record, twinIds: [...ids].sort() } : record;
+  });
+}
+
 // ---- the bill review's suggestion -------------------------------------------
 
 /** What `suggestTwins` reads off a staged bill line. */

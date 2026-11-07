@@ -114,6 +114,7 @@ import { snapshotRecords } from "@/lib/record-snapshot";
 import { loadFieldsWithPalettes } from "@/lib/palette-load";
 import { paletteOptionFor } from "@/lib/palettes";
 import { documentClosedSentence, reviewedWord } from "@/lib/intake-status";
+import { loadTwinIds, withTwinIds } from "@/lib/record-twins";
 
 /**
  * What a stored swatch is CALLED, which is the only place its page survives.
@@ -250,7 +251,10 @@ async function loadRecords(txn: TxnSql, projectId: string): Promise<RecordEntry[
     where r.project_id = ${projectId} and r.status = 'active'
     order by run.sort_order, r.record_no
   `;
-  return rows.map((row) => ({
+  // 0060: the twin links, read by `loadTwinIds` exactly as the review screen
+  // reads them, so a card ticked over two twin lines confirms over the same.
+  const twins = await loadTwinIds(txn, projectId);
+  return withTwinIds(rows.map((row) => ({
     id: String(row.id),
     recordNo: Number(row.record_no),
     label: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
@@ -266,7 +270,7 @@ async function loadRecords(txn: TxnSql, projectId: string): Promise<RecordEntry[
     // 0043: what `resolveDrawingItem` narrows a mock-up drawing to.
     onMockupPhase: row.is_mockup === true,
     version: Number(row.version),
-  }));
+  })), twins);
 }
 
 /** Locate by id, never by position. Array index is display order, not identity. */

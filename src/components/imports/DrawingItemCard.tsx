@@ -93,6 +93,8 @@ export type ItemResolution = {
     matchedBy?: { kind: "code_end" | "several_codes"; code: string | null; message: string };
     /** The page marks the item as mock-up (0043): resolved among mock-up records only. The server's sentence. */
     mockup?: { evidence: string | null; message: string };
+    /** 0060: the lines it would have asked about are twins, so each is ticked. The server's sentence. */
+    twins?: { message: string };
   };
   targets: string[];
   /**
@@ -762,7 +764,13 @@ export default function ItemCard({
             // Amber whether or not it settled on one: a code read off the end
             // of a bill code is a reading a person checks, like a guessed slot.
             note={
-              resolution?.resolution.matchedBy ? (
+              resolution?.resolution.twins ? (
+                // The twin link answers the question the code alone could
+                // not, so it is said in place of the amber reading (0060).
+                <Note tone="info" className="mt-2">
+                  {resolution.resolution.twins.message}
+                </Note>
+              ) : resolution?.resolution.matchedBy ? (
                 <Note tone="warn" className="mt-2">
                   {resolution.resolution.matchedBy.message}
                 </Note>

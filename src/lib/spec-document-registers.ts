@@ -25,6 +25,7 @@ import type { AnswerEntry, AttributeEntry, RecordEntry, Registers, RequirementEn
 // The same label the chase emails use. Two spellings of one record number would
 // make a proposal and a chase about the same item look like different items.
 import { numberingFromRow, recordLabel } from "@/lib/record-label";
+import { loadTwinIds, withTwinIds } from "@/lib/record-twins";
 import { billRunIdOf, buildBillRowIndex, type BillRowIndex, type BillRowLine } from "@/lib/bill-rows";
 
 /**
@@ -206,7 +207,10 @@ export async function loadExtractionRegisters(
     : [];
   const documentKind = kindRows[0]?.document_kind ? (String(kindRows[0].document_kind) as DocumentKind) : null;
 
-  return { records, requirements, answers, attributes, specFields, billRows, documentKind };
+  // 0060: each line's twins, so a drawing of a code on two twinned lines of
+  // one phase resolves to both (`readTwinLines`). The confirm reads the same.
+  const twinned = withTwinIds(records, await loadTwinIds(sql, projectId));
+  return { records: twinned, requirements, answers, attributes, specFields, billRows, documentKind };
 }
 
 /**
