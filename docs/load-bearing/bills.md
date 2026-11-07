@@ -310,6 +310,24 @@ columns are plainly there was a dead end because of the words above them. Max:
 in ROW WINDOWS, which is not the excluded "splitting an oversize drawing set":
 a spreadsheet has rows, and a row window loses nothing a page split would.
 
+**The review page is a dispatcher; the bill review is `BoqReview`** (audit
+5.3 cut A, 2026-11-07). `src/app/dashboard/imports/[id]/page.tsx` went from
+3,118 lines to 144: it loads the import with `useBoqImport`
+(`src/components/imports/use-boq-import.ts`, the GET plus every bill verb,
+each the same request with the same reload-then-report order), because ONE
+GET serves all five review screens and the dispatch needs it — do not move
+the load into `BoqReview`, which would be a second GET. It calls
+`useStructureRead` AFTER its next-step and pack effects (effects run in
+declaration order, so the automatic structure read goes out where it always
+did) and hands a bill to `BoqReview.tsx` with the hook's result. The pieces:
+`BillLineRow.tsx` (one line and its panels; `billLineId` lives here),
+`SheetHeader.tsx`, `RevisionPanel.tsx` (the summary and `PairingCell`),
+`StructureRead.tsx` (`useStructureRead`, `StructureReadNotes`, `SheetColumns`
+with the `sheetColumnsId` anchor). Every `id`, `data-*` attribute and
+`goToAndFlash` target was kept; the proof was 83 page snapshots, one per
+rendering test with pending requests settled, byte-identical before and
+after, and no test file changed.
+
 ### Four new bills: what a specifier's own layout broke, and the rules that hold it
 
 `src/lib/boq-structure.ts` (`STRUCTURE_TOOL`), `src/lib/model-request.ts`,
