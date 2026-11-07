@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guessSlotsFromViews, hasASeat, viewFamily, type MeasuredRow } from "@/lib/dimension-guess";
+import { guessSlotsFromViews, hasASeat, viewFamily, type MeasuredRow } from "@/lib/drawing-legacy";
 
 /** The rows as the real pack stages them: the view label, and a bare figure. */
 const rows = (pairs: [string | null, string][]): MeasuredRow[] =>

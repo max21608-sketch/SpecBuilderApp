@@ -34,11 +34,11 @@
 import {
   assertStagedDrawings,
   isMeasuredRow,
-  variantLettersByItem,
   type DrawingItem,
   type DrawingObservation,
   type StagedDrawings,
 } from "../src/lib/drawing-document";
+import { variantLettersByItem } from "../src/lib/drawing-legacy";
 import { composeDimensionCell } from "../src/lib/dimensions";
 import type { DimensionSlot } from "../src/lib/spec-vocab";
 import { unitSourceOf } from "../src/lib/drawing-document";

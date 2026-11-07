@@ -42,7 +42,6 @@ import {
   measuredKey,
   measuredRows,
   codeGroupFor,
-  variantLettersByItem,
   namedConfigurationPlans,
   alreadyRecorded,
   crossPageClaims,
@@ -57,6 +56,7 @@ import {
   type DrawingItem,
   type DrawingObservation,
 } from "@/lib/drawing-document";
+import { variantLettersByItem } from "@/lib/drawing-legacy";
 import { parseDimensionFigure } from "@/lib/dimensions";
 import { normaliseRef } from "@/lib/record-refs";
 import { naturalConfigurationOrder } from "@/lib/record-variants";

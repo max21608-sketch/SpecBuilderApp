@@ -15,13 +15,13 @@ import {
   foldableRow,
   namedConfigurationPlans,
   resolveStagedItem,
-  variantLettersByItem,
   wasReadByModel,
   type DrawingItem,
   type OccupiedSlots,
   type SpecFieldEntry,
   type StagedDrawings,
 } from "@/lib/drawing-document";
+import { variantLettersByItem } from "@/lib/drawing-legacy";
 import { pagesInWords, stageDrawingsV4 } from "@/lib/drawing-items";
 import { resolveStagedRun } from "@/lib/drawing-resolution";
 import { DrawingsItemsOutput, MAX_STATEMENTS } from "@/lib/extraction-schema";

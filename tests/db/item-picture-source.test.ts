@@ -26,7 +26,8 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
-import { stageDrawings, type SpecFieldEntry } from "@/lib/drawing-document";
+import { type SpecFieldEntry } from "@/lib/drawing-document";
+import { stageDrawings } from "@/lib/drawing-legacy";
 import { loadRecordAtoms } from "@/lib/record-atoms";
 import { confirmingAsShown } from "./shown-targets";
 

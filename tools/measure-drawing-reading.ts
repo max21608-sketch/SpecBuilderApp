@@ -48,16 +48,15 @@ import {
   readAsItems,
   readByModel,
   groupItemsByCode,
-  variantLettersByItem,
   foldableRow,
   measuredRows,
-  redundantOverallRows,
   unitSourceOf,
   type DrawingItem,
   type DrawingObservation,
   type StagedDrawings,
 } from "../src/lib/drawing-document";
-import { guessSlotsFromViews } from "../src/lib/dimension-guess";
+import { variantLettersByItem, redundantOverallRows } from "../src/lib/drawing-legacy";
+import { guessSlotsFromViews } from "../src/lib/drawing-legacy";
 import {
   addRegionCounts,
   blankRegionCounts,
@@ -100,7 +99,7 @@ try {
 console.log(`Target: DATABASE_ENVIRONMENT=${environment} (${host})  [read only]`);
 
 /**
- * The magnitude tier's own reason strings, as `dimension-guess.ts` writes them.
+ * The magnitude tier's own reason strings, as `guessSlotsFromViews` (src/lib/drawing-legacy.ts) writes them.
  *
  * Detected by the SENTENCE rather than re-derived, because re-deriving "was
  * this the weak path" here would be a second copy of the rule -- the thing this

@@ -22,12 +22,10 @@ import {
   resolveDimensionUnit,
   splitFigureAndUnit,
   unitSourceOf,
-  stageDrawings,
   assertStagedDrawings,
   canonicalCode,
   groupItemsByCode,
   classifyCallout,
-  variantLettersByItem,
   hasPendingObservations,
   isMeasuredRow,
   mergeNoteBlocks,
@@ -40,6 +38,7 @@ import {
   type StagedDrawings,
   type UnitSource,
 } from "@/lib/drawing-document";
+import { stageDrawings, variantLettersByItem } from "@/lib/drawing-legacy";
 import type { AttributeUnit } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
 import type { RecordEntry } from "@/lib/spec-document";
@@ -718,8 +717,8 @@ describe("assertStagedDrawings", () => {
   // THE VIEW GUESS, ON READ. The real AP364 set labels its figures FRONT /
   // SIDE / BACK / TOP / SIDE SECTION, which places nothing, so every one of
   // those pages arrived with an empty Dimensions question. See
-  // src/lib/dimension-guess.ts for why the repetition across views is
-  // evidence. Applied on READ, never written back, exactly like the slot
+  // `guessSlotsFromViews` in src/lib/drawing-legacy.ts for why the repetition
+  // across views is evidence. Applied on READ, never written back, exactly like the slot
   // upgrade — which is what gives the pack already in the sandbox this
   // without a second model call.
   // ==========================================================================

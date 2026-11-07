@@ -24,7 +24,8 @@
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
-import { stageDrawings, type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
+import { type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
+import { stageDrawings } from "@/lib/drawing-legacy";
 import { planClashResolution } from "@/lib/clash-resolution";
 import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
 import { confirmingAsShown } from "./shown-targets";

@@ -59,7 +59,7 @@ import { measuredRows, oneLinePerPhase, toggledTargets, uncertainNotices, wasRea
 import { configurationNeedsYou, needsYouListId, runTargetsId } from "@/lib/needs-you";
 import { goToAndFlash } from "@/lib/go-to";
 import NeedsYou from "@/components/ui/NeedsYou";
-import { EMPTY_GUESS, guessSlotsFromViews } from "@/lib/dimension-guess";
+import { EMPTY_GUESS, guessSlotsFromViews } from "@/lib/drawing-legacy";
 import { sharedTargets, type ConfigurationMember, type ReviewCard } from "@/lib/configuration-cards";
 import { variantName } from "@/lib/record-variants";
 import { DIMENSION_SLOT_LABELS, type DimensionSlot, type ItemLevel } from "@/lib/spec-vocab";

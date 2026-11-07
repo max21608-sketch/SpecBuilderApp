@@ -9,7 +9,8 @@ import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import { withShownTargets } from "./shown-targets";
 import pg from "pg";
-import { stageDrawings, type SpecFieldEntry } from "@/lib/drawing-document";
+import { type SpecFieldEntry } from "@/lib/drawing-document";
+import { stageDrawings } from "@/lib/drawing-legacy";
 import { stagePreamble } from "@/lib/preamble-document";
 import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
 

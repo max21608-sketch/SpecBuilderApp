@@ -21,12 +21,11 @@ import {
   parentVariantsOf,
   resolveDrawingTargets,
   rowWriteRecords,
-  stageDrawings,
-  variantLettersByItem,
   type NamedTargets,
   type OccupiedSlots,
   type StagedDrawings,
 } from "@/lib/drawing-document";
+import { stageDrawings, variantLettersByItem } from "@/lib/drawing-legacy";
 import { normaliseVariantLabel, VARIANT_LABEL_SHAPE, variantLabelProblem } from "@/lib/record-variants";
 import type { RecordEntry } from "@/lib/spec-document";
 import { NAMED_FIELDS, namedSheetRun, SHOP_DRAWING, SPEC_SHEET } from "../fixtures/named-configurations";

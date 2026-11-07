@@ -31,7 +31,6 @@ import {
   resolveDrawingItem,
   resolveStagedItem,
   targetRecordIds,
-  variantLettersByItem,
   alreadyRecorded,
   crossPageClaims,
   type CrossPageClaim,
@@ -52,6 +51,7 @@ import {
   type OccupiedSlot,
   type StagedDrawings,
 } from "@/lib/drawing-document";
+import { variantLettersByItem } from "@/lib/drawing-legacy";
 import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
 import { billReplacements, type BillReplacement } from "@/lib/bill-over-drawing";
 import {

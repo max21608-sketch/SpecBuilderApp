@@ -45,7 +45,6 @@ import {
   resolveDrawingItem,
   shownTargetsDiffer,
   targetRecordIds,
-  variantLettersByItem,
   namedConfigurationPlans,
   parentVariantsOf,
   rowWriteRecords,
@@ -64,6 +63,7 @@ import {
   type ReplaceTarget,
   type StagedDrawings,
 } from "@/lib/drawing-document";
+import { variantLettersByItem } from "@/lib/drawing-legacy";
 import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
 import type { RecordEntry } from "@/lib/spec-document";
 import { assertProjectScopedPathname } from "@/lib/blob-source";

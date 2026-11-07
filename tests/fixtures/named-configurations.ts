@@ -10,7 +10,8 @@
 //
 // `codeGroups` says the two pages are ONE item (one chair described twice) —
 // correct, and still correct when that chair comes in five configurations.
-import { stageDrawings, type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
+import { type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
+import { stageDrawings } from "@/lib/drawing-legacy";
 import type { RawCodeGroup, RawDrawingDimension, RawDrawingItem } from "@/lib/extraction-schema";
 
 export const NAMED_FIELDS: SpecFieldEntry[] = [

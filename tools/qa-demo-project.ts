@@ -74,12 +74,12 @@ import { guessLevelFromBill } from "@/lib/level-guess";
 import { confirmBoqImport } from "@/lib/confirm-boq";
 import { readSpreadsheetSheets } from "@/lib/intake-source";
 import {
-  stageDrawings,
   specFieldEntries,
   resolveDrawingTargets,
   assertStagedDrawings,
   type StagedDrawings,
 } from "@/lib/drawing-document";
+import { stageDrawings } from "@/lib/drawing-legacy";
 import { confirmDrawingItem } from "@/lib/confirm-drawings";
 import { stagePreamble } from "@/lib/preamble-document";
 import { confirmPreambleNotes } from "@/lib/confirm-preamble";
