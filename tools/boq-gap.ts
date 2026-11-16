@@ -176,7 +176,9 @@ function describeSheet(sheet: ParsedBoqSheet): string[] {
   out.push(
     `  lines: ${lines.length} · no code ${lines.filter((line) => !line.code).length} · no qty ${
       lines.filter((line) => line.qty === null).length
-    } · qty sum (items) ${qtySum} · skipped rows ${sheet.skippedRows}`,
+    } · qty sum (items) ${qtySum} · skipped rows ${sheet.skippedRows}${
+      sheet.repeatedHeaderRows ? ` · repeated heading rows ${sheet.repeatedHeaderRows}` : ""
+    }`,
   );
   out.push(`  row kinds by the bracket rule: ${fabric.length} fabric line(s), ${items.length} other, ${flagged.length} flagged`);
   for (const line of flagged.slice(0, 12)) out.push(`    row ${line.lineNo} ${line.code ?? ""}: ${line.rowKindFlag}`);

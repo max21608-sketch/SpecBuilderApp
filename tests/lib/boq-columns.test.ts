@@ -552,3 +552,35 @@ describe("a saved layout narrower than the known headings does not outrank them 
     expect(sheet.lines[0]?.code).toBe("ZZ-1");
   });
 });
+
+describe("a header printed again above a section is passed over and counted (C9)", () => {
+  const SECTIONS: SheetData = [
+    ["Code", "Description", "Qty"],
+    ["ZZ-301", "Sofa", 2],
+    [null, null, null],
+    ["code", " DESCRIPTION ", "QTY"],
+    ["ZZ-302", "Armchair", 4],
+    ["Code", "Description", null],
+    ["ZZ-303", "Description of works", 1],
+    ["ZZ-304", "Description", 1],
+  ];
+
+  it("stages no record named “Description”, and says how many it passed over", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: SECTIONS }]).sheets);
+    expect(sheet.lines.map((line) => line.code)).toEqual(["ZZ-301", "ZZ-302", "ZZ-303", "ZZ-304"]);
+    expect(sheet.repeatedHeaderRows).toBe(2);
+    expect(describeHeader(sheet)).toMatch(/2 repeated heading rows under the header were passed over/);
+  });
+
+  it("matches the WHOLE cell: a line whose description merely contains a heading, or is one, stays a line", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: SECTIONS }]).sheets);
+    expect(sheet.lines.find((line) => line.code === "ZZ-303")?.itemDescription).toBe("Description of works");
+    // One cell equal to its heading is not a reprinted header: its code is real.
+    expect(sheet.lines.find((line) => line.code === "ZZ-304")?.itemDescription).toBe("Description");
+  });
+
+  it("adds nothing to a sheet with no reprint", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: TYPICAL }]).sheets);
+    expect("repeatedHeaderRows" in sheet).toBe(false);
+  });
+});

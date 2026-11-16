@@ -1471,10 +1471,22 @@ function readRows(
 
   const lines: BoqLine[] = [];
   let skippedRows = 0;
+  let repeatedHeaderRows = 0;
+  const isRepeatedHeader = repeatedHeaderTest(data, headerIndex, headerRows, headings, [
+    ...Object.values(header),
+    ...keptColumns,
+  ]);
 
   for (let rowIndex = headerIndex + 1; rowIndex < data.length; rowIndex += 1) {
     const row = data[rowIndex];
     if (!row) continue;
+
+    // THE HEADER, PRINTED AGAIN above a section (audit C9): passed over and
+    // counted, never staged as a record named "Description".
+    if (isRepeatedHeader(row)) {
+      repeatedHeaderRows += 1;
+      continue;
+    }
 
     const itemDescription = text(at(row, "itemDescription"));
     const descriptionCell = at(row, "itemDescription");
@@ -1522,6 +1534,8 @@ function readRows(
     headerRow: headerIndex + 1,
     headerRows,
     skippedRows,
+    // Absent where there was none, so every other sheet stages as before.
+    ...(repeatedHeaderRows > 0 ? { repeatedHeaderRows } : {}),
     ignored: empty,
     ignoredReason: empty ? "No rows under the header." : null,
     // The metadata stops at the FIRST of the header's rows. Reading up to the
@@ -1544,6 +1558,45 @@ function readRows(
     ...(options.doubt ? { columnsDoubt: options.doubt } : {}),
     preview: previewOf(data, headerIndex + 1),
   } satisfies ParsedBoqSheet;
+}
+
+/**
+ * IS THIS ROW THE HEADER PRINTED AGAIN? (audit C9, 2026-11-16)
+ *
+ * A bill that reprints `Code | Description | Qty` above each section staged
+ * every reprint as a record named "Description". A row is a reprint when at
+ * least TWO of the columns being read carry text and EVERY one of them is,
+ * folded (`foldHeading`), that column's own heading — as joined, or either
+ * row of a two-row header. Whole cell only, never a substring: a description
+ * reading "Description of works" is a line, and so is a row with one heading
+ * word in one cell.
+ */
+function repeatedHeaderTest(
+  data: SheetData,
+  headerIndex: number,
+  headerRows: number,
+  headings: readonly string[],
+  columns: readonly number[],
+): (row: readonly unknown[]) => boolean {
+  const lower = data[headerIndex] ?? [];
+  const upper = headerRows === 2 ? (data[headerIndex - 1] ?? []) : [];
+  const wanted = new Map<number, Set<string>>();
+  for (const index of new Set(columns)) {
+    const spellings = [headings[index], text(lower[index]), text(upper[index])]
+      .map((value) => (value ? foldHeading(value) : ""))
+      .filter((value) => value !== "");
+    if (spellings.length > 0) wanted.set(index, new Set(spellings));
+  }
+  return (row) => {
+    let matched = 0;
+    for (const index of new Set(columns)) {
+      const value = text(row[index]);
+      if (value === null) continue;
+      if (!wanted.get(index)?.has(foldHeading(value))) return false;
+      matched += 1;
+    }
+    return matched >= 2;
+  };
 }
 
 /**
@@ -1581,6 +1634,7 @@ export function describeHeader(sheet: {
   headerRow?: number;
   headerRows?: number;
   skippedRows?: number;
+  repeatedHeaderRows?: number;
   lines?: readonly { lineNo?: number; qty?: number | null; qtyRaw?: string }[];
 }): string {
   const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
@@ -1649,6 +1703,15 @@ export function describeHeader(sheet: {
       printed
         ? `No line here carries a quantity it could read as a count. The bill prints words such as “${printed}”, so none is written.`
         : "No line here carries a quantity — the bill gave none, so none is written.",
+    );
+  }
+
+  // THE HEADER PRINTED AGAIN under itself (C9), counted apart from spacers.
+  const repeated = Number.isFinite(sheet.repeatedHeaderRows) ? Number(sheet.repeatedHeaderRows) : 0;
+  if (repeated > 0) {
+    sentences.push(
+      `${repeated} repeated heading ${plural(repeated, "row", "rows")} under the header ` +
+        `${plural(repeated, "was", "were")} passed over.`,
     );
   }
 

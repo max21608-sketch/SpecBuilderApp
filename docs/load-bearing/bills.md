@@ -326,6 +326,15 @@ columns are plainly there was a dead end because of the words above them. Max:
   the sheet carries a `columnsDoubt` naming the layout, held as above. Where
   the synonyms cannot read the sheet at all (the Aman "Spec Code"), a layout
   applies exactly as before.
+- **A header printed again above a section is passed over and counted**
+  (2026-11-16, audit C9). It used to stage as a record named "Description".
+  A row is a reprint where at least two of the columns being read carry text
+  and EVERY one of them folds (`foldHeading`) to that column's own heading
+  (joined, or either row of a two-row header) — whole cells only, never a
+  substring, so "Description of works" stays a line and so does a row with
+  one heading word in one cell. The count is `repeatedHeaderRows` on the
+  staged sheet (absent where none), and `describeHeader` says "2 repeated
+  heading rows under the header were passed over".
 
 **Read the specifications in this bill** registers the SAME stored file as an
 `ffe_schedule` document (`src/lib/bill-specifications.ts`, idempotent on
