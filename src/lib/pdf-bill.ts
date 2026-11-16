@@ -24,7 +24,10 @@
 //     column whose label centre is nearest;
 //   * the ROWS are anchored on the quantity column — one figure per line,
 //     printed centred in its row — and a line of text belongs to the row whose
-//     anchor is nearest, within reach of it.
+//     anchor is nearest, within reach of it. Since 2026-11-16 (audit C10) a
+//     quantity printed as words, or a code no quantity claims, anchors a row
+//     too, and what the reader cannot settle is flagged on the row
+//     (`pageRows`).
 //
 // WHAT IT CANNOT DO, said on the screen as well as here: it carries NO
 // pictures (a PDF's pictures are not cells), and it works on a PDF PRINTED
@@ -46,13 +49,18 @@ import { readPrintedNumber } from "@/lib/printed-number";
 
 import { type PdfBillFailureCode } from "@/lib/pdf-bill-source";
 
-export { pdfBillRefusal, pdfPageOfLine, type PdfBillFailureCode, type PdfBillSource } from "@/lib/pdf-bill-source";
+export { pdfBillRefusal, pdfFlagsOfLine, pdfPageOfLine, type PdfBillFailureCode, type PdfBillSource } from "@/lib/pdf-bill-source";
 
 /** One piece of text the PDF prints, in page units, y growing DOWN the page. */
 export type PdfTextItem = { str: string; x: number; y: number; w: number; h: number };
 
-/** One line of the bill as the PDF printed it: its page and its cells, in header order. */
-export type PdfBillRow = { page: number; cells: string[] };
+/**
+ * One line of the bill as the PDF printed it: its page and its cells, in
+ * header order. `flags`, where present, are the reader's own doubts about the
+ * row in words (audit C10) — a cell holding text from two bands of the page —
+ * which the review prints beside the line. Absent on a row nothing doubts.
+ */
+export type PdfBillRow = { page: number; cells: string[]; flags?: string[] };
 
 export type PdfBillRead =
   | {
@@ -148,7 +156,13 @@ function columnOf(columns: Column[], item: PdfTextItem): number {
 type Header = { columns: Column[]; quantityColumn: number; bottom: number };
 
 /** The folded headings the registers know, by role: what tells a table's header from a label on a sheet. */
-type Vocabulary = { quantity: ReadonlySet<string>; other: ReadonlySet<string> };
+type Vocabulary = {
+  quantity: ReadonlySet<string>;
+  other: ReadonlySet<string>;
+  /** The code and description headings, which rows may also hang on (C10). */
+  code: ReadonlySet<string>;
+  description: ReadonlySet<string>;
+};
 
 /**
  * A HEADER NAMES TWO MORE COLUMNS A BILL HAS, besides its quantity, and is
@@ -244,33 +258,229 @@ function pickQuantity(columns: Column[], vocabulary: Vocabulary): number | strin
   return null;
 }
 
-/** A page's lines, as cell strings in the header's column order. */
-function pageRows(items: PdfTextItem[], header: Header, top: number): string[][] {
+/** The column a role's heading names on this header, or null where none does. */
+function roleColumn(columns: Column[], headings: ReadonlySet<string>): number | null {
+  const index = columns.findIndex((column) => headings.has(foldHeading(column.label)));
+  return index < 0 ? null : index;
+}
+
+/** A row's anchor: where it sits on the page, and what it was read from. */
+type Anchor = { y: number; from: "quantity" | "words" | "code" };
+
+/**
+ * Pieces of text one above another, grouped where the gap between them is at
+ * most `gap` — one cell's wrapped lines, rather than two cells.
+ */
+function verticalClusters(items: PdfTextItem[], gap: number): { items: PdfTextItem[]; top: number; bottom: number; centre: number }[] {
+  const sorted = [...items].sort((a, b) => a.y - b.y);
+  const out: { items: PdfTextItem[]; top: number; bottom: number; centre: number }[] = [];
+  for (const item of sorted) {
+    const last = out[out.length - 1];
+    if (last && item.y - last.bottom <= gap) {
+      last.items.push(item);
+      last.bottom = item.y;
+    } else out.push({ items: [item], top: item.y, bottom: item.y, centre: item.y });
+  }
+  for (const cluster of out) cluster.centre = (cluster.top + cluster.bottom) / 2;
+  return out;
+}
+
+/** How far apart two wrapped lines of one cell may be, in line heights. */
+const WRAP_GAP = 1.6;
+
+/**
+ * A PAGE'S LINES, as cell strings in the header's column order.
+ *
+ * ROWS HANG ON THE QUANTITY, AND NOW NOT ONLY ON A FIGURE (audit C10,
+ * 2026-11-16). The 575-of-575 measurement was on schedules where every line
+ * printed a number, and four things went wrong where one did not, none
+ * flagged:
+ *
+ *   * A line whose quantity is WORDS (`TBC`, `-`, `N/A`) is its own row: the
+ *     words are its quantity cell, and the bill reader then says "quantity not
+ *     given (the bill says “TBC”)" through `qty_raw` (0059).
+ *   * A line with NO quantity at all hangs on its CODE: where two separate
+ *     code cells sit nearest one quantity, the farther one is a row of its
+ *     own. A code that wraps (`CH-01` / `(TO BE` / `CONFIRMED )`) is ONE cell,
+ *     its lines no further apart than `WRAP_GAP` line heights. So a schedule
+ *     where every line prints a number reads exactly as before: each quantity
+ *     has its one code. A row hung on words or on a code is kept only where it
+ *     has BOTH a code and a description, so a footer's date under the quantity
+ *     column, or a title in the code column, is never a line.
+ *   * A description longer than the row's reach no longer loses its lines: a
+ *     piece beyond reach joins the edge row where it CONTINUES text already in
+ *     that row's cell of the same column, a line apart.
+ *   * A page printed with no header of its own (a continuation) does not hand
+ *     its title to row 1: above the first row, only what lies within half a
+ *     row of it, or continues its cells, is read.
+ *
+ * And what it still cannot know it SAYS: a cell holding pieces from two bands
+ * of the page — a gap of more than `WRAP_GAP` line heights between its lines —
+ * is flagged on the row rather than silently joined.
+ */
+function pageRows(
+  items: PdfTextItem[],
+  header: Header,
+  top: number,
+  roles: { code: number | null; description: number | null },
+  continuation: boolean,
+): { cells: string[]; flags: string[] }[] {
   const { columns, quantityColumn } = header;
   const body = items.filter((item) => item.y > top);
-  const anchors = body
-    .filter((item) => columnOf(columns, item) === quantityColumn && QUANTITY.test(item.str.trim()))
+  const lineHeight = median(body.map((item) => item.h)) || 7;
+  const wrap = lineHeight * WRAP_GAP;
+  const inColumn = (item: PdfTextItem, column: number | null) => column !== null && columnOf(columns, item) === column;
+
+  // 1. THE FIGURES, exactly as before: one per line, centred in its row.
+  const figures = body
+    .filter((item) => inColumn(item, quantityColumn) && QUANTITY.test(item.str.trim()))
     .map((item) => item.y)
     .sort((a, b) => a - b);
-  if (anchors.length === 0) return [];
-  // THE REACH OF A ROW: half the widest gap between two anchors, or a few
-  // lines where there is one row. Beyond it a piece of text belongs to no line
-  // — a footer's date and page number, a note under the table — and is left
-  // out rather than glued onto the last line's cells.
-  const lineHeight = median(body.map((item) => item.h)) || 7;
+  // THE REACH OF A ROW, from the figures alone, as before: half the widest gap
+  // between two, or a few lines where there is one. Beyond it a piece belongs
+  // to no line unless it continues one (step 4).
   let widest = 0;
-  for (let r = 1; r < anchors.length; r++) widest = Math.max(widest, anchors[r]! - anchors[r - 1]!);
+  for (let r = 1; r < figures.length; r++) widest = Math.max(widest, figures[r]! - figures[r - 1]!);
   const reach = Math.max(widest / 2, lineHeight * 4);
-  const cells: PdfTextItem[][][] = anchors.map(() => columns.map(() => [] as PdfTextItem[]));
-  for (const item of body) {
-    let row = 0;
-    for (let r = 1; r < anchors.length; r++) {
-      if (Math.abs(anchors[r]! - item.y) < Math.abs(anchors[row]! - item.y)) row = r;
-    }
-    if (Math.abs(anchors[row]! - item.y) > reach) continue;
-    cells[row]![columnOf(columns, item)]!.push(item);
+
+  const anchors: Anchor[] = figures.map((y) => ({ y, from: "quantity" as const }));
+  // 2. A QUANTITY CELL THAT IS WORDS: its own row, unless it sits against a figure (part of that cell).
+  const words = body.filter((item) => inColumn(item, quantityColumn) && !QUANTITY.test(item.str.trim()));
+  for (const cluster of verticalClusters(words, wrap)) {
+    if (figures.some((y) => y >= cluster.top - wrap && y <= cluster.bottom + wrap)) continue;
+    anchors.push({ y: cluster.centre, from: "words" });
   }
-  return cells.map((row) => row.map(cellText));
+  // 3. A CODE NO QUANTITY CLAIMS: only on a page that has a row at all.
+  if (roles.code !== null && anchors.length > 0) {
+    const codes = verticalClusters(body.filter((item) => inColumn(item, roles.code)), wrap);
+    const nearestTo = (y: number) =>
+      anchors.reduce((best, anchor, index) => (Math.abs(anchor.y - y) < Math.abs(anchors[best]!.y - y) ? index : best), 0);
+    const claimed = new Map<number, typeof codes>();
+    const extra: Anchor[] = [];
+    for (const cluster of codes) {
+      const index = nearestTo(cluster.centre);
+      if (Math.abs(anchors[index]!.y - cluster.centre) > reach) {
+        extra.push({ y: cluster.centre, from: "code" });
+        continue;
+      }
+      claimed.set(index, [...(claimed.get(index) ?? []), cluster]);
+    }
+    for (const [index, clusters] of claimed) {
+      if (clusters.length < 2) continue;
+      const anchorY = anchors[index]!.y;
+      const nearest = clusters.reduce((best, cluster) =>
+        Math.abs(cluster.centre - anchorY) < Math.abs(best.centre - anchorY) ? cluster : best,
+      );
+      for (const cluster of clusters) if (cluster !== nearest) extra.push({ y: cluster.centre, from: "code" });
+    }
+    anchors.push(...extra);
+  }
+  if (anchors.length === 0) return [];
+  anchors.sort((a, b) => a.y - b.y);
+
+  // 4 and 5, until they agree: a row hung on words or on a code that turns
+  // out to have no code or no description is not a line, and is taken away
+  // BEFORE the pieces settle, so nothing it drew in is lost to its neighbours.
+  for (;;) {
+    const cells = assignPieces(body, columns, anchors, { reach, wrap, lineHeight, continuation });
+    const keep = anchors.map((anchor, r) => {
+      if (anchor.from === "quantity") return true;
+      if (roles.code === null && roles.description === null) return false;
+      const has = (column: number | null) => column === null || cells[r]![column]!.length > 0;
+      return has(roles.code) && has(roles.description);
+    });
+    if (keep.every(Boolean)) {
+      // TWO BANDS IN THE DESCRIPTION is what two bill lines joined look like:
+      // a line with neither a quantity nor a code to hang on lands in its
+      // neighbour. Only the description is asked, MEASURED: on the real
+      // schedules a dimensions or notes cell often leaves a blank line inside
+      // itself (`REFER TO DRAWING`, a gap, `550 DIA X 710MM`) — 41 rows of 47
+      // flagged for nothing when every column was asked — and no description
+      // cell there does.
+      return cells.map((row, r) => {
+        const description = roles.description === null ? [] : row[roles.description]!;
+        const flags: string[] = [];
+        if (twoBands(description, wrap)) {
+          flags.push(
+            "The description holds text from two bands of the page — perhaps two lines of the bill joined, one of " +
+              "them with no quantity and no code. Check it against the PDF.",
+          );
+        }
+        // THE FIRST LINE OF A PAGE PRINTED WITH NO HEADER: a cell whose top
+        // band sits wholly above the line, apart from the rest of it, may be
+        // the page's own title. Not dropped — a cell with a blank line inside
+        // it looks the same — but said.
+        if (continuation && r === 0) {
+          const above = row.findIndex((cell) => {
+            const bands = verticalClusters(cell, wrap);
+            return bands.length > 1 && bands[0]!.bottom < anchors[0]!.y - wrap;
+          });
+          if (above >= 0) {
+            flags.push(
+              `This page prints no header, and “${columns[above]!.label}” of its first line holds text from above ` +
+                "the line — perhaps the page's title. Check it against the PDF.",
+            );
+          }
+        }
+        return { cells: row.map(cellText), flags };
+      });
+    }
+    const remaining = anchors.filter((_, r) => keep[r]);
+    if (remaining.length === 0) return [];
+    anchors.splice(0, anchors.length, ...remaining);
+  }
+}
+
+/**
+ * Every piece to its nearest row, within reach — and above the first row of a
+ * continuation page, within half a row of it. A piece beyond that which
+ * CONTINUES its column's text in the nearest row, a wrapped line apart, is
+ * that cell's next line; repeated until nothing more joins. The rest belongs
+ * to no line: a footer, a title, a note under the table.
+ */
+function assignPieces(
+  body: PdfTextItem[],
+  columns: Column[],
+  anchors: Anchor[],
+  limits: { reach: number; wrap: number; lineHeight: number; continuation: boolean },
+): PdfTextItem[][][] {
+  const { reach, wrap, lineHeight, continuation } = limits;
+  const firstPitch = anchors.length > 1 ? (anchors[1]!.y - anchors[0]!.y) / 2 : reach;
+  const aboveLimit = continuation ? Math.max(lineHeight * WRAP_GAP, Math.min(reach, firstPitch)) : reach;
+  const cells: PdfTextItem[][][] = anchors.map(() => columns.map(() => [] as PdfTextItem[]));
+  const nearestRow = (y: number) => {
+    let row = 0;
+    for (let r = 1; r < anchors.length; r++) if (Math.abs(anchors[r]!.y - y) < Math.abs(anchors[row]!.y - y)) row = r;
+    return row;
+  };
+  let loose: PdfTextItem[] = [];
+  for (const item of body) {
+    const row = nearestRow(item.y);
+    const limit = row === 0 && item.y < anchors[0]!.y ? aboveLimit : reach;
+    if (Math.abs(anchors[row]!.y - item.y) > limit) loose.push(item);
+    else cells[row]![columnOf(columns, item)]!.push(item);
+  }
+  for (let joined = true; joined && loose.length > 0; ) {
+    joined = false;
+    const still: PdfTextItem[] = [];
+    for (const item of loose) {
+      const cell = cells[nearestRow(item.y)]![columnOf(columns, item)]!;
+      if (cell.some((other) => Math.abs(other.y - item.y) <= wrap)) {
+        cell.push(item);
+        joined = true;
+      } else still.push(item);
+    }
+    loose = still;
+  }
+  return cells;
+}
+
+/** Do a cell's pieces sit in two bands — a gap of more than a wrapped line between them? */
+function twoBands(cell: PdfTextItem[], wrap: number): boolean {
+  if (cell.length < 2) return false;
+  const ys = cell.map((item) => item.y).sort((a, b) => a - b);
+  for (let i = 1; i < ys.length; i++) if (ys[i]! - ys[i - 1]! > wrap) return true;
+  return false;
 }
 
 /** A cell's text: pieces within half a line height share a line, read left to right. */
@@ -315,9 +525,12 @@ export function readPdfBillPages(
   options: { aliases?: readonly BoqAlias[] } = {},
 ): PdfBillRead {
   const aliases = options.aliases ?? REFERENCE_BOQ_ALIASES;
+  const folded = (role: string) => new Set(aliases.filter((alias) => alias.role === role).map((alias) => foldHeading(alias.term)));
   const vocabulary: Vocabulary = {
-    quantity: new Set(aliases.filter((alias) => alias.role === "qty").map((alias) => foldHeading(alias.term))),
+    quantity: folded("qty"),
     other: new Set(aliases.filter((alias) => alias.role !== "qty").map((alias) => foldHeading(alias.term))),
+    code: folded("code"),
+    description: folded("itemDescription"),
   };
   if (pages.every((items) => items.length === 0)) {
     return { ok: false, code: "no_text", detail: "None of its pages carries any text." };
@@ -345,7 +558,10 @@ export function readPdfBillPages(
       top = search.found.bottom;
     }
     if (!header) continue;
-    for (const cells of pageRows(items, header, top)) rows.push({ page: index + 1, cells });
+    const roles = { code: roleColumn(header.columns, vocabulary.code), description: roleColumn(header.columns, vocabulary.description) };
+    for (const { cells, flags } of pageRows(items, header, top, roles, !search.found)) {
+      rows.push({ page: index + 1, cells, ...(flags.length > 0 ? { flags } : {}) });
+    }
   }
   if (!header) {
     if (several) {
@@ -432,7 +648,7 @@ export async function readPdfBill(bytes: Uint8Array, options: { aliases?: readon
 export async function pdfBillWorkbook(
   read: Extract<PdfBillRead, { ok: true }>,
   sheetName: string = PDF_BILL_SHEET,
-): Promise<{ bytes: Buffer; rowPages: number[]; firstRow: number }> {
+): Promise<{ bytes: Buffer; rowPages: number[]; firstRow: number; rowFlags?: string[][] }> {
   const book = new ExcelJS.Workbook();
   const sheet = book.addWorksheet(sheetName);
   sheet.addRow(read.header);
@@ -447,7 +663,15 @@ export async function pdfBillWorkbook(
     );
   }
   const bytes = Buffer.from(await book.xlsx.writeBuffer());
-  return { bytes, rowPages: read.rows.map((row) => row.page), firstRow: HEADER_ROW + 1 };
+  // The reader's doubts per row (C10), only where there is one, so a PDF
+  // nothing doubts stages exactly as before.
+  const flagged = read.rows.some((row) => (row.flags?.length ?? 0) > 0);
+  return {
+    bytes,
+    rowPages: read.rows.map((row) => row.page),
+    firstRow: HEADER_ROW + 1,
+    ...(flagged ? { rowFlags: read.rows.map((row) => row.flags ?? []) } : {}),
+  };
 }
 
 /** The workbook's pathname, BESIDE the PDF's: same project prefix, the PDF's name and the suffix. */

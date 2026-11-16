@@ -17,6 +17,13 @@ export type PdfBillSource = {
   firstRow: number;
   /** The PDF page of each line, in workbook-row order. */
   pages: number[];
+  /**
+   * What the reader DOUBTS about each line, in words, in workbook-row order
+   * (audit C10, 2026-11-16): a description holding text from two bands of the
+   * page, or a continuation page's first line holding text from above it.
+   * Present only where some line has one; absent on every PDF bill read before.
+   */
+  flags?: string[][];
 };
 
 /** The PDF page a staged line was read from, or null for a line that was not. */
@@ -28,6 +35,17 @@ export function pdfPageOfLine(
   if (!source || source.sheet !== sheetName) return null;
   const page = source.pages[lineNo - source.firstRow];
   return typeof page === "number" && Number.isFinite(page) ? page : null;
+}
+
+/** What the PDF reader doubts about a staged line, in words; empty where nothing. */
+export function pdfFlagsOfLine(
+  source: Pick<PdfBillSource, "sheet" | "firstRow" | "flags"> | null | undefined,
+  sheetName: string,
+  lineNo: number,
+): string[] {
+  if (!source?.flags || source.sheet !== sheetName) return [];
+  const flags = source.flags[lineNo - source.firstRow];
+  return Array.isArray(flags) ? flags.filter((flag) => typeof flag === "string" && flag.trim() !== "") : [];
 }
 
 /** Why a PDF's text could not be put back into a bill. Stable: C2 reads it. */

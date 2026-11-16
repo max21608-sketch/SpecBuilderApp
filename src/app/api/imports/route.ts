@@ -551,6 +551,8 @@ async function registerPdfBoq(input: Registered, actor: string, store: PictureSt
           sheet: PDF_BILL_SHEET,
           firstRow: workbook.firstRow,
           pages: workbook.rowPages,
+          // What the reader doubts per line (C10), only where it doubts something.
+          ...(workbook.rowFlags ? { flags: workbook.rowFlags } : {}),
         },
       };
     },

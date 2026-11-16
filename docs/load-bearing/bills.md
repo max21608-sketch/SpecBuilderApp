@@ -565,6 +565,31 @@ PDFs printed from Excel.
   Pictures are not carried.
 - Measured on the three real PDFs: 575 of 575 staged fields equal to the
   hand-converted workbook. 47 non-bill real PDFs: none reads as a bill.
+- **A line with no figure is still a line** (2026-11-16, audit C10,
+  `pageRows`). The 575 were on schedules where every line printed a number;
+  a `TBC`, `-` or blank quantity merged the line into its neighbour, a
+  description taller than the row's reach lost lines, and a page printed with
+  no header gave its title to row 1, none flagged. Now: a quantity printed as
+  WORDS anchors its own row (and reaches the bill as `qty_raw`, "quantity not
+  given"); a CODE no quantity claims — two separate code cells nearest one
+  figure, the farther one — anchors its own row, a code wrapped over lines
+  (`CH-01` / `(TO BE` / `CONFIRMED )`) being one cell; a row hung on words or
+  a code is kept only with BOTH a code and a description, so a footer's date
+  or a title is never a line; a piece beyond reach that continues its
+  column's text in the edge row a wrapped line apart is that cell's next
+  line; above the first row of a header-less page only half a row is read.
+  Two things are FLAGGED, never guessed (`PdfBillRow.flags` → the workbook's
+  `rowFlags` → `pdfSource.flags`, "check against the PDF" on the review line):
+  a DESCRIPTION holding text from two bands (two lines joined, one with
+  neither figure nor code), and a header-less page's first line holding a
+  separate band above it (perhaps the title). Only the description is asked
+  about bands, MEASURED: asking every column flagged 41 of 47 real rows whose
+  dimensions or notes cells carry a blank line. Re-measured on all 117 real
+  PDFs under `~/dev/localstack`: every read byte-identical before and after,
+  no flag raised, the same 114 refused. NOT done: a page with no figure and no
+  `TBC` at all still reads no rows (code anchors only supplement a page that
+  has a quantity); a title in a column where the first line has nothing is
+  still read into it, flagged only where it is a separate band.
 
 ### A PDF bill code cannot read is transcribed, and every line says so
 
