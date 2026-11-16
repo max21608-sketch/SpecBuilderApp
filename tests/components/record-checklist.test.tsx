@@ -619,4 +619,24 @@ describe("the TGQ tile and filter on Matthew's matrix (2026-10-13)", () => {
     );
     expect(screen.getByText(/showing 2 of 4 · 4 more recorded on the item/)).toBeInTheDocument();
   });
+
+});
+
+describe("an answer the BWS file does not ship (review 1.8)", () => {
+  it("marks an answer the file does not ship because a spec fills the field, and links to Specs", () => {
+    // Review 1.8: a correction typed here changed the checklist and not the
+    // BWS file, and nothing on the row said so.
+    renderChecklist({
+      readiness: { ...READINESS, toQuote: null },
+      answers: [
+        answer({ requirement_id: "q5", prompt: "COM 1", json_id: 1, state: "confirmed", value: "Velvet Moss 04", spec_ships: "Yarn Harbour LW44102 - 01" }),
+        answer({ requirement_id: "q6", prompt: "COM 2", json_id: 2, state: "confirmed", value: "Linen 12", spec_ships: null }),
+      ],
+    });
+    const marked = screen.getByText(/The file ships the spec, not this/);
+    expect(within(marked).getByRole("link", { name: "Change it on Specs" })).toHaveAttribute("href", "?tab=specs");
+    expect(within(marked).getByRole("note").getAttribute("aria-label")).toContain("Yarn Harbour LW44102 - 01");
+    // Once, on the answer the spec overrides — not on the one the file ships.
+    expect(screen.getAllByText(/The file ships the spec, not this/)).toHaveLength(1);
+  });
 });

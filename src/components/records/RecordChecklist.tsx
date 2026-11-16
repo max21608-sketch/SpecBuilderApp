@@ -85,6 +85,12 @@ export type ChecklistAnswer = {
    * dimensions cell has to be able to say out loud.
    */
   source_kind?: string | null;
+  /**
+   * What the BWS file ships for this field INSTEAD of this answer, where a
+   * spec on the record fills the field and says something else
+   * (`specShipsInstead`, the export's own composition). Null otherwise.
+   */
+  spec_ships?: string | null;
   version: number;
 };
 
@@ -812,6 +818,21 @@ export default function RecordChecklist({
                         tell which half the document said. */}
                     {answer.qualifier && (
                       <p className="mt-1 text-[11px] text-neutral-500">{answer.qualifier}</p>
+                    )}
+                    {/* A SPEC FILLS THIS FIELD, AND THE FILE TAKES THE SPEC.
+                        Typing a correction here changed the checklist and not
+                        the file, silently. Said where it is, with the next
+                        step; the reason is one hover away. */}
+                    {answer.spec_ships && (
+                      <p className={`mt-1 rounded border px-1.5 py-0.5 text-[11px] font-medium ${TONE.warn.note}`}>
+                        The file ships the spec, not this.{" "}
+                        <Link href="?tab=specs" className="text-blue-700 no-underline hover:underline">
+                          Change it on Specs
+                        </Link>
+                        <Tip>
+                          {`A spec on this item fills this BWS field, and the BWS file takes the spec over a checklist answer, so it ships “${answer.spec_ships}”. Edit the spec to change the file; this box changes the checklist only.`}
+                        </Tip>
+                      </p>
                     )}
                   </div>
 
