@@ -521,6 +521,26 @@ function DraftsView() {
     }
   }
 
+  // NO PROJECT IS A WAY ON, NOT A DEAD END (review 3.4c, 2026-11-16). Opened
+  // without `?projectId=` this rendered a bare red box and nothing else — no
+  // heading, no link. A chase is always about one project, so the next step is
+  // to pick one, and the projects list has a Chase button on every row.
+  if (!projectId) {
+    return (
+      <>
+        <PageHeader title="Chase what is missing" />
+        <PageBody width="std">
+          <Note tone="warn" title="No project chosen.">
+            A chase is about one project.{" "}
+            <Link href="/dashboard/projects" className="underline">
+              Open the projects list
+            </Link>{" "}
+            and press Chase on a project&apos;s row.
+          </Note>
+        </PageBody>
+      </>
+    );
+  }
   if (error && !data) {
     return (
       <PageBody width="wide">
