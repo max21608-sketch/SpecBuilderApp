@@ -3,7 +3,7 @@
 // The project's preamble notes: what the preamble said the whole package is
 // built under, collapsed by default, each flaggable and retirable. Moved out of
 // src/app/dashboard/projects/[id]/page.tsx on 2026-11-07 (audit 5.3, cut B).
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
@@ -46,38 +46,46 @@ export default function NotesCard({
       return next;
     });
 
+  // The notes with a change in flight. A second click on Flag or Retire while
+  // the first is still out would send the same version twice, and the second
+  // comes back a 409 that reads like somebody else changed the note.
+  // The ref is the guard (two clicks in one tick both see the state from
+  // before either rendered); the state is what disables the buttons.
+  const [pending, setPending] = useState<Set<string>>(new Set());
+  const inFlight = useRef<Set<string>>(new Set());
+
+  async function patchNote(note: ProjectNote, change: { flagged: boolean } | { status: "retired" }) {
+    if (inFlight.current.has(note.id)) return;
+    inFlight.current.add(note.id);
+    setPending((current) => new Set(current).add(note.id));
+    onError(null);
+    try {
+      const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/notes/${note.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...change, version: note.version }),
+      });
+      // A refusal reloads too, THEN says why: a 409 means the note on screen is
+      // stale, and leaving it there makes the next click refused the same way.
+      await onChanged();
+      if (!res.ok) onError(res.error);
+    } finally {
+      inFlight.current.delete(note.id);
+      setPending((current) => {
+        const next = new Set(current);
+        next.delete(note.id);
+        return next;
+      });
+    }
+  }
+
   /**
    * Marking a note load-bearing. Independent of `status`, which is whether the
    * note is a correct reading of the document -- "this is wrong" and "this
    * matters" are different answers and must not share a field.
    */
-  async function setNoteFlag(note: ProjectNote, flagged: boolean) {
-    onError(null);
-    const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/notes/${note.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ flagged, version: note.version }),
-    });
-    if (!res.ok) {
-      onError(res.error);
-      return;
-    }
-    await onChanged();
-  }
-
-  async function retireNote(note: ProjectNote) {
-    onError(null);
-    const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/notes/${note.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: "retired", version: note.version }),
-    });
-    if (!res.ok) {
-      onError(res.error);
-      return;
-    }
-    await onChanged();
-  }
+  const setNoteFlag = (note: ProjectNote, flagged: boolean) => patchNote(note, { flagged });
+  const retireNote = (note: ProjectNote) => patchNote(note, { status: "retired" });
 
   const flaggedCount = notes.filter((note) => note.flagged).length;
   const allNotesOpen = notes.length > 0 && notes.every((note) => openNotes.has(note.id));
@@ -156,11 +164,17 @@ export default function NotesCard({
                       size="xs"
                       variant="quiet"
                       title={note.flagged ? "Stop flagging this" : "Flag this as load-bearing"}
+                      disabled={pending.has(note.id)}
                       onClick={() => void setNoteFlag(note, !note.flagged)}
                     >
                       {note.flagged ? "★ Flagged" : "☆ Flag"}
                     </Button>
-                    <Button size="xs" variant="quiet" onClick={() => void retireNote(note)}>
+                    <Button
+                      size="xs"
+                      variant="quiet"
+                      disabled={pending.has(note.id)}
+                      onClick={() => void retireNote(note)}
+                    >
                       Retire
                     </Button>
                   </div>

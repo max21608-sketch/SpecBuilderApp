@@ -65,12 +65,27 @@ export async function PATCH(
 
   // Predicated on the version, so a stale tab writes zero rows rather than
   // silently overwriting somebody else's change.
+  //
+  // WHO RETIRED IT, AND WHEN, IS STAMPED ONCE: on the move INTO retired. The
+  // stamp read the patch's target status, so flagging a note that was already
+  // retired re-stamped it with whoever flagged it and today's date — and the
+  // trail then named the wrong person. Decided on the row's OWN status in the
+  // same statement (a SET reads the old value), never on the read above, which
+  // a concurrent change could have moved. Leaving retired clears both.
   const rows = await sql`
     update project_notes
     set status = ${nextStatus},
         flagged = ${nextFlagged},
-        retired_at = ${nextStatus === "retired" ? new Date().toISOString() : null},
-        retired_by = ${nextStatus === "retired" ? user.email : null},
+        retired_at = case
+          when ${nextStatus}::text <> 'retired' then null
+          when status = 'retired' then retired_at
+          else now()
+        end,
+        retired_by = case
+          when ${nextStatus}::text <> 'retired' then null
+          when status = 'retired' then retired_by
+          else ${user.email}::text
+        end,
         updated_by = ${user.email}
     where id = ${noteId} and project_id = ${id} and version = ${version}
     returning id, status, flagged, version
