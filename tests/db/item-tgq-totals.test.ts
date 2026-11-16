@@ -65,7 +65,10 @@ describeIfDb("an item's TGQ, and totals equal to their lines", () => {
       )
     ).rows[0].id;
     const mapped = (
-      await client.query(`select item_category_id as id from spec_matrix_category_map order by item_category_id limit 1`)
+      await client.query(
+        `select m.item_category_id as id from spec_matrix_category_map m
+           join item_categories c on c.id = m.item_category_id order by c.slug limit 1`,
+      )
     ).rows[0].id as string;
     const placeholder = (
       await client.query(

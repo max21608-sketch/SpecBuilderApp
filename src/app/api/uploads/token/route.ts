@@ -20,12 +20,10 @@ import { json, sql } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { UPLOAD_CONTENT_TYPES } from "@/lib/intake-source-types";
 import { assertProjectScopedPathname, UntrustedBlobError } from "@/lib/blob-source";
-import { requireWriter } from "@/lib/route-guards";
+import { isUuid, requireWriter } from "@/lib/route-guards";
 import { explainFailure } from "@/lib/error-detail";
 
 const MAX_UPLOAD_BYTES = 30 * 1024 * 1024; // 30MB — comfortably above the largest known sample (12.4MB)
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: Request): Promise<Response> {
   const user = await getSessionUser();
@@ -46,7 +44,7 @@ export async function POST(request: Request): Promise<Response> {
       request,
       onBeforeGenerateToken: async (pathname, clientPayload) => {
         const projectId = typeof clientPayload === "string" ? clientPayload.trim() : "";
-        if (!UUID.test(projectId)) {
+        if (!isUuid(projectId)) {
           throw new UntrustedBlobError("An upload must say which project it belongs to.");
         }
         // Throws unless the pathname is inside this project's prefix. The

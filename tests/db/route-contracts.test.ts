@@ -71,11 +71,6 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
-// Three export routes carry `import "server-only"`, which resolves only inside
-// Next's bundler. It has no exports; an empty module is what it is everywhere
-// but the client bundle.
-vi.mock("server-only", () => ({}));
-
 // The queue consumer's work. A stub, so a forged message that got through
 // would be COUNTED here rather than run against anything.
 vi.mock("@/lib/extraction-run", async (importOriginal) => {

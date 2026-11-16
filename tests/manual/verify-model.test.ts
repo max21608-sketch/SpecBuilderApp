@@ -64,7 +64,8 @@ describeIfEnabled("one real model call", () => {
       const category = (
         await c.query(
           `select c.id, c.name from item_categories c join requirements q on q.category_id=c.id
-           group by c.id, c.name having count(q.id) >= 5 order by c.id limit 1`,
+           where c.created_by = 'seed'
+           group by c.id, c.name having count(q.id) >= 5 order by c.slug limit 1`,
         )
       ).rows[0];
 

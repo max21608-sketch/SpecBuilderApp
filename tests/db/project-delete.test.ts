@@ -194,7 +194,8 @@ describeIfDb("0055 a project is deletable", () => {
     // A sent chase and its coverage: RESTRICT on the project, the record and
     // the answer.
     const requirement = await one<{ id: string }>(
-      `select id from requirements where spec_field_id is null and created_by = 'seed' order by id limit 1`,
+      `select q.id from requirements q join item_categories c on c.id = q.category_id
+        where c.slug = 'consoles-desks-dressing-tables' and q.seed_key = 'q:toe-agreement'`,
     );
     const { id: answerId } = await one<{ id: string }>(
       `insert into spec_answers (record_id, requirement_id, state) values ($1, $2, 'missing') returning id`,

@@ -72,8 +72,9 @@ describeIfDb("spec document review", () => {
     const category = await client.query(
       `select c.id from item_categories c
        join requirements q on q.category_id = c.id
+       where c.created_by = 'seed'
        group by c.id having count(q.id) >= 3
-       order by c.id limit 1`,
+       order by c.slug limit 1`,
     );
     categoryId = category.rows[0].id;
 
@@ -115,9 +116,9 @@ describeIfDb("spec document review", () => {
     const otherCategory = await client.query(
       `select c.id from item_categories c
        join requirements q on q.category_id = c.id
-       where c.id <> $1
+       where c.id <> $1 and c.created_by = 'seed'
        group by c.id having count(q.id) >= 1
-       order by c.id limit 1`,
+       order by c.slug limit 1`,
       [categoryId],
     );
     otherCategoryId = otherCategory.rows[0].id;
@@ -457,7 +458,9 @@ describeIfDb("spec document review", () => {
 
   it("refuses a question from another category, and writes nothing", async () => {
     const foreign = await client.query(
-      `select id from requirements where category_id <> $1 order by id limit 1`,
+      `select q.id from requirements q join item_categories c on c.id = q.category_id
+        where q.category_id <> $1 and c.created_by = 'seed' and q.created_by = 'seed'
+        order by c.slug, q.sort_order limit 1`,
       [categoryId],
     );
     const a = proposal({
@@ -636,7 +639,9 @@ describeIfDb("spec document review", () => {
 
   it("refuses a question outside the chosen record's category", async () => {
     const foreign = await client.query(
-      `select id from requirements where category_id <> $1 order by id limit 1`,
+      `select q.id from requirements q join item_categories c on c.id = q.category_id
+        where q.category_id <> $1 and c.created_by = 'seed' and q.created_by = 'seed'
+        order by c.slug, q.sort_order limit 1`,
       [categoryId],
     );
     const a = proposal();

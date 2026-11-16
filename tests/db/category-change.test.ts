@@ -283,7 +283,7 @@ describeIfDb("changing a record's category", () => {
     const requirement = await client.query(
       `select q.id from requirements q where q.category_id = $1
           and not exists (select 1 from spec_answers a where a.record_id = $2 and a.requirement_id = q.id)
-        limit 1`,
+        order by q.sort_order limit 1`,
       [fromCategory.id, recordId],
     );
     if (requirement.rows[0]) {

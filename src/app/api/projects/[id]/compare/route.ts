@@ -9,9 +9,7 @@
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { compareChangeSets } from "@/lib/baselines";
-import { requireUuid } from "@/lib/route-guards";
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { isUuid, requireUuid } from "@/lib/route-guards";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
@@ -23,7 +21,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const url = new URL(request.url);
   const from = url.searchParams.get("from") ?? "";
   const to = url.searchParams.get("to") ?? "";
-  if (!UUID.test(from) || !UUID.test(to)) {
+  if (!isUuid(from) || !isUuid(to)) {
     return json({ ok: false, error: "Give two points to compare." }, 400);
   }
   if (from === to) {

@@ -109,8 +109,9 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
       `select c.id from item_categories c
          join requirements q on q.category_id = c.id
         where c.id not in (select item_category_id from spec_matrix_category_map)
+          and c.created_by = 'seed'
         group by c.id having count(q.id) >= 3
-        order by c.id limit 1`,
+        order by c.slug limit 1`,
     );
     categoryId = category.rows[0].id;
 
@@ -253,7 +254,10 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
   // questions that happen to be outstanding.
   it("counts a level-less matrix record under its designer, by itemTgq", async () => {
     const mapped = (
-      await client.query(`select item_category_id as id from spec_matrix_category_map order by item_category_id limit 1`)
+      await client.query(
+        `select m.item_category_id as id from spec_matrix_category_map m
+           join item_categories c on c.id = m.item_category_id order by c.slug limit 1`,
+      )
     ).rows[0].id as string;
     const before = await readOwed();
     const record = await client.query(

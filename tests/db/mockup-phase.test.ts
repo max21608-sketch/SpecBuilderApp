@@ -70,7 +70,8 @@ describeIfDb("the mock-up phase", () => {
     ).rows[0].id;
     const category = (
       await client.query(
-        `select category_id, count(*)::int as n from requirements group by category_id order by n desc limit 1`,
+        `select q.category_id, count(*)::int as n from requirements q join item_categories c on c.id = q.category_id
+          where c.created_by = 'seed' group by q.category_id, c.slug order by n desc, c.slug limit 1`,
       )
     ).rows[0];
     categoryId = String(category.category_id);

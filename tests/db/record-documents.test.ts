@@ -165,7 +165,12 @@ describeIfDb("the documents behind a record", () => {
     await note(recordId, oldDrawingRunId, 5, true);
 
     // An answer confirmed off the email: source_id is the email's intake run.
-    const requirement = await client.query(`select id, spec_field_id from requirements order by id limit 1`);
+    // By category slug and seed key, never by uuid order (CLAUDE.md, the
+    // four test tiers): a fresh database rolls different uuids.
+    const requirement = await client.query(
+      `select q.id, q.spec_field_id from requirements q join item_categories c on c.id = q.category_id
+        where c.slug = 'consoles-desks-dressing-tables' and q.seed_key = 'q:toe-agreement'`,
+    );
     await client.query(
       `insert into spec_answers (record_id, requirement_id, spec_field_id, value, state, source_kind, source_id,
                                  created_by, updated_by)
@@ -176,7 +181,10 @@ describeIfDb("the documents behind a record", () => {
     // An answer COMPOSED from the drawing's specs (0050's `attribute`): its
     // source_id is the drawing's run, and it is that document's answer as much
     // as an email's is the email's.
-    const composed = await client.query(`select id, spec_field_id from requirements order by id offset 1 limit 1`);
+    const composed = await client.query(
+      `select q.id, q.spec_field_id from requirements q join item_categories c on c.id = q.category_id
+        where c.slug = 'consoles-desks-dressing-tables' and q.seed_key = 'field:3'`,
+    );
     await client.query(
       `insert into spec_answers (record_id, requirement_id, spec_field_id, value, state, source_kind, source_id,
                                  confirmed_by, confirmed_at, created_by, updated_by)

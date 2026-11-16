@@ -13,6 +13,7 @@
 // blob-source carried it for one evening and four backfills failed with
 // ERR_MODULE_NOT_FOUND. This walk is the guard for both, and it runs in the
 // pure tier on every push rather than only when somebody builds.
+import { builtinModules } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -20,9 +21,55 @@ import { describe, expect, it } from "vitest";
 const ROOT = path.resolve(__dirname, "../..");
 const SRC = path.join(ROOT, "src");
 
-/** Modules a browser bundle must never contain. */
-const SERVER_FILES = new Set(["src/lib/db.ts", "src/lib/blob-source.ts"].map((file) => path.join(ROOT, file)));
-const SERVER_PACKAGES = new Set(["@neondatabase/serverless", "pg", "@vercel/blob", "server-only"]);
+/**
+ * Modules a browser bundle must never contain. Widened by review 5.3
+ * (2026-11-16) from the driver and the blob SDK to everything that holds a
+ * credential or a session, or runs only on a server: the session and auth
+ * modules (they read the cookie and sign the token), the Graph and Capsule
+ * clients (they hold the service credentials), the model SDK, the queue,
+ * `jose`, `next/headers`, `exceljs` (a workbook is read on the server; no
+ * screen parses one) and every Node built-in.
+ */
+const SERVER_FILES = new Set(
+  [
+    "src/lib/db.ts",
+    "src/lib/blob-source.ts",
+    "src/lib/session.ts",
+    "src/lib/auth.ts",
+    "src/lib/graph-client.ts",
+    "src/lib/capsule.ts",
+  ].map((file) => path.join(ROOT, file)),
+);
+const SERVER_PACKAGES = new Set([
+  "@neondatabase/serverless",
+  "pg",
+  "@vercel/blob",
+  "server-only",
+  "@anthropic-ai/sdk",
+  "@vercel/queue",
+  "jose",
+  "exceljs",
+  "next/headers",
+]);
+
+/** A Node built-in, as `node:fs` or as bare `fs` — or a subpath of one, `fs/promises`. */
+function isNodeBuiltin(spec: string): boolean {
+  return spec.startsWith("node:") || builtinModules.includes(spec.split("/")[0]!);
+}
+
+/**
+ * The ONE subpath of a forbidden package a screen legitimately imports:
+ * `@vercel/blob/client` is the browser half of the client-direct upload, and
+ * it carries no credential (the token comes from `/api/uploads/token`).
+ */
+const BROWSER_SUBPATHS = new Set(["@vercel/blob/client"]);
+
+function isServerPackage(spec: string): boolean {
+  if (SERVER_PACKAGES.has(spec) || isNodeBuiltin(spec)) return true;
+  if (BROWSER_SUBPATHS.has(spec)) return false;
+  // A subpath of a forbidden package (`@anthropic-ai/sdk/resources`, `jose/jwt/sign`).
+  return [...SERVER_PACKAGES].some((name) => spec.startsWith(`${name}/`));
+}
 
 function walk(dir: string, into: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -80,7 +127,7 @@ function chainToServer(file: string, seen = new Map<string, string[] | null>(), 
   visiting.add(file);
   let chain: string[] | null = null;
   for (const spec of runtimeImports(file)) {
-    if (SERVER_PACKAGES.has(spec)) {
+    if (isServerPackage(spec)) {
       chain = [file, spec];
       break;
     }
@@ -104,13 +151,25 @@ describe("the client/server boundary", () => {
     expect(clientFiles.length).toBeGreaterThan(50);
   });
 
-  it("no client component imports the database driver or the blob store's server SDK", () => {
+  it("no client component imports a server-only module: the driver, the blob SDK, a session, a credential, a built-in", () => {
     const seen = new Map<string, string[] | null>();
     const leaks = clientFiles
       .map((file) => chainToServer(file, seen))
       .filter((chain): chain is string[] => chain !== null)
       .map((chain) => chain.map((step) => (path.isAbsolute(step) ? path.relative(ROOT, step) : step)).join(" -> "));
     expect(leaks).toEqual([]);
+  });
+
+  it("would see the widened list: a built-in, a credential module, a subpath, and not the upload client", () => {
+    expect(isServerPackage("node:crypto")).toBe(true);
+    expect(isServerPackage("crypto")).toBe(true);
+    expect(isServerPackage("fs/promises")).toBe(true);
+    expect(isServerPackage("jose")).toBe(true);
+    expect(isServerPackage("@anthropic-ai/sdk/resources")).toBe(true);
+    expect(isServerPackage("next/headers")).toBe(true);
+    expect(isServerPackage("@vercel/blob/client")).toBe(false);
+    expect(isServerPackage("next/navigation")).toBe(false);
+    expect(chainToServer(path.join(SRC, "lib/session.ts"))).toEqual([path.join(SRC, "lib/session.ts")]);
   });
 
   it("would see a leak: the walk, pointed at a module that imports db.ts, names the chain", () => {

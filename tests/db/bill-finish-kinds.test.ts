@@ -147,7 +147,8 @@ describeIfDb("a bill's finish lines, filed by kind", () => {
     const category = (
       await client.query(
         `select q.category_id from requirements q join spec_fields f on f.id = q.spec_field_id
-          where f.json_id in (1, 2, 14, 4, 5) group by q.category_id having count(distinct f.json_id) = 5 limit 1`,
+          where f.json_id in (1, 2, 14, 4, 5) group by q.category_id having count(distinct f.json_id) = 5
+          order by (select c.slug from item_categories c where c.id = q.category_id) limit 1`,
       )
     ).rows[0]?.category_id as string;
     expect(category).toBeTruthy();

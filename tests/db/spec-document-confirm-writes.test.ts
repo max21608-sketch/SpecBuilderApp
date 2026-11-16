@@ -67,7 +67,7 @@ describeIfDb("a specification-document confirm over specs another document holds
         where f.json_id = 3
           and exists (select 1 from requirements c join spec_fields cf on cf.id = c.spec_field_id
                        where c.category_id = q.category_id and cf.json_id = 1)
-        order by q.category_id limit 1`,
+        order by (select c.slug from item_categories c where c.id = q.category_id) limit 1`,
     );
     categoryId = String(category.rows[0].category_id);
     com1FieldId = String((await client.query(`select id from spec_fields where json_id = 1`)).rows[0].id);

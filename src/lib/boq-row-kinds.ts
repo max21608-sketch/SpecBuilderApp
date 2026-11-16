@@ -61,9 +61,6 @@ export const BOQ_ROW_KIND_LABELS: Record<BoqRowKind, string> = {
   blank: "Blank",
 };
 
-/** The kinds that are not a thing to make, and are ignored until somebody says otherwise. */
-export const IGNORED_ROW_KINDS: readonly BoqRowKind[] = ["section", "subtotal", "blank"];
-
 /** Why such a line is ignored, printed where the Include box is. */
 export const IGNORED_BECAUSE: Record<"section" | "subtotal" | "blank", string> = {
   section: "a section heading, not an item",

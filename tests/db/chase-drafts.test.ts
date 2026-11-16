@@ -648,7 +648,7 @@ describeIfDb("chase drafts", () => {
        join spec_matrix_category_map m on m.item_category_id = c.id
        join requirements q on q.category_id = c.id
        group by c.id having count(q.id) >= 1
-       order by c.id limit 1`,
+       order by c.slug limit 1`,
     );
     const coveredCategoryId = covered.rows[0].id;
     const matrixRecord = await client.query(
@@ -783,7 +783,8 @@ describeIfDb("chase drafts", () => {
     // A question from a DIFFERENT category: the stale-tab case after somebody
     // changed the record's category, or a crafted pair.
     const elsewhere = await client.query(
-      `select q.id from requirements q where q.category_id <> $1 order by q.id limit 1`,
+      `select q.id from requirements q join item_categories c on c.id = q.category_id
+        where q.category_id <> $1 and c.created_by = 'seed' order by c.slug, q.sort_order limit 1`,
       [categoryId],
     );
     const res = await generate({}, [{ recordId, requirementId: elsewhere.rows[0].id }]);
