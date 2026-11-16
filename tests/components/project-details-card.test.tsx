@@ -137,3 +137,19 @@ describe("ProjectDetailsCard", () => {
     expect(screen.getByText("Somebody Else")).toBeTruthy();
   });
 });
+
+// Review 3.10 (2026-11-16): `truncate` on every value cut the project's own
+// name to "TEST: Aman pack in full (2026-10-…" in a card with room to spare.
+describe("a details value", () => {
+  it("wraps rather than being cut, and the BWS number stays on one line", () => {
+    const long = "Invented Hotel and Residences, the whole name of it (2026-10-04)";
+    const { container } = render(
+      <ProjectDetailsCard project={{ ...project, name: long }} onSaved={vi.fn()} onError={vi.fn()} />,
+    );
+    const name = screen.getByText(long);
+    expect(name.closest(".truncate")).toBeNull();
+    expect(name.className).toContain("[overflow-wrap:anywhere]");
+    expect(container.querySelector("#project-details .truncate")).toBeNull();
+    expect(screen.getByText("ZZ900").className).toContain("whitespace-nowrap");
+  });
+});
