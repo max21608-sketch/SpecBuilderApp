@@ -326,3 +326,41 @@ describe("boqConfirmBlocker — the reason beside a disabled Confirm", () => {
     expect(boqConfirmBlocker({ ...none, noLiveLines: true })).toBe("Every line is dropped, so there is nothing to confirm.");
   });
 });
+
+describe("a bracket makes a finish line only where the line also looks like a finish (C8)", () => {
+  it("reads `CH-02 (CH-01)` — “as CH-01” — as an ITEM, flagged, never as CH-01's fabric", () => {
+    const [first, second] = applyBracketRule([
+      line(5, "ZZ-CH-01", { itemDescription: "Dining chair" }),
+      line(6, "ZZ-CH-02 (ZZ-CH-01)", { itemDescription: "Dining chair, carver" }),
+    ]);
+    expect(first?.rowKind).toBeUndefined();
+    expect(second?.rowKind).toBeUndefined();
+    expect(second?.finishFor).toBeUndefined();
+    expect(second?.code).toBe("ZZ-CH-02 (ZZ-CH-01)");
+    expect(second?.rowKindFlag).toMatch(/names ZZ-CH-01 in brackets, and row 5 carries it, but nothing else on this line says it is a finish/);
+    expect(second?.rowKindFlag).toMatch(/Read as an item line, with its client ref exactly as printed/);
+  });
+
+  it("reads `CH-01 (TO BE CONFIRMED)` as an item whose ref carries the bill's qualifier, said in words", () => {
+    const [only] = applyBracketRule([line(8, "ZZ-CH-01 (TO BE CONFIRMED )", { itemDescription: "Pouffe" })]);
+    expect(only?.rowKind).toBeUndefined();
+    expect(only?.code).toBe("ZZ-CH-01 (TO BE CONFIRMED )");
+    expect(only?.rowKindFlag).toMatch(/The client ref carries “\(TO BE CONFIRMED\)” — the bill's own qualifier/);
+    expect(only?.rowKindFlag).not.toMatch(/fabric/);
+  });
+
+  it("still places, unflagged, a line whose code or words say it is a finish", () => {
+    const byCode = applyBracketRule([line(9, "ZZ-FUR-10"), line(10, "ZZ-FAB-13 (ZZ-FUR-10)", { itemDescription: "Collection TBC" })]);
+    expect(byCode[1]).toMatchObject({ rowKind: "finish_for", rowKindFlag: null, finishFor: { row: 9 } });
+    const byWords = applyBracketRule([line(9, "ZZ-SF-01"), line(10, "ZZ-X-1 (ZZ-SF-01)", { itemDescription: "Fabric @ Sofa" })]);
+    expect(byWords[1]).toMatchObject({ rowKind: "finish_for", rowKindFlag: null, finishFor: { row: 9 } });
+    const twoPart = applyBracketRule([line(9, "ZZ-SF-01"), line(10, "FAB-19 (ZZ-SF-01)", { itemDescription: "Main upholstery" })]);
+    expect(twoPart[1]).toMatchObject({ rowKind: "finish_for", finishFor: { row: 9 } });
+  });
+
+  it("names a cloth's name as no evidence: “Velvet sofa (ZZ-SF-01)” is a sofa", () => {
+    const [, sofa] = applyBracketRule([line(1, "ZZ-SF-01"), line(2, "ZZ-SF-02 (ZZ-SF-01)", { itemDescription: "Velvet sofa" })]);
+    expect(sofa?.rowKind).toBeUndefined();
+    expect(sofa?.rowKindFlag).toMatch(/Read as an item line/);
+  });
+});

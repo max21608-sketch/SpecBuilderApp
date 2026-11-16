@@ -43,6 +43,7 @@
 // ============================================================================
 import { endsOnSegment, expandZoneList, normaliseRef } from "@/lib/record-refs";
 import { DEFERRED_TO_SOMEBODY_PHRASES, TBC_TOKENS, containsPhrase } from "@/lib/spec-vocab";
+import { CODE_PREFIXES, billFinishCodeKind, projectCodeKind } from "@/lib/material-words";
 
 /** What a row of a bill IS. Order is the review's select order. */
 export const BOQ_ROW_KINDS = ["item", "finish_for", "section", "subtotal", "blank"] as const;
@@ -122,6 +123,44 @@ export function fabricCodeOf(code: string | null | undefined): string | null {
   return raw;
 }
 
+/**
+ * The words that say a bill line IS A FINISH, whole words of its description.
+ * Generic finish nouns only: a cloth's name ("velvet", "linen") or a part
+ * ("upholstered") describes ITEMS just as often — "Velvet sofa" is a sofa.
+ */
+const FINISH_LINE_WORDS = new Set(["fabric", "fabrics", "com", "col", "leather", "textile", "trim", "trims", "finish", "finishes", "vinyl"]);
+
+type BracketLine = KindLine & { itemDescription?: string | null; finishCode?: string | null };
+
+/**
+ * DOES A BRACKETED LINE ALSO LOOK LIKE A FINISH? (audit C8, 2026-11-16)
+ *
+ * The bracket alone is not enough: `CH-02 (CH-01)` is a bill saying "CH-02, as
+ * CH-01" — an ITEM — and the rule read it as a fabric line for CH-01,
+ * unflagged, so CH-02 vanished into CH-01's specs. So the bracket's reading is
+ * taken unflagged only where the line ALSO says it is a finish: its own code
+ * is a finish code (`GR-FAB-13`, `FAB-19`, `F-FA-05`), its description names a
+ * finish noun ("Fabric @ Stool"), or it carries a finish code of its own (a
+ * COM CODE). Every bracketed line on the real Aman bill passes on two of the
+ * three.
+ */
+function bracketLineLooksLikeFinish(line: BracketLine, fabricCode: string | null): boolean {
+  if (line.finishCode?.trim()) return true;
+  if (fabricCode) {
+    if (billFinishCodeKind(fabricCode) || projectCodeKind(fabricCode)) return true;
+    const lead = /^([A-Za-z]{2,4})[-\s]?\d/.exec(fabricCode.trim())?.[1]?.toLowerCase();
+    if (lead && CODE_PREFIXES.some((entry) => entry.prefix === lead)) return true;
+  }
+  const words = (line.itemDescription ?? "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return words.some((word) => FINISH_LINE_WORDS.has(word));
+}
+
+/** The bracket says the line is not decided ("TO BE CONFIRMED"), rather than naming a line. */
+function bracketIsTbc(itemRef: string): boolean {
+  const folded = itemRef.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return TBC_TOKENS.some((token) => folded === token || containsPhrase(folded, token));
+}
+
 /** An item line: anything not already a fabric line and not bracketed itself. */
 function isItemCandidate(line: KindLine): boolean {
   if (line.rowKind && line.rowKind !== "item") return false;
@@ -132,7 +171,7 @@ function isItemCandidate(line: KindLine): boolean {
  * THE ONE RULE CODE APPLIES ON ITS OWN. Returns a new list; a line that already
  * carries a kind (a person's, a model's) is left exactly as it is.
  */
-export function applyBracketRule<T extends KindLine>(lines: readonly T[]): T[] {
+export function applyBracketRule<T extends BracketLine>(lines: readonly T[]): T[] {
   const byRef = new Map<string, T[]>();
   for (const line of lines) {
     if (!line.code || !isItemCandidate(line)) continue;
@@ -146,6 +185,27 @@ export function applyBracketRule<T extends KindLine>(lines: readonly T[]): T[] {
     const bracket = parseBracketCode(line.code);
     if (!bracket) return line;
     const candidates = (byRef.get(normaliseRef(bracket.itemRef)) ?? []).filter((other) => other !== line);
+
+    // NOT A FINISH BY ANYTHING BUT ITS BRACKET (C8): an ITEM line, its client
+    // ref kept exactly as printed, and a flag saying what the bracket said —
+    // never a fabric placed on another item, and never a ref silently changed.
+    if (!bracketLineLooksLikeFinish(line, bracket.fabricCode)) {
+      const rows = candidates.map((other) => other.lineNo);
+      const said =
+        candidates.length === 0
+          ? bracketIsTbc(bracket.itemRef)
+            ? `The client ref carries “(${bracket.itemRef})” — the bill's own qualifier, not another code.`
+            : `The code names ${bracket.itemRef} in brackets, and no line on this sheet carries it.`
+          : `The code names ${bracket.itemRef} in brackets, and ${
+              rows.length === 1 ? `row ${rows[0]} carries it` : `rows ${listWords(rows.map(String))} carry it`
+            }, but nothing else on this line says it is a finish.`;
+      return {
+        ...line,
+        rowKindFlag:
+          `${said} Read as an item line, with its client ref exactly as printed — check the ref` +
+          `${candidates.length > 0 ? `, or choose “Finish for…” if it is that item's finish` : ""}.`,
+      };
+    }
 
     if (candidates.length === 1) {
       const parent = candidates[0] as T;

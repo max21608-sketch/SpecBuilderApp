@@ -310,6 +310,18 @@ columns are plainly there was a dead end because of the words above them. Max:
   the nearer one ABOVE, flagged; otherwise only the model or a person places
   it. **The bracket alone placed 5 of 34** on the real bill (brackets such as
   `GR / MUR-FUR--04` name no item code); the model's reading placed all 34.
+  **The bracket counts only where the line ALSO looks like a finish**
+  (2026-11-16, audit C8, `bracketLineLooksLikeFinish`): its own code is a
+  finish code (`GR-FAB-13`, `FAB-19`, `F-FA-05`), its description names a
+  generic finish noun (fabric, COM, COL, leather, trim, finish…, never a
+  cloth's name — "Velvet sofa" is a sofa), or it carries a COM code.
+  Otherwise `CH-02 (CH-01)` ("as CH-01") is an ITEM, not CH-01's fabric, and
+  `CH-01 (TO BE CONFIRMED)` (the Ronnie Scott's schedule, found in use
+  2026-10-15) is an item whose ref carries the bill's qualifier: both stay
+  item lines, the client ref exactly as printed — never stripped, which would
+  change the pre-sale key silently — with an amber flag saying what the
+  bracket said. Every bracketed line on both Aman copies passes; `boq:gap`
+  moved only the Ronnie Scott's row 8 sentence.
   The confirm writes the description verbatim into the next free slot OF ITS
   KIND on that record (since 2026-10-06 — see the next section; it was "the
   next free COM slot" for every line), files the code through
