@@ -10,6 +10,7 @@ import { loadRecordBaselines } from "@/lib/baselines";
 import { parseAtoms } from "@/lib/snapshot-diff";
 import type { StoredCell } from "@/lib/record-snapshot";
 import { requireUuid } from "@/lib/route-guards";
+import { reportFailure } from "@/lib/error-detail";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
@@ -77,9 +78,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
             .filter((answer) => !touched.has(answer.requirementId))
             .map((answer) => ({ key: answer.requirementId, label: answer.prompt, value: answer.value })),
         ];
-      } catch {
+      } catch (cause) {
         // A version a newer build wrote. The diff above already reported that;
         // an empty unchanged list is better than failing the whole comparison.
+        // Logged, so a list that came back empty for another reason is traceable.
+        reportFailure(`listing the unchanged specs of record ${id}`, cause);
       }
     }
 
