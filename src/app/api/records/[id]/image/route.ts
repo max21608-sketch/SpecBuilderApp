@@ -21,11 +21,9 @@ import { blobPathname, streamTrustedBlob, UntrustedBlobError } from "@/lib/blob-
 import { pictureServing } from "@/lib/picture-types";
 import { ITEM_IMAGE_ALTERNATIVE_KIND, ITEM_IMAGE_KIND } from "@/lib/item-image";
 import { contentDisposition } from "@/lib/content-disposition";
-import { requireUuid } from "@/lib/route-guards";
+import { isUuid, requireUuid } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
@@ -40,7 +38,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   // among this record's own picture rows and nothing else, so it can only ever
   // reach a file this record already points at.
   const attachmentId = new URL(request.url).searchParams.get("attachment");
-  if (attachmentId !== null && !UUID.test(attachmentId)) {
+  if (attachmentId !== null && !isUuid(attachmentId)) {
     return json({ ok: false, error: "That record has no such image." }, 404);
   }
   const rows = attachmentId

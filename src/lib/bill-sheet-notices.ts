@@ -36,6 +36,8 @@
 // the confirm, on the review; and after it, on the phase, once.
 // ============================================================================
 
+import { readQuantity, WHOLE } from "@/lib/printed-number";
+
 /** The cells that say "not in the mock-up", folded (case, whitespace). */
 export const MOCKUP_NOT_APPLICABLE: readonly string[] = ["n/a", "na", "-", "0", "none"];
 
@@ -63,12 +65,15 @@ export function readMockupQty(raw: string | null | undefined): MockupQtyReading 
   // Every dash is a dash: a bill typed in Word writes "–" for "-".
   const folded = cell.toLowerCase().replace(/[‐-―−]/g, "-");
   if (MOCKUP_NOT_APPLICABLE.includes(folded)) return { on: false };
-  // A WHOLE number only: `spec_records.qty` is an integer, and "1.5" in a
-  // prototype column is a statement to quote, not a count to round.
-  if (/^\d{1,6}$/.test(cell)) {
-    const qty = Number(cell);
-    if (qty === 0) return { on: false };
-    return { on: true, qty, note: null };
+  // A WHOLE number only, read by THE ONE READER (`printed-number.ts`):
+  // `spec_records.qty` is an integer, "1.5" in a prototype column is a
+  // statement to quote, not a count to round, and `1,200` is refused there
+  // rather than guessed — so it is quoted here too. A BARE count only: the
+  // reader strips a unit word (`2 nr`), and this column has always quoted one.
+  const reading = readQuantity(cell);
+  if (reading.ok && WHOLE.test(cell)) {
+    if (reading.qty === 0) return { on: false };
+    if (reading.qty > 0) return { on: true, qty: reading.qty, note: null };
   }
   return { on: true, qty: null, note: mockupQtyNote(cell) };
 }

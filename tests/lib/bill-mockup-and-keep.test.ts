@@ -235,6 +235,14 @@ describe("the mock-up cell", () => {
     expect(readMockupQty("1.5")).toEqual({ on: true, qty: null, note: "Prototype quantity on the bill: 1.5" });
     expect(readMockupQty("2 nr")).toEqual({ on: true, qty: null, note: "Prototype quantity on the bill: 2 nr" });
   });
+
+  // Read by `printed-number.ts`, the one reader: a thousands-or-decimal group
+  // is REFUSED there, so here it is quoted, never read as 1200 or as 1.2.
+  it("quotes a refused number in the cell's own words, and never guesses it", () => {
+    for (const cell of ["1,200", "1.200", "1,5", "-2", "1e3"]) {
+      expect(readMockupQty(cell)).toEqual({ on: true, qty: null, note: `Prototype quantity on the bill: ${cell}` });
+    }
+  });
 });
 
 describe("the sheet's notices", () => {

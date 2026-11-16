@@ -2,7 +2,7 @@
 // Moved out of src/app/api/imports/[id]/route.ts on 2026-11-07 (audit 5.3, cut D); the route is now the dispatcher.
 
 import { billSheetNotices } from "@/lib/bill-sheet-notices";
-import { numberingFromRow, recordLabel } from "@/lib/record-label";
+import { numberingFromRow, recordLabel, recordShortLabel } from "@/lib/record-label";
 import { z } from "zod";
 import { sql, json, type Row } from "@/lib/db";
 import { withTransaction, transactionErrorResponse, DomainConflictError, type TxnSql } from "@/lib/db-transaction";
@@ -127,7 +127,13 @@ export async function getBillReview(run: Row): Promise<Response> {
         hasImage: Boolean(row.has_image),
         settledAnswers: Number(row.settled_answers),
         configurations: ((row.configuration_ordinals as unknown[] | null) ?? []).map(
-          (ordinal) => `${Number(row.record_no)}.${Number(ordinal)}`,
+          // `12.3`, composed where every configuration label is (record-label.ts).
+          (ordinal) =>
+            recordShortLabel({
+              recordNo: Number(row.record_no),
+              parentRecordNo: Number(row.record_no),
+              variantOrdinal: Number(ordinal),
+            }),
         ),
       });
       const existing = recordRows.filter((row) => row.status === "active").map(toExisting);
@@ -522,12 +528,6 @@ export async function patchBoqLine(
   if (decision?.field === "level") patch.levelCarriedFrom = null;
   if (decision?.field === "category") patch.categoryCarriedFrom = null;
 
-  const setLine = (targetSheet: number, targetIndex: number, targetPatch: Record<string, unknown>) => ({
-    sheetPath: String(targetSheet),
-    linePath: String(targetIndex),
-    body: JSON.stringify(targetPatch),
-  });
-
   // The ordinary edit: ONE statement, merged into whatever is live at that
   // address rather than writing back an array the client sent.
   if (!decision) {
@@ -582,15 +582,34 @@ export async function patchBoqLine(
       const sheets = ((staged[0].parsed as { sheets?: CarrySheet[] } | null)?.sheets ?? []) as CarrySheet[];
       const targets = planCarry(sheets, { sheetIndex, index }, decision);
 
-      const primary = setLine(sheetIndex, index, patch);
+      // ONE WRITE FOR THE PRESS (review 5.4): the source row's patch, then each
+      // receiver's, folded IN THAT ORDER by the same `jsonb_set(… coalesce(line)
+      // || patch)` the per-line updates used to run one statement each — so the
+      // staged document is the same, byte for byte, and the version moves once.
+      // The fold starts from the row locked above, and the source line must
+      // still exist, as it had to before.
+      const writes = [
+        [sheetIndex, index, patch],
+        ...targets.map((target) => [target.sheetIndex, target.index, target.patch]),
+      ];
       const updated = await txn`
+        with recursive step as (
+          select w.ord::int as ord, (w.value->>0)::int as sheet, (w.value->>1)::int as line, w.value->2 as body
+            from jsonb_array_elements(${JSON.stringify(writes)}::jsonb) with ordinality as w(value, ord)
+        ),
+        fold(ord, doc) as (
+          select 0, parsed from intake_runs where id = ${id}
+          union all
+          select step.ord,
+                 jsonb_set(
+                   fold.doc,
+                   array['sheets', step.sheet::text, 'lines', step.line::text],
+                   coalesce(fold.doc->'sheets'->step.sheet->'lines'->step.line, '{}'::jsonb) || step.body
+                 )
+            from fold join step on step.ord = fold.ord + 1
+        )
         update intake_runs
-        set parsed = jsonb_set(
-              parsed,
-              array['sheets', ${primary.sheetPath}, 'lines', ${primary.linePath}],
-              coalesce(parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int), '{}'::jsonb)
-                || ${primary.body}::jsonb
-            ),
+        set parsed = (select doc from fold order by ord desc limit 1),
             updated_by = ${actor}
         where id = ${id}
           and status = 'parsed'
@@ -600,27 +619,7 @@ export async function patchBoqLine(
       if (!updated[0]) {
         throw new DomainConflictError("gone", "That line is no longer in this bill.");
       }
-
-      let version = updated[0].version as number;
-      for (const target of targets) {
-        const write = setLine(target.sheetIndex, target.index, target.patch);
-        const rows = await txn`
-          update intake_runs
-          set parsed = jsonb_set(
-                parsed,
-                array['sheets', ${write.sheetPath}, 'lines', ${write.linePath}],
-                coalesce(
-                  parsed->'sheets'->(${target.sheetIndex}::int)->'lines'->(${target.index}::int),
-                  '{}'::jsonb
-                ) || ${write.body}::jsonb
-              ),
-              updated_by = ${actor}
-          where id = ${id} and status = 'parsed'
-          returning version
-        `;
-        if (!rows[0]) throw new DomainConflictError("gone", "That line is no longer in this bill.");
-        version = rows[0].version as number;
-      }
+      const version = updated[0].version as number;
       return { version, carried: targets.length, tabs: listTabs(targets) };
     });
     return json({ ok: true, version: result.version, carried: result.carried, carriedTo: result.tabs });

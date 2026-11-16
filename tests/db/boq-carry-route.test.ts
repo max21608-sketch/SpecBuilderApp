@@ -123,12 +123,26 @@ describeIfDb("a decision carries across a bill's phases", () => {
   it("accepting a level on one tab fills it in on the others, marked as carried", async () => {
     const { PATCH } = await import("@/app/api/imports/[id]/route");
     const importId = await stage(threeTabs());
+    const before = await stagedVersion(client, importId);
+    const pre = await read(importId);
 
-    const res = await PATCH(patchRequest({ ...{ sheetIndex: 0, index: 0, level: "simple" }, version: await stagedVersion(client, importId) }), params(importId));
+    const res = await PATCH(patchRequest({ ...{ sheetIndex: 0, index: 0, level: "simple" }, version: before }), params(importId));
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.carried).toBe(2);
     expect(body.carriedTo).toBe("__QA MAIN RUN and __QA MAIN RUN - VE");
+    // ONE write for the press and its two receivers (review 5.4): the version
+    // moves once, and the one it returns is the one the client carries forward.
+    expect(body.version).toBe(before + 1);
+    expect(await stagedVersion(client, importId)).toBe(before + 1);
+    // Each changed line is ITS OWN line merged with the decision, and every
+    // other line is exactly as it was.
+    const post = await read(importId);
+    for (const [s, sheetLines] of post.entries()) {
+      expect(sheetLines.lines[1]).toEqual(pre[s]!.lines[1]);
+      expect(sheetLines.lines[0]).toEqual({ ...pre[s]!.lines[0], ...sheetLines.lines[0] });
+      expect(sheetLines.lines[0]!.itemDescription).toBe(pre[s]!.lines[0]!.itemDescription);
+    }
 
     const sheets = await read(importId);
     // The tab it was decided on says nothing about where it came from.
