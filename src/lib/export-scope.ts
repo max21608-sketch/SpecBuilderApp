@@ -21,7 +21,7 @@
 // question with an answer. This function keeps only the part that is genuinely
 // about scope: which records are in it.
 // ============================================================================
-import { sql } from "@/lib/db";
+import { withTransaction, type TxnSql } from "@/lib/db-transaction";
 import { exportAnswers, loadRecordAtoms, type RecordAtoms } from "@/lib/record-atoms";
 import type { ExportAnswer, ExportAttribute, ExportRecord, ExportScope } from "@/lib/bws-export";
 
@@ -40,6 +40,38 @@ export type LoadedExportScope = {
 export type ScopeFailure = { error: string; status: 404 | 409 };
 
 /**
+ * The scope's rows, in scope order, from the atoms loaded for it.
+ *
+ * A record the id list named and the atoms do not hold is a FAILURE, never a
+ * skipped row. A BWS import replaces rather than merges, so a file one record
+ * short wipes that record's fields on upload — the filtered-export trap with
+ * nobody having asked for a filter. The reads share one snapshot now, so this
+ * should be unreachable; it stays as the guard that makes a short file
+ * impossible rather than unlikely.
+ */
+export function collectScopeRows(
+  recordIds: string[],
+  atoms: Map<string, RecordAtoms>,
+): Pick<ExportScope, "records" | "attributes" | "answers"> | ScopeFailure {
+  const records: ExportRecord[] = [];
+  const attributes: ExportAttribute[] = [];
+  const answers: ExportAnswer[] = [];
+  for (const id of recordIds) {
+    const record = atoms.get(id);
+    if (!record) {
+      return {
+        error: "The project changed while this file was being built, so it could be missing an item. Download it again.",
+        status: 409,
+      };
+    }
+    records.push(record.record);
+    attributes.push(...record.attributes);
+    answers.push(...exportAnswers(record));
+  }
+  return { records, attributes, answers };
+}
+
+/**
  * Every active record in scope, with the attributes and confirmed answers that
  * compose its row.
  *
@@ -47,6 +79,22 @@ export type ScopeFailure = { error: string; status: 404 | 409 };
  * project" and "no such phase on this project" in the same words.
  */
 export async function loadExportScope(projectId: string, runId: string | null): Promise<LoadedExportScope | ScopeFailure> {
+  // ONE SNAPSHOT for every read below. The id list and the atoms were separate
+  // statements under READ COMMITTED, so a record retired or split between them
+  // was in the list and not in the atoms — and was silently dropped from a
+  // file whose import replaces. REPEATABLE READ makes every statement see the
+  // same committed state; READ ONLY because nothing here may write.
+  return withTransaction(async (sql) => {
+    await sql`set transaction isolation level repeatable read, read only`;
+    return loadExportScopeIn(sql, projectId, runId);
+  });
+}
+
+async function loadExportScopeIn(
+  sql: TxnSql,
+  projectId: string,
+  runId: string | null,
+): Promise<LoadedExportScope | ScopeFailure> {
   const projects = await sql`select id, bws_project_number, name, client from projects where id = ${projectId}`;
   const project = projects[0];
   if (!project) return { error: "No such project.", status: 404 };
@@ -125,17 +173,9 @@ export async function loadExportScope(projectId: string, runId: string | null): 
   `;
   const recordIds = idRows.map((row) => String(row.id));
   const atoms = await loadRecordAtoms(sql, recordIds);
-
-  const records: ExportRecord[] = [];
-  const attributes: ExportAttribute[] = [];
-  const answers: ExportAnswer[] = [];
-  for (const id of recordIds) {
-    const record = atoms.get(id);
-    if (!record) continue;
-    records.push(record.record);
-    attributes.push(...record.attributes);
-    answers.push(...exportAnswers(record));
-  }
+  const rows = collectScopeRows(recordIds, atoms);
+  if ("error" in rows) return rows;
+  const { records, attributes, answers } = rows;
 
   return {
     projectNumber: String(project.bws_project_number),
