@@ -533,6 +533,7 @@ in the UK.
 | What runs where, and what this app deliberately lacks | `docs/stack.md` |
 | Which deployment is which; the two naming traps | `docs/environments.md` |
 | Incident triage, recovery, rollback | `docs/recovery.md` |
+| The USERS' help file, given to Claude by a colleague who is stuck: how to do each job, what each message means, and the email to Max. It quotes screen text verbatim, so a change to a message, a button label or a limit changes this file too | `docs/help/spec-builder-help.md` |
 | External integrations: scope, setup, activation | `docs/integration.md` |
 | The BWS field grid: blocks, order, and how each field is written | `docs/bws-spec-grid.md` |
 | The design language: the eight rules, the tones, the primitives, the DOM traps | `docs/design-language.md` (and `/dashboard/design`) |
