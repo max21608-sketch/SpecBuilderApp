@@ -168,7 +168,7 @@ describe("the revision panel says what the confirm will write", () => {
     expect(pairing.value).toBe("");
     await userEvent.click(within(row).getByRole("button", { name: /Pair with ZZ001-012/ }));
     expect(patches()).toEqual([
-      { sheetIndex: 0, index: 0, replaces: { recordId: "rec-chair", recordVersion: 5 } },
+      { sheetIndex: 0, index: 0, replaces: { recordId: "rec-chair", recordVersion: 5 }, version: 1 },
     ]);
   });
 
@@ -176,7 +176,7 @@ describe("the revision panel says what the confirm will write", () => {
     mount([line(0, "ZZ-12"), line(1, "ZZ-09")], reconciliation);
     await userEvent.click(await screen.findByRole("button", { name: /Pair the 1 suggested/ }));
     expect(patches()).toEqual([
-      { sheetIndex: 0, index: 0, replaces: { recordId: "rec-chair", recordVersion: 5 } },
+      { sheetIndex: 0, index: 0, replaces: { recordId: "rec-chair", recordVersion: 5 }, version: 1 },
     ]);
   });
 
@@ -200,7 +200,7 @@ describe("the revision panel says what the confirm will write", () => {
     mount([line(0, "ZZ-12"), line(1, "ZZ-09")], reconciliation);
     await userEvent.click(await screen.findByRole("button", { name: /Bring back ZZ001-009/ }));
     expect(patches()).toEqual([
-      { sheetIndex: 0, index: 1, replaces: { recordId: "rec-bench", recordVersion: 8, restore: true } },
+      { sheetIndex: 0, index: 1, replaces: { recordId: "rec-bench", recordVersion: 8, restore: true }, version: 1 },
     ]);
   });
 });

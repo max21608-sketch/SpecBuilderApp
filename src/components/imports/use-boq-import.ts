@@ -12,7 +12,7 @@
 // Every verb is the same request it was on the page, in the same order, and
 // keeps the same discipline about the reload: where a refusal must survive
 // the reload it triggers, the reload comes first and the report after.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import { type Registers } from "@/components/imports/SpecDocumentReview";
@@ -215,6 +215,42 @@ export function useBoqImport(id: string) {
   const [blocked, setBlocked] = useState<{ lineNo: number; code: string | null }[]>([]);
   const [specsBusy, setSpecsBusy] = useState(false);
 
+  // ==========================================================================
+  // THE BILL'S VERSION, AS THIS SCREEN KNOWS IT, AND ONE WRITE AT A TIME.
+  //
+  // Every line, sheet and kind write is positional (`sheets[i].lines[j]`) and
+  // carries the staged run's version, so another reviewer's choice — or a
+  // re-read that re-laid the lines — refuses it instead of being silently
+  // written over. The version sent is read when the request is BUILT, never
+  // from a closure: the larger of what the last load rendered and what the
+  // server acknowledged to this screen's own writes (`acked-versions.ts`, the
+  // drawings screens' rule). And the writes run in order, each built after the
+  // one before it answered, so three quick clicks are three versions and never
+  // refuse each other.
+  // ==========================================================================
+  const billVersion = useRef(0);
+  const knowVersion = (version: unknown) => {
+    if (typeof version === "number" && version > billVersion.current) billVersion.current = version;
+  };
+  const chain = useRef<Promise<unknown>>(Promise.resolve());
+  function inOrder<T>(write: () => Promise<T>): Promise<T> {
+    const next = chain.current.then(write, write);
+    chain.current = next.catch(() => undefined);
+    return next;
+  }
+  /** One PATCH of the staged bill, queued; `versioned` adds the bill's version as the request is built. */
+  function patchBill<T extends Record<string, unknown>>(body: Record<string, unknown>, versioned = true) {
+    return inOrder(async () => {
+      const res = await apiFetch<T & { version?: number }>(`/api/imports/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(versioned ? { ...body, version: billVersion.current } : body),
+      });
+      if (res.ok) knowVersion(res.data.version);
+      return res;
+    });
+  }
+
   // `quiet` skips the loading state. The spec-document view re-reads every
   // three seconds while a document is being read, and blanking the screen out
   // from under someone reading it would make the page unusable.
@@ -235,6 +271,7 @@ export function useBoqImport(id: string) {
     }>(`/api/imports/${id}`);
     if (!quiet) setLoading(false);
     if (!res.ok) { setError(res.error); return; }
+    knowVersion(res.data.import?.version);
     setData({
       import: res.data.import,
       categories: res.data.categories ?? [],
@@ -264,12 +301,10 @@ export function useBoqImport(id: string) {
   ) {
     setError(null);
     setNotice(null);
-    const res = await apiFetch<{ carried?: number; carriedTo?: string }>(`/api/imports/${id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sheetIndex, index, ...patch }),
-    });
-    if (!res.ok) { setError(res.error); return; }
+    const res = await patchBill<{ carried?: number; carriedTo?: string }>({ sheetIndex, index, ...patch });
+    // Reload FIRST on a refusal, then say it: a 409 means the bill moved, and
+    // the person must see what it moved to before choosing again.
+    if (!res.ok) { await load(); setError(res.error); return; }
     // WHAT IT DID SOMEWHERE ELSE, SAID OUT LOUD. The receiving row carries the
     // sentence, but the person is looking at the tab they decided on — so
     // without this a press that changed three tabs looks like a press that
@@ -295,11 +330,10 @@ export function useBoqImport(id: string) {
   async function setPicture(sheetIndex: number, line: Line, picture: PictureChoice): Promise<boolean> {
     setError(null);
     setNotice(null);
-    const res = await apiFetch(`/api/imports/${id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sheetIndex, index: line.index, picture, pictureVersion: line.pictureVersion ?? 0 }),
-    });
+    const res = await patchBill(
+      { sheetIndex, index: line.index, picture, pictureVersion: line.pictureVersion ?? 0 },
+      false,
+    );
     await load(true);
     if (!res.ok) {
       setError(res.error);
@@ -314,13 +348,9 @@ export function useBoqImport(id: string) {
     patch: { runName?: string; ignored?: boolean; replacesRunId?: string | null },
   ) {
     setError(null);
-    const res = await apiFetch(`/api/imports/${id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sheetIndex, ...patch }),
-    });
-    if (!res.ok) { setError(res.error); return; }
+    const res = await patchBill({ sheetIndex, ...patch });
     await load();
+    if (!res.ok) setError(res.error);
   }
 
   /**
@@ -343,11 +373,7 @@ export function useBoqImport(id: string) {
     try {
       for (const line of lines) {
         if (!line.level) continue;
-        const res = await apiFetch<{ carried?: number }>(`/api/imports/${id}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sheetIndex, index: line.index, level: line.level }),
-        });
+        const res = await patchBill<{ carried?: number }>({ sheetIndex, index: line.index, level: line.level });
         if (!res.ok) {
           setError(res.error);
           break;
@@ -384,11 +410,7 @@ export function useBoqImport(id: string) {
       for (const line of lines) {
         const categoryId = suggestedCategoryId(line);
         if (!categoryId) continue;
-        const res = await apiFetch<{ carried?: number }>(`/api/imports/${id}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sheetIndex, index: line.index, categoryId }),
-        });
+        const res = await patchBill<{ carried?: number }>({ sheetIndex, index: line.index, categoryId });
         if (!res.ok) {
           setError(res.error);
           break;
@@ -425,14 +447,10 @@ export function useBoqImport(id: string) {
     setNotice(null);
     try {
       for (const pair of pairs) {
-        const res = await apiFetch(`/api/imports/${id}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            sheetIndex,
-            index: pair.index,
-            replaces: { recordId: pair.recordId, recordVersion: pair.recordVersion },
-          }),
+        const res = await patchBill({
+          sheetIndex,
+          index: pair.index,
+          replaces: { recordId: pair.recordId, recordVersion: pair.recordVersion },
         });
         if (!res.ok) {
           setError(res.error);
@@ -462,11 +480,7 @@ export function useBoqImport(id: string) {
     setError(null);
     try {
       for (const line of lines) {
-        const res = await apiFetch(`/api/imports/${id}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sheetIndex, index: line.index, ignored: true }),
-        });
+        const res = await patchBill({ sheetIndex, index: line.index, ignored: true });
         if (!res.ok) {
           setError(res.error);
           break;
@@ -489,11 +503,13 @@ export function useBoqImport(id: string) {
     setError(null);
     setNotice(null);
     try {
-      const res = await apiFetch(`/api/imports/${id}/columns`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "reread", version: data.import.version }),
-      });
+      const res = await inOrder(() =>
+        apiFetch(`/api/imports/${id}/columns`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "reread", version: billVersion.current }),
+        }),
+      );
       await load();
       if (!res.ok) {
         setError(res.error);
@@ -517,16 +533,10 @@ export function useBoqImport(id: string) {
     setError(null);
     setNotice(null);
     try {
-      const res = await apiFetch(`/api/imports/${id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sheetIndex,
-          index: line.index,
-          slotOverride: { key, slot },
-          slotOverridesVersion: line.slotOverridesVersion ?? 0,
-        }),
-      });
+      const res = await patchBill(
+        { sheetIndex, index: line.index, slotOverride: { key, slot }, slotOverridesVersion: line.slotOverridesVersion ?? 0 },
+        false,
+      );
       await load(true);
       if (!res.ok) setError(res.error);
     } finally {
@@ -540,16 +550,10 @@ export function useBoqImport(id: string) {
     setError(null);
     setNotice(null);
     try {
-      const res = await apiFetch(`/api/imports/${id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sheetIndex,
-          index: line.index,
-          unitOverride: unit,
-          unitOverrideVersion: line.unitOverrideVersion ?? 0,
-        }),
-      });
+      const res = await patchBill(
+        { sheetIndex, index: line.index, unitOverride: unit, unitOverrideVersion: line.unitOverrideVersion ?? 0 },
+        false,
+      );
       await load(true);
       if (!res.ok) setError(res.error);
     } finally {
@@ -567,15 +571,14 @@ export function useBoqImport(id: string) {
     setError(null);
     setNotice(null);
     try {
-      const res = await apiFetch(`/api/imports/${id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const res = await patchBill(
+        {
           sheetIndex,
           unitOverrideAll: unit,
           lines: lines.map((line) => ({ index: line.index, unitOverrideVersion: line.unitOverrideVersion ?? 0 })),
-        }),
-      });
+        },
+        false,
+      );
       await load(true);
       if (!res.ok) setError(res.error);
       else setNotice(`The unit of ${lines.length} size${lines.length === 1 ? "" : "s"} is set to ${unit}. Each row says so, and can be changed on its own.`);
@@ -596,10 +599,14 @@ export function useBoqImport(id: string) {
     setNotice(null);
     try {
       const entry = (line: Line) => ({ index: line.index, version: line.twinOfVersion ?? 0 });
-      const res = await apiFetch<{ accepted: number }>(`/api/imports/${id}/twins`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sheetIndex, accept: accept.map(entry), clear: clear.map(entry) }),
+      const res = await inOrder(async () => {
+        const answer = await apiFetch<{ accepted: number; version?: number }>(`/api/imports/${id}/twins`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sheetIndex, accept: accept.map(entry), clear: clear.map(entry) }),
+        });
+        if (answer.ok) knowVersion(answer.data.version);
+        return answer;
       });
       await load(true);
       if (!res.ok) setError(res.error);
@@ -614,11 +621,7 @@ export function useBoqImport(id: string) {
   async function setLineKind(sheetIndex: number, index: number, rowKind: BoqRowKind, finishForRow: number | null) {
     setError(null);
     setNotice(null);
-    const res = await apiFetch(`/api/imports/${id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sheetIndex, index, rowKind, ...(finishForRow === null ? {} : { finishForRow }) }),
-    });
+    const res = await patchBill({ sheetIndex, index, rowKind, ...(finishForRow === null ? {} : { finishForRow }) });
     await load();
     if (!res.ok) setError(res.error);
   }
@@ -662,16 +665,19 @@ export function useBoqImport(id: string) {
     setError(null);
     setBlocked([]);
     try {
-      const res = await apiFetch<{
-        imported: number;
-        projectId: string;
-        runs: number;
-        mockup?: { skipped: number; left: number; message: string } | null;
-      }>(`/api/imports/${id}/confirm`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ version: data.import.version }),
-      });
+      // Behind every queued write, at the version the last of them returned.
+      const res = await inOrder(() =>
+        apiFetch<{
+          imported: number;
+          projectId: string;
+          runs: number;
+          mockup?: { skipped: number; left: number; message: string } | null;
+        }>(`/api/imports/${id}/confirm`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ version: billVersion.current }),
+        }),
+      );
       if (!res.ok) {
         setError(res.error);
         const lines = (res.data?.lines as { lineNo: number; code: string | null }[] | undefined) ?? [];

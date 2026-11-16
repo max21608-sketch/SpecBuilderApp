@@ -28,6 +28,7 @@
 // ============================================================================
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import pg from "pg";
+import { stagedVersion } from "./staged-version";
 import ExcelJS from "exceljs";
 import { describeIfDb, qaNumber } from "./db-tier";
 import { assertBoqDocument } from "@/lib/boq-import";
@@ -185,7 +186,9 @@ describeIfDb("a bill's structure, read; its fabric lines, written onto their ite
   }
   async function patch(body: unknown) {
     const { PATCH } = await import("@/app/api/imports/[id]/route");
-    const res = await PATCH(request(body, "PATCH"), params(billId));
+    // The bill's version as a screen would hold it: every line write carries one.
+    const versioned = { ...(body as Record<string, unknown>), version: await stagedVersion(client, billId) };
+    const res = await PATCH(request(versioned, "PATCH"), params(billId));
     return { status: res.status, body: (await res.json()) as Record<string, unknown> };
   }
   async function confirm(version: number) {

@@ -195,11 +195,16 @@ describeIfDb("a bill's row pictures", () => {
 
     const revisionId = await register("__QA pictured bill rev B.xlsx");
     const { PATCH } = await import("@/app/api/imports/[id]/route");
-    expect((await PATCH(jsonRequest("PATCH", { sheetIndex: 0, replacesRunId: phaseId }), params(revisionId))).status).toBe(200);
+    expect((await PATCH(jsonRequest("PATCH", { sheetIndex: 0, replacesRunId: phaseId, version: await stagedVersion(client, revisionId) }), params(revisionId))).status).toBe(200);
     for (const [index, lineNo] of [[0, 3], [1, 4], [2, 5], [3, 6]] as const) {
       const record = await recordAt(lineNo);
       const paired = await PATCH(
-        jsonRequest("PATCH", { sheetIndex: 0, index, replaces: { recordId: record.id, recordVersion: record.version } }),
+        jsonRequest("PATCH", {
+          sheetIndex: 0,
+          index,
+          replaces: { recordId: record.id, recordVersion: record.version },
+          version: await stagedVersion(client, revisionId),
+        }),
         params(revisionId),
       );
       expect(paired.status).toBe(200);

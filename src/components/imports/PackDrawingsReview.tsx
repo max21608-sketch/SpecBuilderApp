@@ -37,7 +37,7 @@ import Chip from "@/components/ui/Chip";
 import Tip from "@/components/ui/Tip";
 import Note from "@/components/ui/Note";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
-import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
+import { measuredRows, type DrawingItem, type DrawingObservation, type StagedDrawings } from "@/lib/drawing-document";
 import { ReviewRowActionsContext, type ReviewRowActions } from "@/components/imports/review-row-actions";
 import { planClashResolution, type ClashChoice } from "@/lib/clash-resolution";
 import ItemCard, {
@@ -488,10 +488,16 @@ export default function PackDrawingsReview({
       let failure: string | null = null;
       for (const run of targets) {
         if (!run) continue;
+        // The rows this press reaches on this document, as the screen showed
+        // them, each at the ledger's version (`patchBulkUnit`).
+        const expected = (run.staged?.items ?? [])
+          .filter((item) => scope === "run" || item.id === itemId)
+          .flatMap(measuredRows)
+          .map((row) => ({ id: row.id, version: versions.row(row.id, row.version) }));
         const res = await apiFetch<{ versions?: WrittenVersions }>(`/api/imports/${run.importId}`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ bulkUnit: { scope, unit, ...(itemId ? { itemId } : {}) } }),
+          body: JSON.stringify({ bulkUnit: { scope, unit, ...(itemId ? { itemId } : {}), expected } }),
         });
         if (res.ok) versions.record(res.data.versions);
         if (!res.ok) {

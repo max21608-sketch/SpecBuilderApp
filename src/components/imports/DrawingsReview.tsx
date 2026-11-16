@@ -46,7 +46,7 @@ import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/intake-status";
 import Button from "@/components/ui/Button";
 import Tabs from "@/components/ui/Tabs";
 import { DOCUMENT_KIND_LABELS, type ItemLevel } from "@/lib/spec-vocab";
-import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
+import { measuredRows, type DrawingItem, type DrawingObservation, type StagedDrawings } from "@/lib/drawing-document";
 import { ReviewRowActionsContext, type ReviewRowActions } from "@/components/imports/review-row-actions";
 import { planClashResolution, type ClashChoice } from "@/lib/clash-resolution";
 import ItemCard, {
@@ -440,10 +440,17 @@ export default function DrawingsReview({
 
   async function setBulkUnit(scope: "item" | "run", unit: BulkUnitChoice, itemId?: string) {
     await queueSave(async () => {
+      // The rows this press reaches, as the screen showed them, each at the
+      // ledger's version: a figure somebody else changed is refused, not
+      // overwritten unseen.
+      const expected = (run?.parsed?.items ?? [])
+        .filter((item) => scope === "run" || item.id === itemId)
+        .flatMap(measuredRows)
+        .map((row) => ({ id: row.id, version: versions.row(row.id, row.version) }));
       const res = await apiFetch<{ versions?: WrittenVersions }>(`/api/imports/${importId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ bulkUnit: { scope, unit, ...(itemId ? { itemId } : {}) } }),
+        body: JSON.stringify({ bulkUnit: { scope, unit, ...(itemId ? { itemId } : {}), expected } }),
       });
       if (res.ok) versions.record(res.data.versions);
       await reloadThen(res.ok ? null : res.error);

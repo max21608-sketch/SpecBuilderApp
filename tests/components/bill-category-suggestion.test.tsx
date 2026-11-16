@@ -38,7 +38,9 @@ vi.mock("@/lib/api-fetch", () => ({
     const method = (init?.method ?? "GET").toUpperCase();
     if (method === "PATCH" && path === `/api/imports/${IMPORT}`) {
       routes.patches.push(JSON.parse(String(init?.body)));
-      return { ok: true, status: 200, data: { ok: true } };
+      // The bill's version after each write, as the route returns it. The GET
+      // goes on saying 3, so only carrying this forward can avoid a false 409.
+      return { ok: true, status: 200, data: { ok: true, version: 3 + routes.patches.length } };
     }
     const body = routes.current[method === "GET" ? path : `${method} ${path}`];
     if (body === undefined) return { ok: false, status: 404, error: "no such route", data: null };
@@ -127,7 +129,9 @@ describe("a bill line's category", () => {
 
     fireEvent.click(offers[0]!);
     await waitFor(() => expect(routes.patches).toHaveLength(1));
-    expect(routes.patches[0]).toEqual({ sheetIndex: 0, index: second.index, categoryId: "cat-seat" });
+    // With the bill's version as the screen loaded it (3), so a bill that moved
+    // underneath refuses rather than being written over.
+    expect(routes.patches[0]).toEqual({ sheetIndex: 0, index: second.index, categoryId: "cat-seat", version: 3 });
   });
 
   it("shows a chosen category as a decision, not a suggestion", async () => {
@@ -162,5 +166,24 @@ describe("a bill line's category", () => {
     // Every suggested line, and never the one a person already chose.
     expect(routes.patches.map((patch) => patch.index)).toEqual(staged.lines.slice(1).map((line) => line.index));
     expect(routes.patches.every((patch) => patch.categoryId === "cat-seat")).toBe(true);
+  });
+
+  it("carries the version each write returned into the next, so quick edits never refuse each other", async () => {
+    // Two presses before either answers, then a whole tab: each request is
+    // built after the one before it answered, at the version that answer
+    // returned — never the version of the render the click happened in.
+    const staged = mount();
+    const offers = await screen.findAllByRole("button", { name: /Uph · Armchairs Benches Stools Sofas/ });
+    fireEvent.click(offers[0]!);
+    fireEvent.click(offers[1]!);
+    await waitFor(() => expect(routes.patches).toHaveLength(2));
+    expect(routes.patches.map((patch) => patch.version)).toEqual([3, 4]);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Accept all suggested categories on this tab/ }));
+    const expected = staged.lines.length - 1;
+    await waitFor(() => expect(routes.patches).toHaveLength(2 + expected));
+    expect(routes.patches.slice(2).map((patch) => patch.version)).toEqual(
+      Array.from({ length: expected }, (_, n) => 5 + n),
+    );
   });
 });

@@ -36,7 +36,8 @@ export default function LevelsBanner({
       const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/levels/accept`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ runId: null }),
+        // The count the button showed: a set that changed since is refused.
+        body: JSON.stringify({ runId: null, expectedCount: summary.levelSuggested }),
       });
       await onReload();
       if (!res.ok) onError(res.error);
