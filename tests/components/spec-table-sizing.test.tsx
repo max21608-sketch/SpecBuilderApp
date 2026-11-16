@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { AfterGate, ClientRefs, ItemName, ITEM_CLAMP } from "@/components/records/SpecTable";
+import { SourceName, SOURCE_NAME_CHARS } from "@/components/records/SpecsTab";
 import RecordTitle, { RECORD_TITLE_CHARS } from "@/components/records/RecordTitle";
 
 const LONG_NAME = "Bedframe & Headboard - TWIN (X18 = BED BASES - X1 HEADBOARD PER X2 BED BASES) with a long extra clause to be cut";
@@ -72,3 +73,17 @@ describe("a gate not yet reached", () => {
   });
 });
 
+// Review 3.6 (2026-11-16): the Source column cut every name to
+// "Appendix 2 - AMB_Bil…" on one line. It is now cut as a string to about two
+// lines of the column, the whole of it on the link's title.
+describe("a spec's source name", () => {
+  it("is cut as a string when long and printed whole when short", () => {
+    const long = "Appendix 2 - AMB_Bill of Quantities - Casegoods, Seating and Tables Rev 0.xlsx";
+    const { container, rerender } = render(<SourceName name={long} />);
+    expect(container.textContent!.length).toBeLessThanOrEqual(SOURCE_NAME_CHARS + 1);
+    expect(container.textContent).toMatch(/…$/);
+    expect(container.textContent!.length).toBeGreaterThan("Appendix 2 - AMB_Bil".length);
+    rerender(<SourceName name="Shop drawings.pdf" />);
+    expect(container.textContent).toBe("Shop drawings.pdf");
+  });
+});
