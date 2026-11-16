@@ -13,6 +13,7 @@ import {
   readSheetWithColumns,
   REFERENCE_BOQ_ALIASES,
   sheetsNeedingColumns,
+  sheetsWithColumnsInDoubt,
   sheetWidth,
   type BoqLayout,
   type ParsedBoqSheet,
@@ -20,6 +21,7 @@ import {
 import {
   BOQ_ROLES,
   columnMappingProblem,
+  columnsAwaitingALook,
   columnsFromSelections,
   composeBoqArea,
   foldHeading,
@@ -441,5 +443,112 @@ describe("a person's mapping is checked in words", () => {
     expect(columnsFromSelections(selections).problem).toMatch(/Columns D and E are both set as code/);
     selections[3] = "ignore";
     expect(columnsFromSelections(selections)).toEqual({ columns: { code: 4 }, keep: [], problem: null });
+  });
+});
+
+// ---- audit C6 / C7 (2026-11-16): the reader's own doubt about its columns ----
+
+describe("two columns claiming one role are a question, never a silent first-wins (C6)", () => {
+  // `item` and `description` are BOTH synonyms of the item description. The
+  // first column used to win and the second vanished: every record was named
+  // "1.01" and the real description was never read, with no columns check.
+  const ITEM_AND_DESCRIPTION: SheetData = [
+    ["Item", "Code", "Description", "Qty"],
+    ["1.01", "ZZ-101", "Sofa", 2],
+    ["1.02", "ZZ-102", "Armchair", 4],
+  ];
+
+  it("stages the sheet with the doubt in words, naming both columns", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: ITEM_AND_DESCRIPTION }]).sheets);
+    expect(sheet.needsColumns).toBe(false);
+    expect(sheet.columnsDoubt).toMatch(/Columns A \(“Item”\) and C \(“Description”\)/);
+    expect(sheet.columnsDoubt).toMatch(/takes as the description/);
+    expect(sheet.columnsDoubt).toMatch(/column A was read as it/);
+  });
+
+  it("opens the Columns panel and holds the confirm until a person has looked", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: ITEM_AND_DESCRIPTION }]).sheets);
+    expect(columnsAwaitingALook(sheet)).toBe(true);
+    expect(sheetsWithColumnsInDoubt({ sheets: [sheet] })).toHaveLength(1);
+    // "The columns are right" is the look.
+    expect(sheetsWithColumnsInDoubt({ sheets: [{ ...sheet, columnsChecked: true }] })).toHaveLength(0);
+    expect(columnsAwaitingALook({ ...sheet, columnsChecked: true })).toBe(false);
+    // A person's own columns carry no doubt.
+    const person = readSheetWithColumns("Bill", ITEM_AND_DESCRIPTION, {
+      headerRow: 1,
+      headerRows: 1,
+      columns: { code: 1, itemDescription: 2, qty: 3 },
+    });
+    expect(person.columnsDoubt).toBeUndefined();
+    expect(person.lines.map((line) => line.itemDescription)).toEqual(["Sofa", "Armchair"]);
+  });
+
+  it("says nothing where each role has one column, so such a sheet stages as it always did", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: TYPICAL }]).sheets);
+    expect("columnsDoubt" in sheet).toBe(false);
+    expect(columnsAwaitingALook(sheet)).toBe(false);
+  });
+
+  it("counts one column read three ways as ONE claim on a two-row header", () => {
+    const sheet = first(
+      parseBoqSheets([
+        {
+          sheet: "Bill",
+          data: [
+            ["FF&E", "Item", "TOTAL"],
+            ["code", "description", "Q-ty"],
+            ["ZZ-1", "Sofa", 1],
+          ],
+        },
+      ]).sheets,
+    );
+    expect(sheet.headerRows).toBe(2);
+    expect("columnsDoubt" in sheet).toBe(false);
+  });
+});
+
+describe("a saved layout narrower than the known headings does not outrank them (C7)", () => {
+  // A person saved `Description | Qty` off a bill with no code column. Layouts
+  // are global, and that layout fitted every later bill printing those two
+  // headings — and outranked the synonyms, so the code was never read.
+  const NARROW: BoqLayout = {
+    id: "narrow",
+    name: "Somebody's two-column layout",
+    headerRows: 1,
+    mapping: { itemDescription: "description", qty: "qty" },
+  };
+  const BILL: SheetData = [
+    ["Code", "Description", "Qty", "Unit"],
+    ["ZZ-201", "Bench", 3, "nr"],
+  ];
+
+  it("lets the synonyms read the sheet, and says why in the sheet's doubt", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: BILL }], { layouts: [NARROW] }).sheets);
+    expect(sheet.mappingSource).toBe("synonym");
+    expect(sheet.lines[0]?.code).toBe("ZZ-201");
+    expect(sheet.columnsDoubt).toMatch(/saved layout “Somebody's two-column layout” fits this sheet but reads 2 columns/);
+    expect(sheet.columnsDoubt).toMatch(/known headings read 4/);
+    expect(sheetsWithColumnsInDoubt({ sheets: [sheet] })).toHaveLength(1);
+  });
+
+  it("still applies a layout that reads at least as much as the synonyms", () => {
+    const full: BoqLayout = {
+      ...NARROW,
+      id: "full",
+      mapping: { code: "code", itemDescription: "description", qty: "qty", qtyUnit: "unit" },
+    };
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: BILL }], { layouts: [full] }).sheets);
+    expect(sheet.mappingSource).toBe("layout");
+    expect("columnsDoubt" in sheet).toBe(false);
+  });
+
+  it("still applies a narrow layout where the synonyms cannot read the sheet at all", () => {
+    const sheet = first(
+      parseBoqSheets([{ sheet: "Bill", data: [["Spec Code", "Description", "Qty"], ["ZZ-1", "Stool", 1]] }], {
+        layouts: [{ ...NARROW, mapping: { code: "spec code", itemDescription: "description" } }],
+      }).sheets,
+    );
+    expect(sheet.mappingSource).toBe("layout");
+    expect(sheet.lines[0]?.code).toBe("ZZ-1");
   });
 });

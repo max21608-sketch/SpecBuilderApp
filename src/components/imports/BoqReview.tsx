@@ -34,7 +34,7 @@ import { Table, Th } from "@/components/ui/Table";
 import Tip from "@/components/ui/Tip";
 // Pure and type-only inside: which sheets the confirm still waits on, from
 // the functions the confirm itself calls.
-import { sheetsAwaitingColumnCheck, sheetsNeedingColumns } from "@/lib/boq-import";
+import { sheetsAwaitingColumnCheck, sheetsNeedingColumns, sheetsWithColumnsInDoubt } from "@/lib/boq-import";
 import { pdfPageOfLine } from "@/lib/pdf-bill-source";
 import { isAwaitingTranscription, transcriptionChecks, type LineCheck } from "@/lib/pdf-bill-checks";
 import PdfTranscriptionPanel from "@/components/imports/PdfTranscriptionPanel";
@@ -196,6 +196,8 @@ export default function BoqReview({
   const revising = Object.keys(data.reconciliation ?? {}).length > 0;
   /** Live sheets whose columns a model read and nobody has agreed to — the confirm waits. */
   const unchecked = sheetsAwaitingColumnCheck({ sheets });
+  /** Live sheets whose columns the reader itself doubts (C6/C7) — the confirm waits for a look. */
+  const doubted = sheetsWithColumnsInDoubt({ sheets });
   /** Fabric lines that cannot be written, from the function the confirm runs. */
   const kindProblems = activeSheets.flatMap((sheet) => rowKindProblems(sheet.lines));
   const counts = boqConfirmCounts(sheets);
@@ -246,7 +248,7 @@ export default function BoqReview({
           single: sheets.length === 1,
           reading,
           unmapped: unmapped.map(tabName),
-          unchecked: unchecked.map(tabName),
+          unchecked: [...unchecked, ...doubted].map(tabName),
           kindProblems: activeSheets
             .map((sheet) => ({ tab: tabName(sheet), count: rowKindProblems(sheet.lines).length }))
             .filter((entry) => entry.count > 0),
@@ -264,6 +266,7 @@ export default function BoqReview({
             tab: tabName(sheet),
             unmapped: unmapped.includes(sheet),
             unchecked: unchecked.includes(sheet),
+            doubt: doubted.includes(sheet) ? (sheet.columnsDoubt ?? null) : null,
             problems: sheet.ignored ? [] : rowKindProblems(sheet.lines),
           })),
           single: sheets.length === 1,
@@ -402,6 +405,7 @@ export default function BoqReview({
               activeLines.length === 0 ||
               unmapped.length > 0 ||
               unchecked.length > 0 ||
+              doubted.length > 0 ||
               kindProblems.length > 0
             }
             title={confirmBlocker ?? undefined}

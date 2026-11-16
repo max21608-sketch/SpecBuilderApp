@@ -211,6 +211,8 @@ export type BillSheetState = {
   unmapped: boolean;
   /** A model read its columns and nobody has agreed to them. */
   unchecked: boolean;
+  /** Why the reader doubts its own columns (C6/C7), where it does and nobody has looked. */
+  doubt?: string | null;
   /** Finish lines with no item, from `rowKindProblems`. */
   problems: readonly { lineNo: number; problem: string }[];
 };
@@ -246,6 +248,17 @@ export function billNeedsYou(input: {
         words: `Check the columns${on(sheet)}, then press “The columns are right”`,
         target: sheetColumnsId(sheet.index),
         why: "The model read the header, the columns and the Kind of each line; the confirm waits until a person has checked them against the sheet. The model never typed a value: every code, description and quantity was read by code.",
+        sheetIndex: sheet.index,
+      });
+    }
+  }
+  for (const sheet of input.sheets) {
+    if (sheet.doubt && !sheet.unchecked) {
+      out.push({
+        key: `doubt-${sheet.index}`,
+        words: `Check the columns${on(sheet)}, then press “The columns are right”`,
+        target: sheetColumnsId(sheet.index),
+        why: sheet.doubt,
         sheetIndex: sheet.index,
       });
     }

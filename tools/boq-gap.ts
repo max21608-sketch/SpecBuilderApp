@@ -165,6 +165,9 @@ function describeSheet(sheet: ParsedBoqSheet): string[] {
     );
   }
   if (sheet.needsColumns) return out;
+  // The reader's own doubt about its columns (C6/C7, 2026-11-16): printed only
+  // where there is one, so a sheet nothing doubts prints exactly as before.
+  if (sheet.columnsDoubt) out.push(`  COLUMNS IN DOUBT: ${sheet.columnsDoubt}`);
   const lines = sheet.lines;
   const fabric = lines.filter((line) => line.rowKind === "finish_for");
   const items = lines.filter((line) => line.rowKind !== "finish_for");

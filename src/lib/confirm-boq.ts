@@ -33,6 +33,7 @@ import {
   assertBoqDocument,
   sheetsAwaitingColumnCheck,
   sheetsNeedingColumns,
+  sheetsWithColumnsInDoubt,
   type BoqDocument,
   type StagedBoqSheet,
 } from "@/lib/boq-import";
@@ -372,6 +373,20 @@ async function refuseUnconfirmable(
     throw new DomainConflictError(
       "columns_unchecked",
       `The model read the columns of ${names}. Check them on the Columns panel and press “The columns are right” first.`,
+      { status: 400 },
+    );
+  }
+
+  // COLUMNS THE READER ITSELF DOUBTS (audit C6/C7, 2026-11-16): two columns
+  // claimed one role, or a saved layout was passed over for the headings. The
+  // first column was read, so a person must say it was the right one.
+  const doubted = sheetsWithColumnsInDoubt(parsed);
+  if (doubted.length > 0) {
+    const names = doubted.map((sheet) => `“${sheet.sheetName}”`).join(", ");
+    throw new DomainConflictError(
+      "columns_in_doubt",
+      `The columns of ${names} need a look — the Columns panel says why. Check them there and press ` +
+        "“The columns are right”, or set them and read the bill again.",
       { status: 400 },
     );
   }

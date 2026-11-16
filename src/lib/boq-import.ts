@@ -63,6 +63,7 @@ import type { NonFurnitureGuess } from "@/lib/non-furniture-guess";
 import type { BillPictureOverride, BoqRowImages } from "@/lib/bill-row-image";
 import {
   BOQ_KEEP_ROLE,
+  columnLetter,
   foldHeading,
   keptHeading,
   type BoqColumnRef,
@@ -408,6 +409,23 @@ export type StagedBoqSheet = {
    * layout must never apply unseen.
    */
   columnsChecked?: boolean;
+  /**
+   * WHY THE READER DOUBTS ITS OWN COLUMNS, in words (2026-11-16, audit C6/C7):
+   * two columns claimed one role, or a saved layout fitted the sheet but read
+   * fewer columns than the known headings, so the headings were used. The
+   * sheet IS read; the Columns panel opens and the confirm waits for a person
+   * exactly as for a model's reading (`sheetsWithColumnsInDoubt`), until they
+   * set the columns or press "The columns are right". Absent on every sheet
+   * staged before it, and on one nothing doubted.
+   */
+  columnsDoubt?: string | null;
+  /**
+   * HEADING ROWS REPRINTED UNDER THE HEADER — a section's own copy of
+   * "Code | Description | Qty" — passed over and counted (audit C9,
+   * 2026-11-16), never staged as a record named "Description". Absent where
+   * none was.
+   */
+  repeatedHeaderRows?: number;
   /** The first rows of the sheet as displayed text, so the panel needs no re-read. */
   preview?: string[][];
   /**
@@ -591,6 +609,13 @@ type HeaderReading = {
   unrecognised: string[];
   /** True when both required columns are there, which makes this row the header. */
   complete: boolean;
+  /**
+   * Every column whose heading claimed each role, in printed order — read so a
+   * role claimed by TWO columns (`Item` and `Description`, both the item
+   * description) is a question for a person rather than a silent first-wins
+   * (audit C6, 2026-11-16). `found` still holds the first.
+   */
+  claims: Partial<Record<ColumnKey, number[]>>;
 };
 
 /** The nearest thing to a header the reader saw, for a refusal that can be acted on. */
@@ -739,6 +764,7 @@ function quantity(value: unknown): { qty: number | null; qtyRaw?: string } {
  */
 function readHeader(row: readonly unknown[], vocabulary: Vocabulary): HeaderReading {
   const found: Partial<Record<ColumnKey, number>> = {};
+  const claims: Partial<Record<ColumnKey, number[]>> = {};
   const kept: number[] = [];
   const unrecognised: string[] = [];
   row.forEach((cell, index) => {
@@ -755,11 +781,46 @@ function readHeader(row: readonly unknown[], vocabulary: Vocabulary): HeaderRead
       kept.push(index);
       return;
     }
-    // First column wins: "Product Reference" must not be claimed by `code`'s
-    // "reference" synonym once a real "Code" column has been seen.
-    if (role !== "ignore" && found[role] === undefined) found[role] = index;
+    if (role === "ignore") return;
+    // The first column is READ, but every claim is kept: two columns claiming
+    // one role is a sheet a person has to look at (`contestedRoles`).
+    claims[role] = [...(claims[role] ?? []), index];
+    if (found[role] === undefined) found[role] = index;
   });
-  return { found, kept, unrecognised, complete: REQUIRED.every((key) => found[key] !== undefined) };
+  return { found, kept, unrecognised, complete: REQUIRED.every((key) => found[key] !== undefined), claims };
+}
+
+/**
+ * TWO COLUMNS CLAIMING ONE ROLE, in words, or null (audit C6, 2026-11-16).
+ *
+ * The synonyms `item` and `description` both mean the item description, and
+ * `ref` and `code` both mean the code. A sheet headed `Item | Code |
+ * Description | Qty` read its `Item` column (the line numbers) as every
+ * record's NAME and dropped the real Description, with nothing on the screen
+ * saying a second column had claimed it. The first column is still read — a
+ * sheet needs a reading to show — but the sheet is staged with this sentence
+ * as `columnsDoubt`, its Columns panel opens, and the confirm waits for a
+ * person (`sheetsWithColumnsInDoubt`). Neither column is chosen by a rule.
+ */
+function contestedRoles(
+  claims: Partial<Record<ColumnKey, number[]>>,
+  headings: readonly string[],
+): string | null {
+  const sentences: string[] = [];
+  for (const [role, indexes] of Object.entries(claims) as [ColumnKey, number[]][]) {
+    const distinct = [...new Set(indexes)].sort((a, b) => a - b);
+    if (distinct.length < 2) continue;
+    const named = distinct.map((index) => `${columnLetter(index)} (“${headings[index] ?? ""}”)`);
+    sentences.push(
+      `Columns ${list(named)} are all headings this reader takes as the ${COLUMN_LABEL[role]}; ` +
+        `column ${columnLetter(distinct[0] as number)} was read as it.`,
+    );
+  }
+  if (sentences.length === 0) return null;
+  return (
+    `${sentences.join(" ")} Check which is right: set the columns below and read the bill again, or press ` +
+    "“The columns are right” if they are."
+  );
 }
 
 /** How much of a header a row managed to be, for picking the closest one. */
@@ -824,7 +885,15 @@ function readHeaderPair(upper: readonly unknown[], lower: readonly unknown[], vo
     .sort((a, b) => a - b);
   // What NEITHER row nor the join recognised, for the refusal to quote.
   const unrecognised = readHeader(joined, vocabulary).unrecognised;
-  return { found, kept, unrecognised, complete: REQUIRED.every((key) => found[key] !== undefined) };
+  // Every column any of the three readings claimed for a role: one column read
+  // three ways is one claim; two columns are a question (`contestedRoles`).
+  const claims: Partial<Record<ColumnKey, number[]>> = {};
+  for (const reading of readings) {
+    for (const [key, indexes] of Object.entries(reading.claims) as [ColumnKey, number[]][]) {
+      claims[key] = [...new Set([...(claims[key] ?? []), ...indexes])];
+    }
+  }
+  return { found, kept, unrecognised, complete: REQUIRED.every((key) => found[key] !== undefined), claims };
 }
 
 /**
@@ -1078,12 +1147,31 @@ function readSheet(
   vocabulary: Vocabulary,
   layouts: readonly BoqLayout[],
 ): { sheet: ParsedBoqSheet | null; closest: HeaderAttempt | null } {
+  // The synonyms' reading is taken FIRST, though it is used second: a saved
+  // layout is measured against it (C7, below).
+  const synonyms = synonymHeader(sheet, data, vocabulary);
+  const synonymSize = synonyms.header ? mappedCount(synonyms.header.reading) : 0;
+
   // 1. A saved layout, scanning down: a remembered mapping wins over the
-  //    synonyms, because a person decided it for exactly this bill.
+  //    synonyms, because a person decided it for exactly this bill —
+  //
+  //    UNLESS IT READS FEWER COLUMNS THAN THE KNOWN HEADINGS DO (audit C7,
+  //    2026-11-16). Layouts are GLOBAL, and `layoutAt` asks only that every
+  //    heading a layout names is on the row: a layout saved as `Description |
+  //    Qty` off one bill fitted every other bill with those two headings and
+  //    outranked the synonyms, so the code column was never read. A layout
+  //    that maps fewer headings than the synonyms would is passed over, the
+  //    synonyms read the sheet, and the sheet says so in `columnsDoubt`.
+  let narrower: { layout: BoqLayout; size: number } | null = null;
   for (let rowIndex = 0; rowIndex < data.length; rowIndex += 1) {
     for (const layout of layouts) {
       const fit = layoutAt(data, rowIndex, layout);
       if (!fit) continue;
+      const size = Object.keys(fit.found).length + fit.kept.length;
+      if (synonyms.header && size < synonymSize) {
+        narrower ??= { layout, size };
+        continue;
+      }
       const read = readRows(sheet, data, rowIndex, fit.found, {
         kept: fit.kept,
         headerRows: layout.headerRows,
@@ -1106,17 +1194,50 @@ function readSheet(
   }
 
   // 2. The synonyms.
+  if (synonyms.header) {
+    const { rowIndex, reading, headerRows } = synonyms.header;
+    const headings = headingsAt(data, rowIndex, headerRows, sheetWidth(data));
+    const doubts = [
+      contestedRoles(reading.claims, headings),
+      narrower
+        ? `The saved layout “${narrower.layout.name}” fits this sheet but reads ${narrower.size} ` +
+          `column${narrower.size === 1 ? "" : "s"}, where the known headings read ${synonymSize}, so the known ` +
+          "headings were used. Check the columns below; if the layout was right, set them and read the bill again."
+        : null,
+    ].filter((doubt): doubt is string => doubt !== null);
+    return {
+      sheet: readRows(sheet, data, rowIndex, reading.found, {
+        kept: reading.kept,
+        ...(headerRows === 2 ? { headerRows: 2 } : {}),
+        source: "synonym",
+        doubt: doubts.length > 0 ? doubts.join(" ") : null,
+      }),
+      closest: null,
+    };
+  }
+  return { sheet: null, closest: synonyms.closest };
+}
+
+/** How many columns a header reading maps: its roles and its kept columns. */
+function mappedCount(reading: HeaderReading): number {
+  return Object.keys(reading.found).length + reading.kept.length;
+}
+
+/** The synonyms' header on a sheet, scanning down, or the closest they came. */
+function synonymHeader(
+  sheet: string,
+  data: SheetData,
+  vocabulary: Vocabulary,
+): {
+  header: { rowIndex: number; reading: HeaderReading; headerRows: 1 | 2 } | null;
+  closest: HeaderAttempt | null;
+} {
   let closest: HeaderAttempt | null = null;
   for (let rowIndex = 0; rowIndex < data.length; rowIndex += 1) {
     const row = data[rowIndex];
     if (!row) continue;
     const reading = readHeader(row, vocabulary);
-    if (reading.complete) {
-      return {
-        sheet: readRows(sheet, data, rowIndex, reading.found, { kept: reading.kept, source: "synonym" }),
-        closest: null,
-      };
-    }
+    if (reading.complete) return { header: { rowIndex, reading, headerRows: 1 }, closest: null };
 
     // A ROW THAT LOOKS LIKE HALF A HEADER GETS ONE MORE READING, with the row
     // below it (row 3 of the variance matrix). Nothing else does: a row that
@@ -1125,12 +1246,7 @@ function readSheet(
     const below = headerScore(reading) > 0 ? data[rowIndex + 1] : undefined;
     if (below) {
       const pair = readHeaderPair(row, below, vocabulary);
-      if (pair.complete) {
-        return {
-          sheet: readRows(sheet, data, rowIndex + 1, pair.found, { kept: pair.kept, headerRows: 2, source: "synonym" }),
-          closest: null,
-        };
-      }
+      if (pair.complete) return { header: { rowIndex: rowIndex + 1, reading: pair, headerRows: 2 }, closest: null };
     }
 
     if (headerScore(reading) > (closest ? headerScore(closest) : 0)) {
@@ -1142,7 +1258,7 @@ function readSheet(
       };
     }
   }
-  return { sheet: null, closest };
+  return { header: null, closest };
 }
 
 /**
@@ -1310,6 +1426,8 @@ function readRows(
     layout?: { id: string; name: string } | null;
     /** The columns kept in notes. */
     kept?: readonly number[];
+    /** Why a person must look at these columns before the confirm (`columnsDoubt`). */
+    doubt?: string | null;
   },
 ): ParsedBoqSheet {
   const headerRows = options.headerRows ?? 1;
@@ -1421,6 +1539,9 @@ function readRows(
     layout: options.layout ?? null,
     needsColumns: false,
     columnsNote: null,
+    // Absent unless something is doubted, so every sheet nothing doubts stages
+    // byte for byte as before.
+    ...(options.doubt ? { columnsDoubt: options.doubt } : {}),
     preview: previewOf(data, headerIndex + 1),
   } satisfies ParsedBoqSheet;
 }
@@ -1606,5 +1727,21 @@ export function sheetsAwaitingColumnCheck<
 >(doc: { sheets: readonly T[] }): T[] {
   return doc.sheets.filter(
     (sheet) => !sheet.ignored && sheet.needsColumns !== true && sheet.mappingSource === "model" && sheet.columnsChecked !== true,
+  );
+}
+
+/**
+ * The sheets whose columns the READER doubts (`columnsDoubt`: two columns
+ * claimed one role, or a narrower saved layout was passed over) and nobody has
+ * yet looked at. The confirm refuses while any remain, as for a model's
+ * reading; a person's own columns, or "The columns are right", clears it.
+ * Separate from `sheetsAwaitingColumnCheck` because that one's sentences say
+ * a MODEL read the columns, and here none did.
+ */
+export function sheetsWithColumnsInDoubt<
+  T extends Pick<StagedBoqSheet, "ignored" | "needsColumns" | "columnsDoubt" | "columnsChecked">,
+>(doc: { sheets: readonly T[] }): T[] {
+  return doc.sheets.filter(
+    (sheet) => !sheet.ignored && sheet.needsColumns !== true && Boolean(sheet.columnsDoubt) && sheet.columnsChecked !== true,
   );
 }

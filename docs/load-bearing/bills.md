@@ -308,6 +308,24 @@ columns are plainly there was a dead end because of the words above them. Max:
   human step.
 - **A formula cell with no cached result reads as blank**, never
   `[object Object]` — one real copy saved its `Line` column that way.
+- **Two columns claiming one role are a question, not a first-wins**
+  (2026-11-16, audit C6). `item` and `description` are both synonyms of the
+  item description, so `Item | Code | Description | Qty` read the line numbers
+  as every record's name and dropped the description, with no check. The
+  first column is still READ, but the sheet stages `columnsDoubt` naming both
+  columns; the Columns panel opens (`columnsAwaitingALook`) and the confirm
+  refuses it (`sheetsWithColumnsInDoubt`, `columns_in_doubt`) until a person
+  sets the columns or presses "The columns are right". One column read three
+  ways on a two-row header is one claim.
+- **A saved layout narrower than the known headings does not outrank them**
+  (2026-11-16, audit C7). Layouts are global and `layoutAt` only asks that
+  every heading a layout names is present, so a two-heading layout saved off
+  one bill fitted every bill printing those headings and the code column was
+  never read. A layout applies only where it maps at least as many columns as
+  the synonyms' own reading of the sheet; otherwise the synonyms read it and
+  the sheet carries a `columnsDoubt` naming the layout, held as above. Where
+  the synonyms cannot read the sheet at all (the Aman "Spec Code"), a layout
+  applies exactly as before.
 
 **Read the specifications in this bill** registers the SAME stored file as an
 `ffe_schedule` document (`src/lib/bill-specifications.ts`, idempotent on
