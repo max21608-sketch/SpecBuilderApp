@@ -54,6 +54,18 @@ import type { ChecklistSave } from "@/components/records/ChecklistTab";
 import type { useAttributeActions } from "@/components/records/use-attribute-actions";
 import type { ConfigurationFamily } from "@/lib/configuration-family";
 import { labelOf, type FamilyMember, type Payload } from "@/components/records/record-payload";
+import { clampText } from "@/lib/shout";
+
+/**
+ * A source document's name, cut as a STRING to about two lines of the Source
+ * column (review 3.6). `clampText`, never CSS line-clamp: the DOM rule in
+ * docs/design-language.md. The whole name is the link's title.
+ */
+export const SOURCE_NAME_CHARS = 30;
+
+export function SourceName({ name }: { name: string }) {
+  return <>{clampText(name, 1, SOURCE_NAME_CHARS).clamped}</>;
+}
 
 const NO_PICTURE: RecordPictureState = { current: null, offered: null };
 
@@ -258,14 +270,18 @@ export default function SpecsTab({
         target="_blank"
         rel="noreferrer"
         title={`${attribute.source_filename ?? "source"}${attribute.source_page ? ` — page ${attribute.source_page}` : ""}`}
-        // TRUNCATED, NOT WRAPPED. A real filename is `Ashcombe House - Shop
+        // CUT, NOT WRAPPED WHOLE. A real filename is `Ashcombe House - Shop
         // Drawings - Issue A.pdf`, and wrapping it made every row in the table
         // six lines tall — the value the reader came for pushed apart by the
-        // name of the file it came from. The full name is on hover and in the
-        // document it opens.
-        className="block max-w-[9rem] truncate underline hover:text-neutral-900"
+        // name of the file it came from. A one-line `max-w-[9rem] truncate`
+        // then cut every name to "Appendix 2 - AMB_Bil…", which told two
+        // documents apart only by luck (review 3.6, 2026-11-16): now the name
+        // is cut as a STRING to about two lines of the column and may break
+        // anywhere, and the page number is never the part cut off. The full
+        // name is on hover and in the document it opens.
+        className="underline [overflow-wrap:anywhere] hover:text-neutral-900"
       >
-        {attribute.source_filename ?? "source"}
+        <SourceName name={attribute.source_filename ?? "source"} />
         {attribute.source_page ? ` p${attribute.source_page}` : ""}
       </a>
     ) : (
@@ -405,10 +421,15 @@ export default function SpecsTab({
             <Table>
               <thead>
                 <tr>
-                  <Th className="w-[24%]">Label</Th>
-                  <Th className="w-[28%]">Value</Th>
-                  <Th className="w-[22%]">BWS field</Th>
-                  <Th className="w-[16%]">Source</Th>
+                  {/* THE VALUE GETS THE ROOM (review 3.6, 2026-11-16). At
+                      24/28/22/16 a fabric's description wrapped to eleven
+                      lines in a 182px column while "Fabric" and "COM 1" sat
+                      in half-empty ones. Label and BWS field are a word or
+                      two and may wrap onto a second line. */}
+                  <Th className="w-[12%]">Label</Th>
+                  <Th className="w-[40%]">Value</Th>
+                  <Th className="w-[15%]">BWS field</Th>
+                  <Th className="w-[19%]">Source</Th>
                   <Th />
                 </tr>
               </thead>

@@ -100,7 +100,11 @@ function Detail({
         {label}
         {tip && <Tip>{tip}</Tip>}
       </div>
-      <div className="mt-0.5 truncate text-sm text-neutral-900">{children}</div>
+      {/* WRAPS, never cut (review 3.10, 2026-11-16): `truncate` cut the
+          project's own name to "TEST: Aman pack in full (2026-10-…" in a card
+          with room beside it. A long word or an address breaks rather than
+          widening the grid; the BWS number keeps itself on one line. */}
+      <div className="mt-0.5 text-sm text-neutral-900 [overflow-wrap:anywhere]">{children}</div>
     </div>
   );
 }
@@ -225,7 +229,7 @@ export default function ProjectDetailsCard<P extends ProjectDetails>({
         >
           <div id="project-details" className="grid grid-cols-2 gap-x-5 gap-y-4 sm:grid-cols-4">
             <Detail label="BWS number">
-              <span className="font-mono">{project.bws_project_number}</span>
+              <span className="whitespace-nowrap font-mono">{project.bws_project_number}</span>
             </Detail>
             <Detail label="Name">{project.name}</Detail>
             <Detail label="Client">{project.client || <Unset>none recorded</Unset>}</Detail>

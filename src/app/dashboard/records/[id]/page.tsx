@@ -47,6 +47,10 @@ import { useConfigurationPanelState } from "@/components/records/ConfigurationPa
 import ChecklistTab, { useChecklistSave } from "@/components/records/ChecklistTab";
 import SpecsTab from "@/components/records/SpecsTab";
 import RecordHeader from "@/components/records/RecordHeader";
+import Link from "next/link";
+import PageHeader from "@/components/ui/PageHeader";
+import { buttonClass } from "@/components/ui/Button";
+import NotFoundScreen, { BACK_TO_PROJECTS } from "@/components/layout/NotFoundScreen";
 
 export type { Answer, DesignerContact, Payload } from "@/components/records/record-payload";
 import type { Payload } from "@/components/records/record-payload";
@@ -63,6 +67,9 @@ function RecordView() {
   const { id } = useParams<{ id: string }>();
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Whether the FIRST load was refused as not found (review 3.4): that is a
+  // dead end with its own heading and a way on, not a bare red box.
+  const [missing, setMissing] = useState(false);
   const [savingCategory, setSavingCategory] = useState(false);
   const [savingLevel, setSavingLevel] = useState(false);
   /**
@@ -120,8 +127,9 @@ function RecordView() {
 
   const load = useCallback(async () => {
     const res = await apiFetch<Payload>(`/api/records/${id}`);
-    if (!res.ok) { setError(res.error); return; }
+    if (!res.ok) { setError(res.error); setMissing(res.status === 404); return; }
     setError(null);
+    setMissing(false);
     setData(res.data);
   }, [id]);
 
@@ -198,7 +206,33 @@ function RecordView() {
   }
 
 
-  if (error && !data) return <PageBody><Note tone="danger">{error}</Note></PageBody>;
+  // A DEAD END SAYS WHAT HAPPENED AND OFFERS THE WAY ON (review 3.4,
+  // 2026-11-16). It was a bare red "No such record." with no heading and
+  // nothing to press. Before any data there is no project to go back to, so
+  // the way on is the projects list.
+  if (error && !data) {
+    return missing ? (
+      <NotFoundScreen title="No such record">
+        There is no record at this address. It may have been deleted with its project, or the link may be wrong.
+      </NotFoundScreen>
+    ) : (
+      <>
+        <PageHeader title="This record could not be loaded" subtitle="Nothing was saved or changed by this." />
+        <PageBody>
+          <Note
+            tone="danger"
+            actions={
+              <Link href={BACK_TO_PROJECTS.href} className={buttonClass("secondary", "sm", "no-underline")}>
+                {BACK_TO_PROJECTS.label}
+              </Link>
+            }
+          >
+            {error}
+          </Note>
+        </PageBody>
+      </>
+    );
+  }
   if (!data) return <PageBody><Spinner label="Loading record" /></PageBody>;
 
   const { record, refs, answers, attributes, categories } = data;

@@ -315,6 +315,43 @@ export function ItemName({ text }: { text: string }) {
 }
 
 /**
+ * A GATE NOT YET REACHED: "after TGQ", ON TWO LINES (2026-11-16, review 3.1).
+ * On one line it was the widest thing in TG0 and in TG1 — 96px each for a
+ * three-letter header — and the phase table ran 15px past its 1358px box at
+ * 1920 and at 1440. The words break where the "no category" cell's do, between
+ * the word and the gate, so the column is as wide as "after" and nothing is
+ * hidden. `Chip` is no-wrap, so the break is an explicit one.
+ */
+export function AfterGate({ gate }: { gate: Gate }) {
+  return (
+    <Chip tone="blocked" className="leading-4">
+      <span>
+        after
+        <br />
+        {GATE_SHORT_LABELS[gate]}
+      </span>
+    </Chip>
+  );
+}
+
+/**
+ * The suggestions "Accept all" takes, counted over the SAME scope the route
+ * accepts under one phase (`acceptSuggestedLevels`): a live record, not a split
+ * line's heading (its configurations are counted instead), with no level and
+ * a suggestion. Retired rows are listed when "show them" is on, and a heading
+ * may still carry the bill's guess; counting either made the button print a
+ * number the route would refuse once it was sent (review 3, 2026-11-16).
+ */
+export function acceptableSuggestions<
+  T extends { status: string; level: string | null; level_suggested: string | null; variant_count: string | number | null },
+>(records: T[]): T[] {
+  return records.filter(
+    (record) =>
+      record.status === "active" && Number(record.variant_count ?? 0) === 0 && !record.level && Boolean(record.level_suggested),
+  );
+}
+
+/**
  * A LEVEL SUGGESTION'S REASON, CUT TO ONE SHORT LINE. The evidence stays on
  * the row — a suggestion is never shown without what it was read from — but a
  * whole sentence under every button made every row five lines tall. The full
@@ -521,14 +558,18 @@ export default function SpecTable({
     }
   }
 
-  /** Agree with every level this run's records were guessed. */
-  async function acceptLevels() {
+  /**
+   * Agree with every level this run's records were guessed — the number the
+   * button printed goes with it, so a set that changed since this screen
+   * loaded is refused (409 `levels_stale`) rather than accepted unseen.
+   */
+  async function acceptLevels(expectedCount: number) {
     setAcceptingLevels(true);
     try {
       const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/levels/accept`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ runId }),
+        body: JSON.stringify({ runId, expectedCount }),
       });
       // Reload first, then report: this table clears its banner on a
       // successful load, so setting the message first would flash a refusal
@@ -631,7 +672,7 @@ export default function SpecTable({
   // Records carrying a level this app guessed and nobody has agreed to. Until
   // somebody does, every one of them is unquotable-by-unknown rather than
   // unquotable-by-answer, which is not the same thing and reads the same.
-  const suggested = records.filter((record) => !record.level && record.level_suggested);
+  const suggested = acceptableSuggestions(records);
   const suggestedLevels = suggested.length;
   const suggestedBreakdown = [...new Set(suggested.map((record) => record.level_suggested))]
     .map((level) => `${suggested.filter((record) => record.level_suggested === level).length} ${level}`)
@@ -749,7 +790,7 @@ export default function SpecTable({
                 value={`Accept all ${suggestedLevels}`}
                 evidence={suggestedBreakdown}
                 busy={acceptingLevels}
-                onAccept={() => void acceptLevels()}
+                onAccept={() => void acceptLevels(suggestedLevels)}
               />
               <Button size="xs" variant="quiet" onClick={() => setFocus("no_level")}>
                 Review one by one
@@ -775,7 +816,10 @@ export default function SpecTable({
           The counts NEVER change with the filter. They are the run's own, so
           narrowing the screen can never make a run look finished. */}
       {records.length > 0 && (
-        <div className={`grid grid-cols-2 gap-2.5 ${tally.disagreements > 0 ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
+        // `mt-3`, the gap every other block in this column carries above
+        // itself (the Notes, the filter row, the table): without it the
+        // suggested-level banner sat directly on the tiles (review 3.3).
+        <div className={`mt-3 grid grid-cols-2 gap-2.5 ${tally.disagreements > 0 ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
           {/* ==================================================================
               EVERY TILE ON THIS STRIP COUNTS ITEMS, BECAUSE THAT IS WHAT
               PRESSING ONE LISTS.
@@ -1519,9 +1563,11 @@ export default function SpecTable({
                                     : `${entry.outstanding} outstanding at ${gate} — open the record to see which`
                                 }
                               >
-                                <Chip tone={waitingFor ? "blocked" : "danger"}>
-                                  {waitingFor ? `after ${GATE_SHORT_LABELS[waitingFor]}` : entry.outstanding}
-                                </Chip>
+                                {waitingFor ? (
+                                  <AfterGate gate={waitingFor} />
+                                ) : (
+                                  <Chip tone="danger">{entry.outstanding}</Chip>
+                                )}
                               </Link>
                             )}
                           </Td>

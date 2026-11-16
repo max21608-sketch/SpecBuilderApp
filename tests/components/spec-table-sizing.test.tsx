@@ -7,7 +7,8 @@
 // and names here are invented; only the lengths copy the real bill's.
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { ClientRefs, ItemName, ITEM_CLAMP } from "@/components/records/SpecTable";
+import { AfterGate, ClientRefs, ItemName, ITEM_CLAMP } from "@/components/records/SpecTable";
+import { SourceName, SOURCE_NAME_CHARS } from "@/components/records/SpecsTab";
 import RecordTitle, { RECORD_TITLE_CHARS } from "@/components/records/RecordTitle";
 
 const LONG_NAME = "Bedframe & Headboard - TWIN (X18 = BED BASES - X1 HEADBOARD PER X2 BED BASES) with a long extra clause to be cut";
@@ -57,5 +58,32 @@ describe("the record title", () => {
     const { container } = render(<RecordTitle label="ZZ-FUR-10" name="Drawers" />);
     expect(container.textContent).toBe("ZZ-FUR-10 · Drawers");
     expect(container.querySelector("[title]")).toBeNull();
+  });
+});
+
+// Review 3.1 (2026-11-16): the phase table ran 15px past its 1358px box at 1920
+// and 1440. The widest cells in TG0 and TG1 were the one-line "after TGQ"
+// chip, 96px each under a three-letter header; on two lines each column is as
+// wide as "after". jsdom has no layout, so what is held is the break itself.
+describe("a gate not yet reached", () => {
+  it("prints on two lines, the gate on the second", () => {
+    const { container } = render(<AfterGate gate="TGQ" />);
+    expect(container.querySelector("br")).not.toBeNull();
+    expect(container.textContent).toBe("afterTGQ");
+  });
+});
+
+// Review 3.6 (2026-11-16): the Source column cut every name to
+// "Appendix 2 - AMB_Bil…" on one line. It is now cut as a string to about two
+// lines of the column, the whole of it on the link's title.
+describe("a spec's source name", () => {
+  it("is cut as a string when long and printed whole when short", () => {
+    const long = "Appendix 2 - AMB_Bill of Quantities - Casegoods, Seating and Tables Rev 0.xlsx";
+    const { container, rerender } = render(<SourceName name={long} />);
+    expect(container.textContent!.length).toBeLessThanOrEqual(SOURCE_NAME_CHARS + 1);
+    expect(container.textContent).toMatch(/…$/);
+    expect(container.textContent!.length).toBeGreaterThan("Appendix 2 - AMB_Bil".length);
+    rerender(<SourceName name="Shop drawings.pdf" />);
+    expect(container.textContent).toBe("Shop drawings.pdf");
   });
 });
