@@ -93,6 +93,7 @@ export default function UncategorisedBlock({
         {listed.map((record) => (
           <li key={record.recordId} className="flex flex-wrap items-center gap-2">
             <Link
+              prefetch={false}
               href={`/dashboard/records/${record.recordId}`}
               target="_blank"
               rel="noopener noreferrer"

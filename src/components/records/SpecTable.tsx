@@ -1194,6 +1194,7 @@ export default function SpecTable({
                           className={`mr-2 inline-block h-2 w-2 rounded-full align-middle ${dot}`}
                         />
                         <Link
+                          prefetch={false}
                           href={`/dashboard/records/${record.id}`}
                           className="font-mono text-neutral-600 no-underline hover:underline"
                         >
@@ -1230,6 +1231,7 @@ export default function SpecTable({
                       </Td>
                       <Td className={`min-w-[13rem] ${isConfiguration ? "pl-6" : ""}`}>
                         <Link
+                          prefetch={false}
                           href={`/dashboard/records/${record.id}`}
                           className="text-blue-700 no-underline hover:underline"
                         >
@@ -1264,6 +1266,7 @@ export default function SpecTable({
                             >
                               {(record.open_disagreements ?? 0) > 0 && (
                                 <Link
+                                  prefetch={false}
                                   href={`/dashboard/records/${record.id}?tab=specs#disagreements`}
                                   className="no-underline"
                                   title="Another document says something different from a value this item holds. Open it to decide which stands."
@@ -1291,6 +1294,7 @@ export default function SpecTable({
                           <span className="block text-xs text-neutral-500">
                             mock-up of{" "}
                             <Link
+                              prefetch={false}
                               href={`/dashboard/records/${record.mockup_of}`}
                               className="text-blue-700 no-underline hover:underline"
                             >
@@ -1302,6 +1306,7 @@ export default function SpecTable({
                         {record.mockup_copy_id && (
                           <span className="block text-xs text-neutral-500">
                             <Link
+                              prefetch={false}
                               href={`/dashboard/records/${record.mockup_copy_id}`}
                               className="text-blue-700 no-underline hover:underline"
                             >
@@ -1370,6 +1375,7 @@ export default function SpecTable({
                         {record.category_name ? (
                           <>
                             <Link
+                              prefetch={false}
                               href={`/dashboard/records/${record.id}`}
                               className="text-neutral-800 no-underline hover:underline"
                             >
@@ -1555,6 +1561,7 @@ export default function SpecTable({
                                  shows, so the column never says less than it
                                  used to. */
                               <Link
+                                prefetch={false}
                                 href={`/dashboard/records/${record.id}?tab=gates`}
                                 className="no-underline"
                                 title={
@@ -1592,6 +1599,7 @@ export default function SpecTable({
                           )}
                           {record.category_name ? (
                             <Link
+                              prefetch={false}
                               href={`/dashboard/records/${record.id}`}
                               className="rounded border border-transparent px-2 py-1 text-xs text-neutral-600 no-underline hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-900"
                             >
@@ -1602,6 +1610,7 @@ export default function SpecTable({
                                so the useful action is not "look at it" — it is
                                the decision that creates its checklist. */
                             <Link
+                              prefetch={false}
                               href={`/dashboard/records/${record.id}`}
                               className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs text-neutral-700 no-underline hover:bg-neutral-50"
                             >
@@ -1748,7 +1757,7 @@ function ToQuotePanel({
       <p className="text-sm text-neutral-700">
         <b>No category</b>, so this item has no checklist and nothing to count — not nothing outstanding. Choosing a
         category is what creates its questions. Set one on{" "}
-        <Link href={`/dashboard/records/${record.id}`} className="text-blue-700 no-underline hover:underline">
+        <Link prefetch={false} href={`/dashboard/records/${record.id}`} className="text-blue-700 no-underline hover:underline">
           the record
         </Link>
         .
@@ -1766,7 +1775,7 @@ function ToQuotePanel({
         Nothing on this item is tiered yet, so this column cannot say what is missing.{" "}
         <b>A level</b> — simple, complex or hero — is what decides which questions block a quote, and it also picks
         the BWS boilerplate the item is priced against. Set it in the <b>Level</b> column on this row, or on{" "}
-        <Link href={`/dashboard/records/${record.id}`} className="text-blue-700 no-underline hover:underline">
+        <Link prefetch={false} href={`/dashboard/records/${record.id}`} className="text-blue-700 no-underline hover:underline">
           the record
         </Link>
         .
@@ -1834,6 +1843,7 @@ function ToQuotePanel({
                       checklist scrolls to); a dimension slot on the Specs tab;
                       a record column on the item's details. */}
                   <Link
+                    prefetch={false}
                     href={
                       question.kind === "slot"
                         ? `/dashboard/records/${record.id}?tab=specs`

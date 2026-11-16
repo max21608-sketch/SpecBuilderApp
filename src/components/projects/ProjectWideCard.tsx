@@ -404,6 +404,7 @@ function AnswerForm({
                   }
                 />
                 <Link
+                  prefetch={false}
                   href={`/dashboard/records/${row.recordId}?tab=checklist`}
                   className="font-mono text-blue-700 no-underline hover:underline"
                 >
