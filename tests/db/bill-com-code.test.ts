@@ -122,7 +122,8 @@ describeIfDb("a bill that names its cloths by a COM code", () => {
   const indexOf = async (row: number) => (await parsed()).sheets[0]!.lines.find((line) => line.lineNo === row)!.index;
   const patch = async (body: Record<string, unknown>) => {
     const { PATCH } = await import("@/app/api/imports/[id]/route");
-    const response = await PATCH(jsonRequest("PATCH", body), params(runId));
+    // The bill's version as a screen would hold it: every line write carries one.
+    const response = await PATCH(jsonRequest("PATCH", { ...body, version: await stagedVersion(client, runId) }), params(runId));
     const result = (await response.json()) as { ok: boolean; error?: string };
     expect(response.status, result.error).toBe(200);
   };

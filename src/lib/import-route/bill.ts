@@ -268,6 +268,16 @@ export async function getBillReview(run: Row): Promise<Response> {
 }
 
 // ---- the BOQ's positional autosave -----------------------------------------
+const BILL_VERSION_MISSING = "Send the version of this bill you were shown.";
+const BILL_MOVED =
+  "This bill changed since this screen loaded, so nothing was saved. Check the reloaded bill, then make your change again.";
+
+/** Whether a write that matched no row missed because the bill moved on, rather than because the line went. */
+async function billMoved(id: string, expectedVersion: number): Promise<boolean> {
+  const rows = await sql`select version, status from intake_runs where id = ${id}`;
+  return Boolean(rows[0]) && rows[0]!.status === "parsed" && Number(rows[0]!.version) !== expectedVersion;
+}
+
 // Merges the reviewer's change into the line that is still present at that
 // index, rather than writing back an array the client sent -- a snapshot
 // rewrite races another tab's autosave and silently reverts it.
@@ -292,6 +302,7 @@ export async function patchBoqLine(
     lines?: unknown;
     picture?: unknown;
     pictureVersion?: unknown;
+    version?: unknown;
   },
   actor: string,
 ): Promise<Response> {
@@ -332,8 +343,18 @@ export async function patchBoqLine(
   // become the one a fabric is written onto.
   if (body.rowKind !== undefined) {
     if (index === null) return json({ ok: false, error: "A row kind is set on one line." }, 400);
-    return patchRowKind(id, sheetIndex, index, body.rowKind, body.finishForRow, actor);
+    if (typeof body.version !== "number") return json({ ok: false, error: BILL_VERSION_MISSING }, 400);
+    return patchRowKind(id, sheetIndex, index, body.rowKind, body.finishForRow, body.version, actor);
   }
+
+  // EVERY WRITE BELOW CARRIES THE BILL'S VERSION, as its render held it (the
+  // screen carries forward the version each of its own writes returns, so a
+  // reviewer's quick edits never refuse each other). These are POSITIONAL
+  // writes — `sheets[i].lines[j]` — so a bill that moved underneath the screen
+  // (another reviewer's choice, a re-read that re-laid the lines) is refused,
+  // writing nothing, rather than merged onto whatever is now at that address.
+  if (typeof body.version !== "number") return json({ ok: false, error: BILL_VERSION_MISSING }, 400);
+  const expectedVersion = body.version;
 
   // A SHEET-level change: its run name, or dropping the tab entirely. Addressed
   // the same way and merged into the live row, never written back wholesale.
@@ -401,6 +422,7 @@ export async function patchBoqLine(
           updated_by = ${actor}
       where id = ${id}
         and status = 'parsed'
+        and version = ${expectedVersion}
         and parsed->'sheets'->(${sheetIndex}::int) is not null
         and (
           ${revising}::text is null
@@ -429,6 +451,7 @@ export async function patchBoqLine(
       `;
     }
     if (!rows[0]) {
+      if (await billMoved(id, expectedVersion)) return json({ ok: false, error: BILL_MOVED }, 409);
       return json({ ok: false, error: "That sheet is no longer in this bill, or the bill is already confirmed." }, 409);
     }
     return json({ ok: true, version: rows[0].version });
@@ -519,10 +542,12 @@ export async function patchBoqLine(
           updated_by = ${actor}
       where id = ${id}
         and status = 'parsed'
+        and version = ${expectedVersion}
         and parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int) is not null
       returning version
     `;
     if (!rows[0]) {
+      if (await billMoved(id, expectedVersion)) return json({ ok: false, error: BILL_MOVED }, 409);
       return json(
         { ok: false, error: "That line is no longer in this bill, or the bill is already confirmed." },
         409,
@@ -547,12 +572,13 @@ export async function patchBoqLine(
   try {
     const result = await withTransaction(async (txn) => {
       const staged = await txn`
-        select parsed, status from intake_runs where id = ${id} for update
+        select parsed, status, version from intake_runs where id = ${id} for update
       `;
       if (!staged[0]) throw new DomainConflictError("gone", "No such bill.", { status: 404 });
       if (staged[0].status !== "parsed") {
         throw new DomainConflictError("confirmed", "This bill is already confirmed.");
       }
+      if (Number(staged[0].version) !== expectedVersion) throw new DomainConflictError("bill_stale", BILL_MOVED);
       const sheets = ((staged[0].parsed as { sheets?: CarrySheet[] } | null)?.sheets ?? []) as CarrySheet[];
       const targets = planCarry(sheets, { sheetIndex, index }, decision);
 
@@ -615,6 +641,7 @@ async function patchRowKind(
   index: number,
   rowKind: unknown,
   finishForRow: unknown,
+  expectedVersion: number,
   actor: string,
 ): Promise<Response> {
   if (!isBoqRowKind(rowKind)) return json({ ok: false, error: "That is not a kind of row." }, 400);
@@ -623,9 +650,10 @@ async function patchRowKind(
   }
   try {
     const version = await withTransaction(async (txn) => {
-      const rows = await txn`select parsed, status from intake_runs where id = ${id} for update`;
+      const rows = await txn`select parsed, status, version from intake_runs where id = ${id} for update`;
       if (!rows[0]) throw new DomainConflictError("gone", "No such bill.", { status: 404 });
       if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This bill is already confirmed.");
+      if (Number(rows[0].version) !== expectedVersion) throw new DomainConflictError("bill_stale", BILL_MOVED);
       const sheet = assertBoqDocument(rows[0].parsed).sheets[sheetIndex];
       const line = sheet?.lines[index];
       if (!sheet || !line) throw new DomainConflictError("gone", "That line is no longer in this bill.");

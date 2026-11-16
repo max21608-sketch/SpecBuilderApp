@@ -13,7 +13,7 @@ import RecordDetails from "@/components/records/RecordDetails";
 const apiFetch = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api-fetch", () => ({ apiFetch }));
 
-const record = {
+const record: React.ComponentProps<typeof RecordDetails>["record"] = {
   item_description: "Sofa",
   area: "Rooms",
   qty: 14,
@@ -113,5 +113,53 @@ describe("the item details card", () => {
     expect(picker().closest("div.hidden")).not.toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(picker().closest("div.hidden")).toBeNull();
+  });
+
+  it("keeps what is being typed when the page hands in a new record object of the same version", async () => {
+    // Every reload of the record page builds a new `record` object. The form
+    // was re-seeded on the OBJECT, so anything else on the screen saving
+    // wiped the panel mid-sentence.
+    const { rerender } = render(<RecordDetails recordId="r1" record={record} onSaved={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const area = screen.getByDisplayValue("Rooms");
+    await userEvent.clear(area);
+    await userEvent.type(area, "Lobby");
+
+    rerender(<RecordDetails recordId="r1" record={{ ...record }} onSaved={() => {}} />);
+    expect(screen.getByDisplayValue("Lobby")).toBeInTheDocument();
+  });
+
+  it("keeps the panel open with the typed text after a 409, says so, and only then sends the new version", async () => {
+    apiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      error: "Someone else changed this item. Reload and try again.",
+      data: null,
+    });
+    let current = record;
+    let rerenderIt: (ui: React.ReactElement) => void = () => {};
+    // The reload after the refusal brings the other person's edit: version 4.
+    const onSaved = () => {
+      current = { ...record, internal_notes: "Theirs", version: 4 };
+      rerenderIt(<RecordDetails recordId="r1" record={current} onSaved={onSaved} />);
+    };
+    const { rerender } = render(<RecordDetails recordId="r1" record={current} onSaved={onSaved} />);
+    rerenderIt = rerender;
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const area = screen.getByDisplayValue("Rooms");
+    await userEvent.clear(area);
+    await userEvent.type(area, "Lobby");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Someone else changed this item. Reload and try again.")).toBeInTheDocument();
+    expect(screen.getByText(/This item was changed while you were editing/)).toBeInTheDocument();
+    // Still open, still holding the text.
+    expect(screen.getByDisplayValue("Lobby")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(JSON.parse((apiFetch.mock.calls[0]![1] as { body: string }).body).version).toBe(3);
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(JSON.parse((apiFetch.mock.calls[1]![1] as { body: string }).body).version).toBe(4);
   });
 });

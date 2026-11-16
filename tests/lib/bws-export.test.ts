@@ -7,6 +7,8 @@ import {
   SPEC_FIELD_COLUMNS,
   composeRow,
   composeRowCells,
+  cellsByField,
+  specShipsInstead,
   composeWorkbook,
   EXPORT_QUALIFIER_MODE,
   composeDimensions,
@@ -607,5 +609,24 @@ describe("an internal finish code never reaches the file", () => {
     ];
     const row = composeRow(scope({ attributes }), record(), attributes, []);
     expect(row[indexOfField(1)]).toBe("Aissa Dione raffia TBC");
+  });
+});
+
+describe("what the file ships instead of a checklist answer (review 1.8)", () => {
+  const typed = { recordId: "rec-1", specFieldJsonId: 1, value: "Velvet Moss 04", qualifier: null };
+
+  it("names the spec's cell where a spec fills the field and the typed answer says otherwise", () => {
+    const cells = cellsByField(scope(), record(), [attribute()], [typed]);
+    // The export's own precedence: the spec wins the cell.
+    expect(cells.get(1)?.value).toBe("Yarn Harbour LW44102 - 01");
+    expect(specShipsInstead(cells.get(1), typed)).toBe("Yarn Harbour LW44102 - 01");
+  });
+
+  it("says nothing where the answer is what ships, where it is empty, or where no spec holds the field", () => {
+    const same = { ...typed, value: "Yarn Harbour LW44102 - 01" };
+    expect(specShipsInstead(cellsByField(scope(), record(), [attribute()], [same]).get(1), same)).toBeNull();
+    expect(specShipsInstead(cellsByField(scope(), record(), [attribute()], []).get(1), { value: "  ", qualifier: null })).toBeNull();
+    // No spec: the answer IS the cell.
+    expect(specShipsInstead(cellsByField(scope(), record(), [], [typed]).get(1), typed)).toBeNull();
   });
 });

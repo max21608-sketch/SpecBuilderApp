@@ -9,7 +9,7 @@ import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import { withShownTargets } from "./shown-targets";
 import pg from "pg";
-import { type SpecFieldEntry } from "@/lib/drawing-document";
+import { measuredRows, type DrawingItem, type SpecFieldEntry } from "@/lib/drawing-document";
 import { stageDrawings } from "@/lib/drawing-legacy";
 import { stagePreamble } from "@/lib/preamble-document";
 import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
@@ -171,6 +171,17 @@ describeIfDb("intake routes", () => {
    * version 1 would be worse, because `wasReadByModel` reads `isOverall` off
    * the rows and would report a guessing run as one the model had read.
    */
+  /** The rows a bulk unit reaches, at the versions a screen loading now would hold. */
+  async function shownRows(runId: string, itemId?: string) {
+    const parsed = (await client.query(`select parsed from intake_runs where id = $1`, [runId])).rows[0].parsed as {
+      items: DrawingItem[];
+    };
+    return parsed.items
+      .filter((item) => !itemId || item.id === itemId)
+      .flatMap(measuredRows)
+      .map((row) => ({ id: row.id, version: row.version }));
+  }
+
   async function stageDrawingRun(
     itemCode: string,
     overrides: Parameters<typeof stageDrawings>[0][number],
@@ -316,7 +327,9 @@ describeIfDb("intake routes", () => {
     // dimension is a BLOCKER and the confirm refuses the card until it is
     // answered. Nothing about promotion changes that.
     const { PATCH } = await import("@/app/api/imports/[id]/route");
-    expect((await PATCH(patch({ bulkUnit: { scope: "run", unit: "mm" } }), params(runId))).status).toBe(200);
+    expect(
+      (await PATCH(patch({ bulkUnit: { scope: "run", unit: "mm", expected: await shownRows(runId) } }), params(runId))).status,
+    ).toBe(200);
 
     const reread = await client.query(`select parsed, version from intake_runs where id = $1`, [runId]);
     const item = reread.rows[0].parsed.items[0];
@@ -498,7 +511,7 @@ describeIfDb("intake routes", () => {
     expect(staged.items[0]!.observations.filter((o) => o.attrGroup === "dimension" && o.unit === null)).toHaveLength(2);
 
     const { PATCH } = await import("@/app/api/imports/[id]/route");
-    const res = await PATCH(patch({ bulkUnit: { scope: "run", unit: "mm" } }), params(runId));
+    const res = await PATCH(patch({ bulkUnit: { scope: "run", unit: "mm", expected: await shownRows(runId) } }), params(runId));
     expect(res.status).toBe(200);
     expect((await res.json()).changed).toBe(2);
 
@@ -515,6 +528,42 @@ describeIfDb("intake routes", () => {
     const material = observations.find((o: { attrGroup: string }) => o.attrGroup === "material");
     expect(material.unit).toBeNull();
     expect(material.version).toBe(1);
+  });
+
+  it("refuses a bulk unit when a figure it reaches moved since the screen loaded, and writes nothing", async () => {
+    // Review 1.4. The press reached rows the reviewer never saw: a figure
+    // somebody else had just set to cm became mm, unseen.
+    const code = "__QAX122";
+    await makeRecord(mainRunId, code, "__QA Bench stale");
+    const { runId } = await stageDrawingRun(code, {
+      ...drawingItem(code),
+      dimensions: [
+        { labelRaw: "Width", valueRaw: "190" },
+        { labelRaw: "Seat height", valueRaw: "735" },
+      ],
+    });
+    const shown = await shownRows(runId);
+    // Somebody else's edit to one of them lands first: its version moves.
+    await client.query(
+      `update intake_runs
+          set parsed = jsonb_set(parsed, '{items,0,observations}', (
+                select jsonb_agg(case when o->>'id' = $2 then o || jsonb_build_object('unit', 'cm', 'version', (o->>'version')::int + 1) else o end)
+                from jsonb_array_elements(parsed->'items'->0->'observations') o))
+        where id = $1`,
+      [runId, shown[0]!.id],
+    );
+    const before = (await client.query(`select parsed, version from intake_runs where id = $1`, [runId])).rows[0];
+
+    const { PATCH } = await import("@/app/api/imports/[id]/route");
+    const res = await PATCH(patch({ bulkUnit: { scope: "run", unit: "mm", expected: shown } }), params(runId));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("1 figure changed since this screen loaded");
+    const after = (await client.query(`select parsed, version from intake_runs where id = $1`, [runId])).rows[0];
+    expect(after.version).toBe(before.version);
+    expect(after.parsed).toEqual(before.parsed);
+
+    // With no set at all it is refused as invalid, never applied to everything.
+    expect((await PATCH(patch({ bulkUnit: { scope: "run", unit: "mm" } }), params(runId))).status).toBe(400);
   });
 
   it("keeps a corrected figure in its slot instead of re-guessing it away", async () => {
@@ -611,7 +660,10 @@ describeIfDb("intake routes", () => {
     const { PATCH } = await import("@/app/api/imports/[id]/route");
     await POSTConfirmIgnore(runId, item.id, ignored);
 
-    const res = await PATCH(patch({ bulkUnit: { scope: "item", itemId: item.id, unit: "mm" } }), params(runId));
+    const res = await PATCH(
+      patch({ bulkUnit: { scope: "item", itemId: item.id, unit: "mm", expected: await shownRows(runId, item.id) } }),
+      params(runId),
+    );
     expect(res.status).toBe(200);
     expect((await res.json()).changed).toBe(1);
 

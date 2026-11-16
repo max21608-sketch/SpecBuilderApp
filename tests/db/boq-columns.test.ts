@@ -25,6 +25,7 @@
 // ============================================================================
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import pg from "pg";
+import { stagedVersion } from "./staged-version";
 import { describeIfDb, qaNumber } from "./db-tier";
 import { REFERENCE_BOQ_ALIASES, assertBoqDocument } from "@/lib/boq-import";
 import { foldHeading } from "@/lib/boq-roles";
@@ -222,7 +223,7 @@ describeIfDb("a bill is mapped, not refused", () => {
     // The tender summary is not a bill: drop it, the way the panel's
     // "Not a bill" does, through the sheet PATCH that already exists.
     const { PATCH } = await import("@/app/api/imports/[id]/route");
-    const dropped = await PATCH(request({ sheetIndex: 1, ignored: true }, "PATCH"), params(unreadId));
+    const dropped = await PATCH(request({ sheetIndex: 1, ignored: true, version: await stagedVersion(client, unreadId) }, "PATCH"), params(unreadId));
     expect(dropped.status).toBe(200);
 
     const staged = await run(unreadId);

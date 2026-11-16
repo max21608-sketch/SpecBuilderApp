@@ -225,7 +225,7 @@ describeIfDb("A revision and the configurations under its lines", () => {
       { name: "__QA TAB TWO", replacesRunId: null, lines: [line(0, "__QA-NEW")] },
     ]);
     const { PATCH } = await import("@/app/api/imports/[id]/route");
-    const response = await PATCH(request("PATCH", { sheetIndex: 1, replacesRunId: runId }), params(importId));
+    const response = await PATCH(request("PATCH", { sheetIndex: 1, replacesRunId: runId, version: await stagedVersion(client, importId) }), params(importId));
     expect(response.status).toBe(409);
     const body = (await response.json()) as { error: string };
     expect(body.error).toContain("__QA TAB ONE");

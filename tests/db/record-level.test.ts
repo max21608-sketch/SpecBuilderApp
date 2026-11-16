@@ -144,6 +144,33 @@ describeIfDb("item level suggestions", () => {
     expect(after.rows[0].n - before.rows[0].n).toBe(1);
   });
 
+  it("refuses an accept-all whose count differs from what the button showed, and writes nothing", async () => {
+    // Review 1.4. "Accept 2" pressed on a screen drawn before a third
+    // suggestion arrived accepted three, one of them unseen.
+    const a = await makeRecord("complex");
+    const b = await makeRecord("simple");
+    const pending = Number(
+      (
+        await client.query(
+          `select count(*)::int as n from spec_records
+            where project_id = $1 and run_id = $2 and level is null and level_suggested is not null`,
+          [projectId, runId],
+        )
+      ).rows[0].n,
+    );
+    await expect(
+      withTransaction((txn) => acceptSuggestedLevels(txn, { projectId, runId, actor: "qa", expectedCount: pending - 1 })),
+    ).rejects.toMatchObject({ code: "levels_stale", status: 409 });
+    expect((await read(a.id)).level).toBeNull();
+    expect((await read(b.id)).level).toBeNull();
+
+    const result = await withTransaction((txn) =>
+      acceptSuggestedLevels(txn, { projectId, runId, actor: "qa", expectedCount: pending }),
+    );
+    expect(result.accepted).toBe(pending);
+    expect((await read(a.id)).level).toBe("complex");
+  });
+
   // ITEM 1.15 — the drawings card's level control. One drawing of S-200 is
   // quoted by the mock-up, main and VE phases, so one click writes three
   // records; the brass leg is one fact on one page and the trail has to say so

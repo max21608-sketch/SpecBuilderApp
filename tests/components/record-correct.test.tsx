@@ -378,4 +378,48 @@ describe("what a size row is called on the Specs tab", () => {
     expect(cell).toHaveAttribute("title", "The document labels it “OVERALL WIDTH”");
     expect(screen.queryByText("OVERALL WIDTH")).toBeNull();
   });
+
+});
+
+describe("editing a library-linked finish (review 1.9)", () => {
+  // On a spec linked to the finishes library, words that disagree
+  // with the library's description unlink it on save — and the form said so
+  // only afterwards. Now it says so as it is typed, by the save's own rule.
+  it("says before the save that new words will unlink a library finish, and not otherwise", async () => {
+    serve(
+      payload({
+        attributes: [
+          attribute({
+            attr_group: "material",
+            label: "Seat fabric",
+            value: "Yarn Harbour LW44102",
+            unit: null,
+            dimension_slot: null,
+            material_code: "FAB-01",
+            finish_id: "fin-1",
+            finish_code: "FAB-01",
+            finish_description: "Yarn Harbour LW44102",
+            finish_state: "confirmed",
+          }),
+        ],
+      }),
+    );
+    render(<RecordPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Edit value" }));
+    const value = (await screen.findByLabelText("Value")) as HTMLInputElement;
+    // As opened, the words are the library's: nothing to warn about.
+    expect(screen.queryByText(/Saving this unlinks it from FAB-01/)).toBeNull();
+
+    await userEvent.clear(value);
+    await userEvent.type(value, "Velvet Moss 04");
+    expect(screen.getByText(/Saving this unlinks it from FAB-01/)).toBeInTheDocument();
+    expect(screen.getByText(/Change the finish…/, { selector: "span" })).toBeInTheDocument();
+    // Nothing was written by saying so.
+    expect(apiFetch.mock.calls.filter((call) => call[1]?.method === "POST")).toHaveLength(0);
+
+    // The code alone is not words that disagree.
+    await userEvent.clear(value);
+    await userEvent.type(value, "FAB-01");
+    expect(screen.queryByText(/Saving this unlinks it from FAB-01/)).toBeNull();
+  });
 });

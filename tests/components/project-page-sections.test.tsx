@@ -178,7 +178,8 @@ describe("the overview", () => {
   it("accepts every suggested level in one request", async () => {
     serve();
     await userEvent.click(await screen.findByRole("button", { name: "Accept 3" }));
-    expect(sent("POST", "/levels/accept")[0]?.body).toEqual({ runId: null });
+    // With the count the button showed, so a set that changed since is refused.
+    expect(sent("POST", "/levels/accept")[0]?.body).toEqual({ runId: null, expectedCount: 3 });
   });
 
   it("groups documents by pack, folds the sixth, and says what each produced", async () => {

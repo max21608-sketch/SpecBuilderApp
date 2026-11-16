@@ -37,11 +37,14 @@ import { documentClosedSentence, reviewedWord } from "@/lib/intake-status";
 // The per-observation select stays; this is the escape from answering the same
 // question a few hundred times on a pack whose pages state no unit.
 //
-// NO per-observation `expectedVersion`. The run row is held with `for update`
-// for the whole statement, so nothing can interleave, and every observation's
-// version still bumps — a tab that was editing one of them gets its own stale
-// conflict on its next write, which is the behaviour a per-row check would
-// have produced anyway.
+// THE SET THE SCREEN COUNTED, AT THE VERSIONS IT HELD (review 1.4). The run
+// row is held with `for update`, so nothing interleaves with the write — but
+// the write itself reached rows the reviewer never saw: a figure somebody else
+// had just set to cm, or a page another tab had just read, became mm unseen.
+// So the request names every measured row in its scope with the version the
+// screen held (`expected`), and a set that differs in any row — one moved, one
+// added, one gone — refuses the whole press, writing nothing. Every changed
+// row's version still bumps.
 //
 // PENDING DIMENSIONS ONLY. An applied observation is history, an ignored one
 // was a decision, and a material cannot carry a unit at all
@@ -53,6 +56,9 @@ const BulkUnitPatch = z
         scope: z.enum(["item", "run"]),
         itemId: z.string().min(1).optional(),
         unit: z.enum(ATTRIBUTE_UNITS),
+        expected: z
+          .array(z.object({ id: z.string().min(1), version: z.number().int().nonnegative() }).strict())
+          .max(20_000),
       })
       .strict()
       .refine((value) => value.scope === "run" || Boolean(value.itemId), {
@@ -66,7 +72,7 @@ export async function patchBulkUnit(id: string, raw: unknown, actor: string): Pr
   if (!parsed.success) {
     return json({ ok: false, error: parsed.error.issues[0]?.message ?? "That change is not valid." }, 400);
   }
-  const { scope, itemId, unit } = parsed.data.bulkUnit;
+  const { scope, itemId, unit, expected } = parsed.data.bulkUnit;
 
   try {
     const result = await withTransaction(async (txn) => {
@@ -86,6 +92,20 @@ export async function patchBulkUnit(id: string, raw: unknown, actor: string): Pr
       const staged: StagedDrawings = assertStagedDrawings(run.parsed, specFieldEntries(fieldRows));
       if (scope === "item" && !staged.items.some((item) => item.id === itemId)) {
         throw new DomainConflictError("item_missing", "That item is no longer part of this document. Reload.");
+      }
+
+      const inScope = staged.items.filter((item) => scope === "run" || item.id === itemId);
+      const live = new Map(inScope.flatMap((item) => item.observations.filter(isMeasuredRow)).map((row) => [row.id, row.version]));
+      const shown = new Map(expected.map((row) => [row.id, row.version]));
+      const moved =
+        [...live].filter(([rowId, version]) => shown.get(rowId) !== version).length +
+        [...shown.keys()].filter((rowId) => !live.has(rowId)).length;
+      if (moved > 0) {
+        throw new DomainConflictError(
+          "bulk_unit_stale",
+          `${moved} figure${moved === 1 ? "" : "s"} changed since this screen loaded, so no unit was set. ` +
+            "Check the reloaded document, then set the unit again.",
+        );
       }
 
       let changed = 0;

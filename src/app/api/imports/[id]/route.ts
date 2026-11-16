@@ -138,8 +138,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   if (rows[0].document_kind === "shop_drawings") {
     // Two shapes on one route, told apart by the key the body carries rather
-    // than by a mode flag: a bulk set names no observation and carries no
-    // version, so it cannot be validated by `DrawingPatch` at all.
+    // than by a mode flag: a bulk set names a SET of rows (each at the version
+    // the screen held), not one observation, so `DrawingPatch` cannot validate it.
     if (raw && typeof raw === "object" && "bulkUnit" in raw) return patchBulkUnit(id, raw, user.email);
     return patchDrawing(id, raw, user.email);
   }

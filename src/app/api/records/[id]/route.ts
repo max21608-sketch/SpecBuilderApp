@@ -34,6 +34,8 @@ import {
   waitingByQuestion,
 } from "@/lib/chase-drafts";
 import { requireUuid, requireWriter } from "@/lib/route-guards";
+import { exportAnswers, loadRecordAtoms, scopeForAtoms } from "@/lib/record-atoms";
+import { cellsByField, specShipsInstead } from "@/lib/bws-export";
 
 export const dynamic = "force-dynamic";
 
@@ -486,6 +488,25 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   );
   const twins = twinLinks.map((twin) => ({ ...twin, attributes: twinAttributes.get(twin.recordId) ?? [] }));
 
+  // ---- where the FILE ships a spec over the checklist answer (review 1.8) ----
+  //
+  // Composed by the export's own composer over the export's own atoms, so the
+  // row's "the file ships the spec, not this" can never disagree with the file.
+  const atoms = (await loadRecordAtoms(sql, [id])).get(id);
+  const fileCells = atoms
+    ? cellsByField(scopeForAtoms(atoms), atoms.record, atoms.attributes, exportAnswers(atoms))
+    : new Map();
+  const answersWithFile = answers.map((answer) => ({
+    ...answer,
+    spec_ships:
+      answer.json_id === null || answer.json_id === undefined
+        ? null
+        : specShipsInstead(fileCells.get(Number(answer.json_id)), {
+            value: (answer.value as string | null) ?? null,
+            qualifier: (answer.qualifier as string | null) ?? null,
+          }),
+  }));
+
   return json({
     ok: true,
     record,
@@ -496,7 +517,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     attributes,
     retiredAttributes: retired,
     disagreements,
-    answers,
+    answers: answersWithFile,
     categories,
     specFields,
     finishes,

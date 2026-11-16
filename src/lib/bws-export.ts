@@ -603,6 +603,44 @@ export function composeRowCells(
   });
 }
 
+/**
+ * The composed cells by BWS field id — `composeRowCells`' own answer, read by
+ * field rather than by column, for a screen asking what the file ships.
+ */
+export function cellsByField(
+  scope: ExportScope,
+  record: ExportRecord,
+  attributes: ExportAttribute[],
+  answers: ExportAnswer[],
+): Map<number, ExportCell> {
+  const cells = composeRowCells(scope, record, attributes, answers);
+  const out = new Map<number, ExportCell>();
+  BWS_EXPORT_COLUMNS.forEach((column, n) => {
+    if (column.jsonId !== null) out.set(column.jsonId, cells[n]!);
+  });
+  return out;
+}
+
+/**
+ * WHAT THE FILE SHIPS INSTEAD OF A CHECKLIST ANSWER, or null (review 1.8).
+ *
+ * The precedence above puts a record's SPEC first: a field a spec fills ships
+ * the spec, and the checklist answer for that field goes nowhere. Typing a
+ * correction into the Checklist changed the Checklist and not the file, and
+ * nothing on the row said so. This reads the cell `composeRowCells` already
+ * composed — never a second copy of the rule — and returns its value where a
+ * spec won it AND the answer, as the file would have written it, says
+ * something else. An empty answer is nothing to contradict.
+ */
+export function specShipsInstead(
+  cell: ExportCell | undefined,
+  answer: { value: string | null; qualifier?: string | null },
+): string | null {
+  if (!cell || cell.source.kind !== "attribute") return null;
+  if (!answer.value?.trim()) return null;
+  return renderAnswerValue(answer) === cell.value ? null : cell.value;
+}
+
 /** The 109 cells as the file holds them. One set of precedence rules, two views. */
 export function composeRow(scope: ExportScope, record: ExportRecord, attributes: ExportAttribute[], answers: ExportAnswer[]): string[] {
   return composeRowCells(scope, record, attributes, answers).map((cell) => cell.value);

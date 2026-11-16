@@ -222,7 +222,7 @@ describeIfDb("BOQ confirm concurrency", () => {
       new Request("http://localhost/test", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sheetIndex: 0, runName: "MUR" }),
+        body: JSON.stringify({ sheetIndex: 0, runName: "MUR", version: await stagedVersion(client, runId) }),
       }),
       params(runId),
     );
@@ -232,7 +232,7 @@ describeIfDb("BOQ confirm concurrency", () => {
       new Request("http://localhost/test", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sheetIndex: 1, ignored: true }),
+        body: JSON.stringify({ sheetIndex: 1, ignored: true, version: await stagedVersion(client, runId) }),
       }),
       params(runId),
     );
@@ -243,7 +243,7 @@ describeIfDb("BOQ confirm concurrency", () => {
       new Request("http://localhost/test", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sheetIndex: 0, runName: "   " }),
+        body: JSON.stringify({ sheetIndex: 0, runName: "   ", version: await stagedVersion(client, runId) }),
       }),
       params(runId),
     );
@@ -254,7 +254,7 @@ describeIfDb("BOQ confirm concurrency", () => {
       new Request("http://localhost/test", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sheetIndex: 9, runName: "Nope" }),
+        body: JSON.stringify({ sheetIndex: 9, runName: "Nope", version: await stagedVersion(client, runId) }),
       }),
       params(runId),
     );
@@ -269,6 +269,55 @@ describeIfDb("BOQ confirm concurrency", () => {
     expect(runs.rows.map((row) => row.name)).toEqual(["MUR"]);
   });
 
+  it("refuses a line or sheet write made against a bill that moved, and writes nothing", async () => {
+    // Review 1.4. Every staged-bill write is POSITIONAL, and two reviewers
+    // used to overwrite each other silently: none carried a version. Each now
+    // carries the bill's, and the one that read an older bill is refused.
+    const { PATCH } = await import("@/app/api/imports/[id]/route");
+    const runId = await stageImport("__QAV", 0, [sheet("__QAV", 3, "__QA STALE")]);
+    const send = (body: Record<string, unknown>) =>
+      PATCH(
+        new Request("http://localhost/test", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        params(runId),
+      );
+    const shown = await stagedVersion(client, runId);
+    const before = (await client.query(`select parsed from intake_runs where id = $1`, [runId])).rows[0].parsed;
+
+    // The other reviewer's write lands first, at the version both were shown.
+    const theirs = await send({ sheetIndex: 0, index: 0, ignored: true, version: shown });
+    expect(theirs.status).toBe(200);
+    const after = (await theirs.json()) as { version: number };
+    expect(after.version).toBeGreaterThan(shown);
+    const moved = (await client.query(`select parsed from intake_runs where id = $1`, [runId])).rows[0].parsed;
+
+    // Ours, at the version we were shown: an ignore, a level (the carry path),
+    // a row kind and a phase name — each refused with the server's sentence.
+    for (const body of [
+      { sheetIndex: 0, index: 1, ignored: true },
+      { sheetIndex: 0, index: 1, level: "hero" },
+      { sheetIndex: 0, index: 1, rowKind: "section" },
+      { sheetIndex: 0, runName: "Renamed" },
+    ]) {
+      const refused = await send({ ...body, version: shown });
+      expect(refused.status, JSON.stringify(body)).toBe(409);
+      expect(((await refused.json()) as { error: string }).error).toContain("changed since this screen loaded");
+    }
+    // Nothing of ours was written; only theirs.
+    expect((await client.query(`select parsed from intake_runs where id = $1`, [runId])).rows[0].parsed).toEqual(moved);
+    expect(moved).not.toEqual(before);
+    expect(await stagedVersion(client, runId)).toBe(after.version);
+
+    // With no version at all, it is refused before anything is read.
+    expect((await send({ sheetIndex: 0, index: 1, ignored: true })).status).toBe(400);
+
+    // And at the version the first write returned, ours lands.
+    expect((await send({ sheetIndex: 0, index: 1, level: "hero", version: after.version })).status).toBe(200);
+  });
+
   it("writes no record for an ignored line, and the ignore is restorable before confirm", async () => {
     // The write half of 1.5. The SUGGESTION is pure and tested in the pure
     // tier; what has to be true here is that accepting one actually removes the
@@ -276,12 +325,12 @@ describeIfDb("BOQ confirm concurrency", () => {
     // house/conventions §5, every ignore path is reversible.
     const { PATCH } = await import("@/app/api/imports/[id]/route");
     const runId = await stageImport("__QAN", 0, [sheet("__QAN", 3, "__QA IGNORE")]);
-    const setIgnored = (index: number, ignored: boolean) =>
+    const setIgnored = async (index: number, ignored: boolean) =>
       PATCH(
         new Request("http://localhost/test", {
           method: "PATCH",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sheetIndex: 0, index, ignored }),
+          body: JSON.stringify({ sheetIndex: 0, index, ignored, version: await stagedVersion(client, runId) }),
         }),
         params(runId),
       );

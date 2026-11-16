@@ -295,19 +295,44 @@ export async function setRecordLevel(
  */
 export async function acceptSuggestedLevels(
   txn: TxnSql,
-  { projectId, runId, actor }: { projectId: string; runId: string | null; actor: string },
+  {
+    projectId,
+    runId,
+    actor,
+    expectedCount,
+  }: { projectId: string; runId: string | null; actor: string; expectedCount?: number },
 ): Promise<{ accepted: number }> {
+  // THE SCREENS' SCOPE (review 1.4): active records on an active phase, a
+  // split bill line counted through its configurations — the scope the
+  // overview counts its "Accept N" over (`project-summary.ts`). It reached
+  // records on a retired phase and split parents too, which no screen shows,
+  // so a press accepted levels nobody had seen.
   const pending = await txn`
     select r.id from spec_records r
+      join spec_runs run on run.id = r.run_id
      where r.project_id = ${projectId}
        and (${runId}::uuid is null or r.run_id = ${runId}::uuid)
        and r.status = 'active'
+       and run.status = 'active'
+       and not exists (select 1 from spec_records v where v.parent_id = r.id and v.status = 'active')
        and r.level is null
        and r.level_suggested is not null
      order by r.record_no
-     for update
+     for update of r
   `;
   const ids = pending.map((row) => String(row.id));
+  // WHAT THE BUTTON SAID. A screen that counted N suggestions and finds a
+  // different number under the lock was drawn before somebody else's
+  // decision or a new bill landed; accepting the difference unseen is the
+  // write the gate forbids, so the whole press is refused.
+  if (expectedCount !== undefined && ids.length !== expectedCount) {
+    throw new DomainConflictError(
+      "levels_stale",
+      `The suggested levels changed since this screen loaded: it showed ${expectedCount}, there ${
+        ids.length === 1 ? "is" : "are"
+      } now ${ids.length}. Nothing was accepted. Check them, then accept again.`,
+    );
+  }
   if (ids.length === 0) return { accepted: 0 };
 
   const { changeSetId } = await changeSetForEdit(txn, { projectId, actor, kind: "level_set" });

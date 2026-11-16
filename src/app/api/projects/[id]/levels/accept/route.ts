@@ -58,6 +58,10 @@ const Body = z
       .object({
         // Null means the whole project. The screens always send a phase.
         runId: z.string().uuid().nullable().optional(),
+        // How many suggestions the button said it would accept ("Accept 3").
+        // A different count under the lock refuses the press: the screen was
+        // drawn before the set changed, and nothing is accepted unseen.
+        expectedCount: z.number().int().nonnegative().optional(),
       })
       .strict(),
   ])
@@ -92,7 +96,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             level: body.level,
             actor: user.email,
           })
-        : await acceptSuggestedLevels(txn, { projectId: id, runId: body.runId ?? null, actor: user.email }),
+        : await acceptSuggestedLevels(txn, {
+            projectId: id,
+            runId: body.runId ?? null,
+            actor: user.email,
+            expectedCount: body.expectedCount,
+          }),
     );
     return json({ ok: true, ...result });
   } catch (cause) {

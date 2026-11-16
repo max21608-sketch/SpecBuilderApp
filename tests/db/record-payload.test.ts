@@ -59,6 +59,7 @@ type Payload = {
     answer_id: string | null;
     state: string | null | undefined;
     value: string | null;
+    spec_ships?: string | null;
   }[];
 };
 
@@ -419,5 +420,46 @@ describeIfDb("record payload — waiting, who to ask, and quote readiness", () =
       `delete from attachments where entity_type = 'spec_records' and entity_id = $1 and kind = 'item_image'`,
       [chasedRecordId],
     );
+  });
+
+  // ---- review 1.8: what the FILE ships over a typed checklist answer -------
+  //
+  // Through the export's own composer: the spec wins the field, so the row
+  // must say the file ships the spec, in the spec's words, and stop saying it
+  // once the answer agrees.
+  it("says which answers the BWS file does not ship because a spec fills the field", async () => {
+    const field = await client.query(
+      `select q.id, q.spec_field_id from requirements q join spec_fields f on f.id = q.spec_field_id
+        where q.category_id = $1 and f.json_id <> 3
+        order by q.sort_order limit 1`,
+      [placeholderCategoryId],
+    );
+    const requirementId = String(field.rows[0].id);
+    const specFieldId = String(field.rows[0].spec_field_id);
+    const spec = await client.query(
+      `insert into record_attributes (record_id, attr_group, label, value, spec_field_id, state, created_by, updated_by)
+       values ($1, 'material', '__QA COM', '__QA Yarn Harbour 01', $2, 'confirmed', 'qa', 'qa') returning id`,
+      [levellessRecordId, specFieldId],
+    );
+    const typed = await client.query(
+      `insert into spec_answers (record_id, requirement_id, spec_field_id, state, value,
+                                 source_kind, confirmed_by, confirmed_at, created_by, updated_by)
+       values ($1, $2, $3, 'confirmed', '__QA Velvet Moss 04', 'manual', 'qa', now(), 'qa', 'qa') returning id`,
+      [levellessRecordId, requirementId, specFieldId],
+    );
+    try {
+      const row = (await read(levellessRecordId)).answers.find((answer) => answer.requirement_id === requirementId);
+      expect(row?.value).toBe("__QA Velvet Moss 04");
+      expect(row?.spec_ships).toBe("__QA Yarn Harbour 01");
+
+      await client.query(`update spec_answers set value = '__QA Yarn Harbour 01', updated_by = 'qa' where id = $1`, [
+        typed.rows[0].id,
+      ]);
+      const agreed = (await read(levellessRecordId)).answers.find((answer) => answer.requirement_id === requirementId);
+      expect(agreed?.spec_ships).toBeNull();
+    } finally {
+      await client.query(`delete from spec_answers where id = $1`, [typed.rows[0].id]);
+      await client.query(`delete from record_attributes where id = $1`, [spec.rows[0].id]);
+    }
   });
 });

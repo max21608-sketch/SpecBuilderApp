@@ -11,6 +11,7 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
+import { stagedVersion } from "./staged-version";
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
@@ -24,7 +25,7 @@ vi.mock("@/lib/session", () => ({
 const databaseUrl = process.env.DATABASE_URL;
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
-const patch = (body: unknown) =>
+const patchRequest = (body: unknown) =>
   new Request("http://localhost/test", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
@@ -122,7 +123,7 @@ describeIfDb("a decision carries across a bill's phases", () => {
     const { PATCH } = await import("@/app/api/imports/[id]/route");
     const importId = await stage(threeTabs());
 
-    const res = await PATCH(patch({ sheetIndex: 0, index: 0, level: "simple" }), params(importId));
+    const res = await PATCH(patchRequest({ ...{ sheetIndex: 0, index: 0, level: "simple" }, version: await stagedVersion(client, importId) }), params(importId));
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.carried).toBe(2);
@@ -150,7 +151,7 @@ describeIfDb("a decision carries across a bill's phases", () => {
       sheet("__QA MAIN RUN", [line(0, "S.201")]),
     ]);
 
-    const res = await PATCH(patch({ sheetIndex: 0, index: 0, categoryId }), params(importId));
+    const res = await PATCH(patchRequest({ ...{ sheetIndex: 0, index: 0, categoryId }, version: await stagedVersion(client, importId) }), params(importId));
     expect((await res.json()).carried).toBe(1);
 
     const sheets = await read(importId);
@@ -169,12 +170,12 @@ describeIfDb("a decision carries across a bill's phases", () => {
     // Receiving side: MAIN RUN carries SX11A twice, so there is no single row
     // to put the decision on. `findRecordsByRef`'s rule — offer the candidates,
     // choose none — is the one that applies.
-    const toDuplicated = await PATCH(patch({ sheetIndex: 0, index: 0, level: "hero" }), params(importId));
+    const toDuplicated = await PATCH(patchRequest({ ...{ sheetIndex: 0, index: 0, level: "hero" }, version: await stagedVersion(client, importId) }), params(importId));
     expect((await toDuplicated.json()).carried).toBe(0);
 
     // Sending side: which of MAIN RUN's two SX11A rows was decided says nothing
     // about the one on MUR.
-    const fromDuplicated = await PATCH(patch({ sheetIndex: 1, index: 0, level: "complex" }), params(importId));
+    const fromDuplicated = await PATCH(patchRequest({ ...{ sheetIndex: 1, index: 0, level: "complex" }, version: await stagedVersion(client, importId) }), params(importId));
     expect((await fromDuplicated.json()).carried).toBe(0);
 
     const sheets = await read(importId);
@@ -192,10 +193,10 @@ describeIfDb("a decision carries across a bill's phases", () => {
 
     // MAIN RUN is decided on its own tab first — a VE phase legitimately being
     // a cheaper build is the case this protects.
-    await PATCH(patch({ sheetIndex: 1, index: 0, level: "hero" }), params(importId));
-    await PATCH(patch({ sheetIndex: 1, index: 0, categoryId: otherCategoryId }), params(importId));
+    await PATCH(patchRequest({ ...{ sheetIndex: 1, index: 0, level: "hero" }, version: await stagedVersion(client, importId) }), params(importId));
+    await PATCH(patchRequest({ ...{ sheetIndex: 1, index: 0, categoryId: otherCategoryId }, version: await stagedVersion(client, importId) }), params(importId));
 
-    const res = await PATCH(patch({ sheetIndex: 0, index: 0, level: "simple" }), params(importId));
+    const res = await PATCH(patchRequest({ ...{ sheetIndex: 0, index: 0, level: "simple" }, version: await stagedVersion(client, importId) }), params(importId));
     // Only MAIN RUN - VE takes it: MUR is the source, MAIN RUN is spoken for.
     expect((await res.json()).carried).toBe(1);
 
@@ -206,7 +207,7 @@ describeIfDb("a decision carries across a bill's phases", () => {
     expect(sheets[2]!.lines[0]!.levelCarriedFrom).toBe("__QA MUR");
 
     // And the category it set on its own tab stays its own.
-    const category = await PATCH(patch({ sheetIndex: 0, index: 0, categoryId }), params(importId));
+    const category = await PATCH(patchRequest({ ...{ sheetIndex: 0, index: 0, categoryId }, version: await stagedVersion(client, importId) }), params(importId));
     expect((await category.json()).carried).toBe(1);
     expect((await read(importId))[1]!.lines[0]!.categoryId).toBe(otherCategoryId);
   });
@@ -215,12 +216,12 @@ describeIfDb("a decision carries across a bill's phases", () => {
     const { PATCH } = await import("@/app/api/imports/[id]/route");
     const importId = await stage(threeTabs());
 
-    await PATCH(patch({ sheetIndex: 0, index: 0, level: "simple" }), params(importId));
-    await PATCH(patch({ sheetIndex: 2, index: 0, level: "hero" }), params(importId));
+    await PATCH(patchRequest({ ...{ sheetIndex: 0, index: 0, level: "simple" }, version: await stagedVersion(client, importId) }), params(importId));
+    await PATCH(patchRequest({ ...{ sheetIndex: 2, index: 0, level: "hero" }, version: await stagedVersion(client, importId) }), params(importId));
     expect((await read(importId))[2]!.lines[0]!.levelCarriedFrom).toBeNull();
 
     // MUR decides again; VE now holds a decision of its own and keeps it.
-    const again = await PATCH(patch({ sheetIndex: 0, index: 0, level: "complex" }), params(importId));
+    const again = await PATCH(patchRequest({ ...{ sheetIndex: 0, index: 0, level: "complex" }, version: await stagedVersion(client, importId) }), params(importId));
     expect((await again.json()).carried).toBe(1);
     const sheets = await read(importId);
     expect(sheets[1]!.lines[0]!.level).toBe("complex");
@@ -237,14 +238,14 @@ describeIfDb("a decision carries across a bill's phases", () => {
 
     // A CLEAR is "I do not know yet" and must not travel: it would destroy
     // values on tabs nobody opened with no decision behind it.
-    const cleared = await PATCH(patch({ sheetIndex: 0, index: 0, level: null }), params(importId));
+    const cleared = await PATCH(patchRequest({ ...{ sheetIndex: 0, index: 0, level: null }, version: await stagedVersion(client, importId) }), params(importId));
     expect((await cleared.json()).carried).toBeUndefined();
 
-    const set = await PATCH(patch({ sheetIndex: 0, index: 0, level: "simple" }), params(importId));
+    const set = await PATCH(patchRequest({ ...{ sheetIndex: 0, index: 0, level: "simple" }, version: await stagedVersion(client, importId) }), params(importId));
     expect((await set.json()).carried).toBe(0);
 
     // A blank is not a ref every other blank shares.
-    const blank = await PATCH(patch({ sheetIndex: 0, index: 1, level: "simple" }), params(importId));
+    const blank = await PATCH(patchRequest({ ...{ sheetIndex: 0, index: 1, level: "simple" }, version: await stagedVersion(client, importId) }), params(importId));
     expect((await blank.json()).carried).toBe(0);
 
     const sheets = await read(importId);
@@ -258,7 +259,7 @@ describeIfDb("a decision carries across a bill's phases", () => {
     const importId = await stage(threeTabs());
     await client.query(`update intake_runs set status = 'confirmed' where id = $1`, [importId]);
 
-    const res = await PATCH(patch({ sheetIndex: 0, index: 0, level: "simple" }), params(importId));
+    const res = await PATCH(patchRequest({ ...{ sheetIndex: 0, index: 0, level: "simple" }, version: await stagedVersion(client, importId) }), params(importId));
     expect(res.status).toBe(409);
     const sheets = await read(importId);
     expect(sheets.every((each) => each.lines.every((row) => row.levelStatus === undefined))).toBe(true);
