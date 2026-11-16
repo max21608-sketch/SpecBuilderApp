@@ -201,6 +201,44 @@ export async function withTransaction<T>(fn: (sql: TxnSql) => Promise<T>): Promi
 // Postgres error codes worth distinguishing at a route boundary. A deadlock or
 // a lock timeout is retryable by a human pressing the button again; a unique or
 // FK violation is not.
+/** Node's own socket and resolver failures: the connection never formed. */
+const CONNECTION_ERRNOS = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EPIPE",
+]);
+
+/**
+ * Did this fail REACHING the database, rather than inside it?
+ *
+ * The two need different sentences (review 2.3): a missing column before the
+ * migrations have run is the server's fault, and calling it "could not reach
+ * the database" sends a person to check the network. Connection-level means:
+ * SQLSTATE class 08 (connection exception), 28 (the database refused the
+ * credentials), 3D000 (no such database), 57P01–03 and 53300 (shut down, not
+ * accepting, too many connections); a Node socket or resolver errno; a
+ * driver error that carries no SQLSTATE at all (Neon's HTTP driver wraps a
+ * failed fetch that way, with `sourceError`); a failed `fetch`; and
+ * `db.ts`'s own "DATABASE_URL is not set". Any other SQLSTATE was answered by
+ * a database that was reached.
+ */
+export function isDatabaseConnectionFailure(cause: unknown): boolean {
+  if (!(cause instanceof Error)) return false;
+  const code = (cause as { code?: unknown }).code;
+  if (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)) {
+    return code.startsWith("08") || code.startsWith("28") || ["3D000", "57P01", "57P02", "57P03", "53300"].includes(code);
+  }
+  if (typeof code === "string" && CONNECTION_ERRNOS.has(code)) return true;
+  if (cause.name === "NeonDbError") return true;
+  if (cause.name === "TypeError" && /fetch failed/i.test(cause.message)) return true;
+  return /^DATABASE_URL is not set/.test(cause.message);
+}
+
 const RETRYABLE_PG_CODES = new Set([
   "40001", // serialization_failure
   "40P01", // deadlock_detected
