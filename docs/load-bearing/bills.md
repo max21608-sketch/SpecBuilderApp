@@ -53,6 +53,20 @@ is the bill's quantity cell as printed where it gave no count, written by the
 confirm and cleared by a revision that prints a count, so the phase table and
 the record header print `quantityNotGiven(qty_raw)` too.
 
+**An identifier is read as the sheet DISPLAYS it** (2026-11-16, audit C13,
+`src/lib/sheet-display.ts`). `read-excel-file` hands back a numeric cell's
+value, so a line number formatted `0.00` read `1.10` as "1.1" (colliding with
+line 1.1) and a code formatted `0000` read `0012` as "12" — both confirmed on
+a synthetic workbook. `readSpreadsheetSheets` now also reads each cell's
+`numFmt` with ExcelJS (whose `.text` is NOT the display) and renders ONLY the
+zero patterns (`0000`, `0.00`, `#0.0`); the bill reader uses that text for the
+CODE, the bill's own LINE NUMBER and a FINISH CODE, and nothing else. A
+quantity keeps its value through `readQuantity` — a `#,##0` display would be
+`1,200`, which is refused — and any other format (separators, currency,
+percent, date) is left to the raw value rather than a second partial Excel
+formatter. A workbook ExcelJS cannot open reads exactly as before. The model's
+text flattener passes `display: false`.
+
 ### A BOQ has tabs, and each tab is a sub-quote
 
 `src/lib/boq-import.ts`, `src/lib/confirm-boq.ts`,

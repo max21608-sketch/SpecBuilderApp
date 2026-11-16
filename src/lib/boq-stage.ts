@@ -19,6 +19,7 @@ import { billItemName } from "@/lib/bill-description";
 import { guessNonFurniture } from "@/lib/non-furniture-guess";
 import type { SheetData } from "read-excel-file/node";
 import { readSheetWithColumns } from "@/lib/boq-import";
+import type { SheetDisplay } from "@/lib/sheet-display";
 import { applyStructureToLines, type StructureReading } from "@/lib/boq-structure";
 import type {
   BoqAlias,
@@ -261,7 +262,7 @@ export function stageSheet(
  */
 export function stageStructureReading(
   current: StagedBoqSheet,
-  source: { sheet: string; data: SheetData },
+  source: { sheet: string; data: SheetData; display?: SheetDisplay },
   reading: StructureReading,
   suggest: (line: SuggestInput, index: number) => StagedBoqLine,
 ): StagedBoqSheet {
@@ -278,7 +279,7 @@ export function stageStructureReading(
     const why = `The model's reading of the columns could not be used: ${reading.mappingProblem ?? "it named no columns"} Set them by hand below.`;
     return { ...current, structure, columnsNote: current.columnsNote ? `${why} ${current.columnsNote}` : why };
   }
-  const fresh = stageSheet(readSheetWithColumns(source.sheet, source.data, reading.mapping, "model"), suggest);
+  const fresh = stageSheet(readSheetWithColumns(source.sheet, source.data, reading.mapping, "model", source.display), suggest);
   return {
     ...fresh,
     lines: applyStructureToLines(fresh.lines, reading.rows),

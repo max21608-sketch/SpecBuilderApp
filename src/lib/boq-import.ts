@@ -57,6 +57,7 @@
 //     a wrong column nobody can correct.
 // ============================================================================
 import type { SheetData } from "read-excel-file/node";
+import { displayKey, type SheetDisplay } from "@/lib/sheet-display";
 import { readQuantity } from "@/lib/printed-number";
 import type { DimensionSlot, ItemLevel } from "@/lib/spec-vocab";
 import type { NonFurnitureGuess } from "@/lib/non-furniture-guess";
@@ -1111,7 +1112,7 @@ export function proposePhaseNames<T extends { sheetName: string; proposedRunName
 }
 
 export function parseBoqSheets(
-  sheets: { sheet: string; data: SheetData }[],
+  sheets: { sheet: string; data: SheetData; display?: SheetDisplay }[],
   registers: Partial<BoqReadingRegisters> = {},
 ): BoqParseResult {
   if (sheets.length === 0) return { ok: false, error: "The file has no sheets." };
@@ -1120,7 +1121,7 @@ export function parseBoqSheets(
   const size = (layout: BoqLayout) => Object.keys(layout.mapping).length + (layout.keep?.length ?? 0);
   const layouts = [...(registers.layouts ?? [])].sort((a, b) => size(b) - size(a));
 
-  const readings = sheets.map(({ sheet, data }) => readSheet(sheet, data, vocabulary, layouts));
+  const readings = sheets.map(({ sheet, data, display }) => readSheet(sheet, data, vocabulary, layouts, display));
   const anyRead = readings.some((reading) => reading.sheet !== null);
 
   /** The nearest miss on any sheet, kept only so a refusal can name it. */
@@ -1146,6 +1147,7 @@ function readSheet(
   data: SheetData,
   vocabulary: Vocabulary,
   layouts: readonly BoqLayout[],
+  display?: SheetDisplay,
 ): { sheet: ParsedBoqSheet | null; closest: HeaderAttempt | null } {
   // The synonyms' reading is taken FIRST, though it is used second: a saved
   // layout is measured against it (C7, below).
@@ -1177,6 +1179,7 @@ function readSheet(
         headerRows: layout.headerRows,
         source: "layout",
         layout: { id: layout.id, name: layout.name },
+        display,
       });
       // WHOSE layout, staged beside it: a seeded one reads like a known
       // heading and a person's keeps its columns check (`columnsAwaitingALook`).
@@ -1211,6 +1214,7 @@ function readSheet(
         ...(headerRows === 2 ? { headerRows: 2 } : {}),
         source: "synonym",
         doubt: doubts.length > 0 ? doubts.join(" ") : null,
+        display,
       }),
       closest: null,
     };
@@ -1333,11 +1337,14 @@ export function readSheetWithColumns(
     keep?: readonly number[];
   },
   source: BoqMappingSource = "person",
+  /** The sheet's displayed numbers (`readSpreadsheetSheets`), for its identifier columns. */
+  display?: SheetDisplay,
 ): ParsedBoqSheet {
   return readRows(sheet, data, mapping.headerRow - 1, mapping.columns, {
     kept: mapping.keep ?? [],
     headerRows: mapping.headerRows,
     source,
+    display,
   });
 }
 
@@ -1428,6 +1435,8 @@ function readRows(
     kept?: readonly number[];
     /** Why a person must look at these columns before the confirm (`columnsDoubt`). */
     doubt?: string | null;
+    /** The sheet's displayed numbers, read for the identifier columns only (C13). */
+    display?: SheetDisplay;
   },
 ): ParsedBoqSheet {
   const headerRows = options.headerRows ?? 1;
@@ -1442,19 +1451,30 @@ function readRows(
     const index = header[key];
     return index === undefined ? null : row[index];
   };
+  /**
+   * AN IDENTIFIER CELL AS THE SHEET SHOWS IT (audit C13): `1.10` and `0012`,
+   * not the `1.1` and `12` a numeric cell's value is. Only the code, the bill's
+   * own line number and a finish code — never a quantity, which reads its
+   * value through `printed-number.ts`.
+   */
+  const shownAt = (row: readonly unknown[], rowIndex: number, key: "code" | "sourceLine" | "finishCode"): unknown => {
+    const index = header[key];
+    if (index === undefined) return null;
+    return options.display?.get(displayKey(rowIndex, index)) ?? row[index];
+  };
   // The three optional columns are written onto a line only where the sheet
   // HAS them, so a bill without a Sub-Area stages exactly the line it always
   // did — and a reader can tell "no such column" from "this cell was blank".
-  const optional = (row: readonly unknown[]) => ({
+  const optional = (row: readonly unknown[], rowIndex: number) => ({
     ...(header.subArea !== undefined ? { subArea: text(at(row, "subArea")) } : {}),
-    ...(header.sourceLine !== undefined ? { sourceLine: text(at(row, "sourceLine")) } : {}),
+    ...(header.sourceLine !== undefined ? { sourceLine: text(shownAt(row, rowIndex, "sourceLine")) } : {}),
     ...(header.notes !== undefined ? { notes: text(at(row, "notes")) } : {}),
     // A size or a finish in a column of its own, VERBATIM — line breaks and
     // all, as a description cell is kept — because `bill-description.ts`
     // reads it, and a reader cannot recover what a collapse threw away.
     ...(header.dimensions !== undefined ? { dimensionsRaw: rawCell(at(row, "dimensions")) } : {}),
     ...(header.finish !== undefined ? { finishRaw: rawCell(at(row, "finish")) } : {}),
-    ...(header.finishCode !== undefined ? { finishCode: text(at(row, "finishCode")) } : {}),
+    ...(header.finishCode !== undefined ? { finishCode: text(shownAt(row, rowIndex, "finishCode")) } : {}),
     // The bill's mock-up figure, as printed: `1`, `PARTIAL`, `N/A` — never
     // read as a number here, because a word in it is the point.
     ...(header.mockupQty !== undefined ? { mockupQtyRaw: text(at(row, "mockupQty")) } : {}),
@@ -1490,7 +1510,7 @@ function readRows(
 
     const itemDescription = text(at(row, "itemDescription"));
     const descriptionCell = at(row, "itemDescription");
-    const code = text(at(row, "code"));
+    const code = text(shownAt(row, rowIndex, "code"));
 
     // A row with neither a code nor a description is a spacer or a totals row.
     // Counted rather than silently dropped, so the reviewer is told.
@@ -1514,7 +1534,7 @@ function readRows(
       productReference: text(at(row, "productReference")),
       ...quantity(at(row, "qty")),
       qtyUnit: text(at(row, "qtyUnit")),
-      ...optional(row),
+      ...optional(row, rowIndex),
     });
   }
 

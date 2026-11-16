@@ -4,6 +4,8 @@
 // of the bill that was refused on 2026-09-23 and invents every row
 // (`tests/fixtures/boq-shapes.ts`); nothing here is client material.
 import { describe, expect, it } from "vitest";
+import ExcelJS from "exceljs";
+import { displayedNumber } from "@/lib/sheet-display";
 import type { SheetData } from "read-excel-file/node";
 import { readSpreadsheetSheets } from "@/lib/intake-source";
 import {
@@ -582,5 +584,68 @@ describe("a header printed again above a section is passed over and counted (C9)
   it("adds nothing to a sheet with no reprint", () => {
     const sheet = first(parseBoqSheets([{ sheet: "Bill", data: TYPICAL }]).sheets);
     expect("repeatedHeaderRows" in sheet).toBe(false);
+  });
+});
+
+describe("an identifier cell reads as the sheet DISPLAYS it, never as its raw number (C13)", () => {
+  const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  /** A bill whose line numbers and codes are typed as NUMBERS and formatted, as a spreadsheet lets you. */
+  async function formattedBill(): Promise<Buffer> {
+    const book = new ExcelJS.Workbook();
+    const ws = book.addWorksheet("Bill");
+    ws.addRow(["Line", "Code", "Description", "Qty"]);
+    const rows: [number, number | string, string, number][] = [
+      [1.1, 12, "Sofa", 2],
+      [1.1, "ZZ-401", "Armchair", 1200],
+      [1.2, 7, "Table", 3],
+    ];
+    rows.forEach(([line, code, description, qty], n) => {
+      const row = ws.addRow([line, code, description, qty]);
+      // 1.10 under 1.1: the second line's number is DISPLAYED with two decimals.
+      row.getCell(1).numFmt = n === 1 ? "0.00" : "0.0";
+      if (typeof code === "number") row.getCell(2).numFmt = "0000";
+      row.getCell(4).numFmt = "#,##0";
+    });
+    return Buffer.from(await book.xlsx.writeBuffer());
+  }
+  const LINE_LAYOUT: BoqLayout = {
+    id: "line-layout",
+    name: "Line, code, description, qty",
+    headerRows: 1,
+    mapping: { sourceLine: "line", code: "code", itemDescription: "description", qty: "qty" },
+  };
+
+  it("keeps 1.10 apart from 1.1 and 0012 as 0012, and reads the quantity's VALUE", async () => {
+    const sheets = await readSpreadsheetSheets(await formattedBill(), "bill.xlsx", XLSX);
+    const sheet = first(parseBoqSheets(sheets, { layouts: [LINE_LAYOUT] }).sheets);
+    expect(sheet.lines.map((line) => [line.sourceLine, line.code, line.qty])).toEqual([
+      ["1.1", "0012", 2],
+      ["1.10", "ZZ-401", 1200],
+      ["1.2", "0007", 3],
+    ]);
+  });
+
+  it("reads the same through a person's columns", async () => {
+    const [source] = await readSpreadsheetSheets(await formattedBill(), "bill.xlsx", XLSX);
+    const sheet = readSheetWithColumns(
+      source!.sheet,
+      source!.data,
+      { headerRow: 1, headerRows: 1, columns: { sourceLine: 0, code: 1, itemDescription: 2, qty: 3 } },
+      "person",
+      source!.display,
+    );
+    expect(sheet.lines.map((line) => line.code)).toEqual(["0012", "ZZ-401", "0007"]);
+  });
+
+  it("renders only the zero patterns, and never a non-number", () => {
+    expect(displayedNumber(1.1, "0.00")).toBe("1.10");
+    expect(displayedNumber(12, "0000")).toBe("0012");
+    expect(displayedNumber(12, "#0.0")).toBe("12.0");
+    expect(displayedNumber(1.2, "0.0")).toBeNull(); // shows as it is
+    expect(displayedNumber(1200, "#,##0")).toBeNull(); // a separator: not an identifier format
+    expect(displayedNumber(0.5, "0%")).toBeNull();
+    expect(displayedNumber(12, "General")).toBeNull();
+    expect(displayedNumber("0012", "0000")).toBeNull();
+    expect(displayedNumber(-3, "0000")).toBeNull();
   });
 });

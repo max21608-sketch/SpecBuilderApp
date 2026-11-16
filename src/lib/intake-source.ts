@@ -3,6 +3,7 @@ import { parse } from "csv-parse/sync";
 import { inflateSync } from "node:zlib";
 import { intakeSourceKind } from "@/lib/intake-source-types";
 import { MAX_MODEL_PDF_PAGES } from "@/lib/upload-limits";
+import { displayKey, displayedNumber, type SheetDisplay } from "@/lib/sheet-display";
 
 export type DocumentSource =
   | { type: "pdf"; base64: string }
@@ -51,6 +52,36 @@ export function spreadsheetSheetsToText(sheets: { sheet: string; data: SheetData
 }
 
 /**
+ * Every sheet's displayed numbers, by sheet name, read with ExcelJS. Null for a
+ * workbook ExcelJS cannot open: the bill then reads its raw values, as before.
+ */
+async function readSheetDisplays(bytes: Buffer): Promise<Map<string, SheetDisplay> | null> {
+  try {
+    const { default: ExcelJS } = await import("exceljs");
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(bytes as unknown as ArrayBuffer);
+    const out = new Map<string, SheetDisplay>();
+    for (const worksheet of book.worksheets) {
+      const shown = new Map<string, string>();
+      worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+        row.eachCell({ includeEmpty: false }, (cell, columnNumber) => {
+          // A formula's cached result is its value; a plain number is itself.
+          const raw = cell.value as unknown;
+          const value =
+            raw && typeof raw === "object" && "result" in raw ? (raw as { result?: unknown }).result : raw;
+          const text = displayedNumber(value, cell.numFmt);
+          if (text !== null) shown.set(displayKey(rowNumber - 1, columnNumber - 1), text);
+        });
+      });
+      if (shown.size > 0) out.set(worksheet.name, shown);
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A spreadsheet as positional rows, one entry per sheet.
  *
  * Shared by the two readers that must agree about what a workbook contains:
@@ -63,9 +94,26 @@ export async function readSpreadsheetSheets(
   bytes: Buffer,
   filename: string,
   contentType: string,
-): Promise<{ sheet: string; data: SheetData }[]> {
+  options: {
+    /**
+     * Read each numeric cell's DISPLAYED text too (`sheet-display.ts`, audit
+     * C13), which the bill reader uses for its identifier columns. On by
+     * default because every bill path reads through here; the model's text
+     * flattener turns it off, since it never reads a column by role.
+     */
+    display?: boolean;
+  } = {},
+): Promise<{ sheet: string; data: SheetData; display?: SheetDisplay }[]> {
   const kind = intakeSourceKind(filename, contentType);
-  if (kind === "xlsx") return readExcelFile(bytes);
+  if (kind === "xlsx") {
+    const sheets = await readExcelFile(bytes);
+    if (options.display === false) return sheets;
+    const displays = await readSheetDisplays(bytes);
+    return sheets.map((sheet) => {
+      const display = displays?.get(sheet.sheet);
+      return display ? { ...sheet, display } : sheet;
+    });
+  }
   if (kind === "csv" || kind === "tsv") {
     const data = parse(textFromBytes(bytes), {
       delimiter: kind === "csv" ? "," : "\t",
@@ -286,7 +334,7 @@ export async function prepareDocumentSource(bytes: Buffer, filename: string, con
     return { type: "email", text: buildEmailModelText(envelope).text };
   }
   if (kind === "xlsx" || kind === "csv" || kind === "tsv") {
-    const sheets = await readSpreadsheetSheets(bytes, filename, contentType);
+    const sheets = await readSpreadsheetSheets(bytes, filename, contentType, { display: false });
     return { type: "spreadsheet", text: spreadsheetSheetsToText(sheets), sheets };
   }
   throw new Error("Unsupported intake file. Upload a PDF, .xlsx, .csv, .tsv or .eml file.");
