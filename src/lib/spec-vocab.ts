@@ -269,11 +269,6 @@ export const ATTRIBUTE_GROUP_LABELS: Record<AttributeGroup, string> = {
 export const ATTRIBUTE_STATES = ["confirmed", "tbc"] as const;
 export type AttributeState = (typeof ATTRIBUTE_STATES)[number];
 
-export const ATTRIBUTE_STATE_LABELS: Record<AttributeState, string> = {
-  confirmed: "Stated",
-  tbc: "TBC",
-};
-
 /**
  * Dimension units. The AP364 drawings print 190/79/72 for a sofa and 550/735
  * for a desk chair and name the unit on NEITHER page, so this is a controlled
@@ -425,10 +420,6 @@ export function isDimensionSlot(value: unknown): value is DimensionSlot {
   return typeof value === "string" && (DIMENSION_SLOTS as readonly string[]).includes(value);
 }
 
-export function isAttributeState(value: unknown): value is AttributeState {
-  return typeof value === "string" && (ATTRIBUTE_STATES as readonly string[]).includes(value);
-}
-
 export function isAttributeGroup(value: unknown): value is AttributeGroup {
   return typeof value === "string" && (ATTRIBUTE_GROUPS as readonly string[]).includes(value);
 }
@@ -466,11 +457,6 @@ export type NoteStatus = (typeof NOTE_STATUSES)[number];
 
 export const ATTRIBUTE_STATUSES = ["active", "retired"] as const;
 export type AttributeStatus = (typeof ATTRIBUTE_STATUSES)[number];
-
-/** A draft is finished being edited once it leaves `draft`. */
-export function isSettledDraft(status: DraftStatus): boolean {
-  return status !== "draft";
-}
 
 export function isAnswerState(value: unknown): value is AnswerState {
   return typeof value === "string" && (ANSWER_STATES as readonly string[]).includes(value);
