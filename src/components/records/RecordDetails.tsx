@@ -108,16 +108,40 @@ export default function RecordDetails({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string[] | null>(null);
   const [editing, setEditing] = useState(false);
+  // The server copy the form was last seeded from, and the version Save sends.
+  // It advances ONLY together with `changedUnderneath`, so a Save never sends a
+  // newer version than the person has been told about.
+  const [seed, setSeed] = useState<{ key: string; version: number; form: Form }>(() => ({
+    key: `${recordId}:${record.version}`,
+    version: record.version,
+    form: server,
+  }));
+  const [changedUnderneath, setChangedUnderneath] = useState(false);
 
   /** Back to exactly what the server holds. */
-  const reset = () => setForm(server);
-
-  // Re-seed only when the SERVER's copy changes — a reload, or somebody else's
-  // edit arriving. Keyed on the version, so a save of this panel resets it and
-  // an unrelated reload does not wipe what is being typed.
-  useEffect(() => {
+  const reset = () => {
     setForm(server);
-  }, [server]);
+    setChangedUnderneath(false);
+  };
+
+  // Re-seed only when the record's ID OR VERSION moves — never on a new object
+  // of the same version, which every reload of the page hands in (keying on
+  // the object wiped the panel whenever anything else on the screen saved).
+  // And never over text being typed: when the version moves while the panel is
+  // open and differs from the copy it was seeded from — somebody else's edit,
+  // or the reload after a 409 — the typed text stays, and the panel says the
+  // item changed underneath it before the new version can be sent.
+  useEffect(() => {
+    const key = `${recordId}:${record.version}`;
+    if (key === seed.key) return;
+    const next = formOf(record);
+    const typing = editing && (Object.keys(form) as (keyof Form)[]).some((k) => form[k].trim() !== seed.form[k].trim());
+    if (typing) setChangedUnderneath(true);
+    else setForm(next);
+    setSeed({ key, version: record.version, form: next });
+    // `form` and `seed` are read, not reacted to: only a new id or version re-seeds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordId, record.version]);
 
   const set = (key: keyof Form) => (event: { target: { value: string } }) =>
     setForm((current) => ({ ...current, [key]: event.target.value }));
@@ -144,14 +168,18 @@ export default function RecordDetails({
             internalNotes: form.internalNotes.trim() || null,
             dimensionNote: form.dimensionNote.trim() || null,
           },
-          version: record.version,
+          version: seed.version,
         }),
       });
       // Reload FIRST and report afterwards. A screen that refreshes after every
       // action clears its banner on a successful load, so setError() followed
       // by a reload showed a 409 for a few milliseconds and then nothing at all.
-      // Back to the summary. The panel exists to be filled in and left.
-      setEditing(false);
+      // Only a SUCCESS closes the panel: a refusal closed it too, and the
+      // typed text went with it.
+      if (result.ok) {
+        setEditing(false);
+        setChangedUnderneath(false);
+      }
       await onSaved();
       if (!result.ok) setError(result.error);
       else setSaved(result.data.changed ?? []);
@@ -185,6 +213,11 @@ export default function RecordDetails({
       }
     >
       {error && <p className="mb-2 text-xs text-red-700 border border-red-200 bg-red-50 rounded px-2 py-1">{error}</p>}
+      {editing && changedUnderneath && (
+        <p className="mb-2 text-xs text-amber-900 border border-amber-200 bg-amber-50 rounded px-2 py-1">
+          This item was changed while you were editing. Your text is still here, not saved: check it, then Save again.
+        </p>
+      )}
 
       {!editing && (
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
