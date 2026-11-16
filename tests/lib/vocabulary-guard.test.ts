@@ -53,10 +53,6 @@ const RUN_WORD = /(?<![\w-])runs?(?![\w-])/i;
  */
 const ALLOWED: { text: string; why: string }[] = [
   {
-    text: "npm run db:backfill-finishes -- --apply",
-    why: "A shell command printed for a person to copy. `npm run` is npm's word, not ours.",
-  },
-  {
     text: "MAIN RUN",
     why: "The placeholder on Add a phase: a real tab name off the pilot's own bill (MUR, MAIN RUN). It is an example of what a client wrote, not our vocabulary for it.",
   },
