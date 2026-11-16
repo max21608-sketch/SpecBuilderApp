@@ -98,4 +98,34 @@ describeIfDb("the twin routes", () => {
     const row = await client.query(`select status from spec_record_twins where id = $1`, [twinId]);
     expect(row.rows[0].status).toBe("retired");
   }, SLOW);
+
+  // Review 2.4: the hover printed a code once per twin line, so a line twinned
+  // with the same code on the main and the mock-up phase said it twice.
+  it("lists each twin code once, in the order of the first line that carries it", async () => {
+    const mainRunId = String((await client.query(`select run_id from spec_records where id = $1`, [guest])).rows[0].run_id);
+    const later = await withTransaction((txn) =>
+      createRecord(txn, {
+        projectId,
+        runId: mainRunId,
+        itemDescription: "Stool",
+        clientRef: "AA-FUR-01",
+        qty: 1,
+        actor: "qa",
+      }),
+    );
+    const { POST } = await import("@/app/api/records/[id]/twins/route");
+    for (const otherId of [guest, mockupCopy, later.recordId]) {
+      const linked = await POST(jsonRequest("POST", { otherId, reason: "__QA One stool" }), params(ambassador));
+      expect(linked.status, JSON.stringify(await linked.clone().json())).toBe(200);
+    }
+    const { GET: list } = await import("@/app/api/records/route");
+    const rows = (
+      (await (await list(new Request(`http://localhost/test?projectId=${projectId}`))).json()) as {
+        records: { id: string; twin_codes?: string[] }[];
+      }
+    ).records;
+    // GR-FUR-13 is on two lines and printed once; AA-FUR-01 sorts first by
+    // its letters but its line came later, so it is second.
+    expect(rows.find((row) => row.id === ambassador)?.twin_codes).toEqual(["GR-FUR-13", "AA-FUR-01"]);
+  }, SLOW);
 });
