@@ -24,7 +24,7 @@
 // subscription that answers slowly. So this enqueues and returns 202; nothing
 // is fetched, parsed or read inside the request.
 // ============================================================================
-import { after } from "next/server";
+import { afterResponse } from "@/lib/after-response";
 import { z } from "zod";
 import { sql } from "@/lib/db";
 import { reportFailure } from "@/lib/error-detail";
@@ -147,7 +147,7 @@ export async function POST(request: Request): Promise<Response> {
   // be frozen with the function before it lands, and its empty catch meant a
   // failure left no trace either.
   const subscriptionIds = [...subscriptions.keys()];
-  after(async () => {
+  afterResponse(async () => {
     try {
       await sql`
         update graph_subscriptions set last_notification_at = now()
