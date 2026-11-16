@@ -63,6 +63,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import Tabs from "@/components/ui/Tabs";
 import Card from "@/components/ui/Card";
 import Note from "@/components/ui/Note";
+import Tip from "@/components/ui/Tip";
 import Chip from "@/components/ui/Chip";
 import SuggestButton from "@/components/ui/SuggestButton";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
@@ -239,6 +240,8 @@ function DraftsView() {
   const [tier, setTier] = useState<"all" | QuestionTier>("all");
   const [includeWaiting, setIncludeWaiting] = useState(false);
   const [acceptingLevels, setAcceptingLevels] = useState(false);
+  /** The add-contact form. Null until somebody opens or closes it: then open exactly when nobody is recorded. */
+  const [addingContact, setAddingContact] = useState<boolean | null>(null);
   // The default selection is computed on FIRST LOAD and again when the contact
   // changes, and at no other time. After that a reload intersects the user's
   // choices with what is still selectable, so acting on a card does not
@@ -589,6 +592,8 @@ function DraftsView() {
    * not showing.
    */
   const contactTab = effectiveContact(contactId, data);
+  /** With nobody recorded the form is always open: it is the next step, and there is nothing to close it onto. */
+  const addingContactOpen = data.contacts.length === 0 || (addingContact ?? false);
 
   /**
    * How many questions the designer chases cover, all together.
@@ -615,6 +620,34 @@ function DraftsView() {
   const nobodyQuestions = nobody.reduce((sum, row) => sum + row.questionCount, 0);
   /** Every question no designer's group holds: nobody to ask, or no level. Listed on Everyone too. */
   const blockedQuestions = inventory.blocked.reduce((sum, row) => sum + row.questionCount, 0);
+
+  /**
+   * WHAT THE TAB COUNTS, IN WORDS (review 3.8b, 2026-11-16).
+   *
+   * "Everyone 3695" sat beside the tiles "TGQ 192" and "Also outstanding 1,888",
+   * and a reader cannot reconcile them, because they count different things:
+   * the tab counts every outstanding QUESTION (both tiers, and the ones on
+   * items with no level, which have no tier yet); the TGQ tile counts each
+   * item's own TGQ (`totalItemTgq` — gate rows on the matrix, project-wide
+   * questions apart), which is not a question count. No number changes; the
+   * tab's hover says the split. The tier split is the route's own totals, and
+   * it is only stated when it adds up to the tab's number, so a payload that
+   * routed questions some other way never gets a breakdown that lies.
+   */
+  const everyoneCount = designerQuestionCount + blockedQuestions;
+  const toQuoteQuestions = inventory.totals.outstanding - inventory.totals.later - inventory.totals.noLevel;
+  const fmt = (n: number) => n.toLocaleString();
+  const everyoneMeaning =
+    everyoneCount === inventory.totals.outstanding && toQuoteQuestions >= 0
+      ? [
+          `${fmt(everyoneCount)} question${everyoneCount === 1 ? "" : "s"} outstanding`,
+          `${fmt(toQuoteQuestions)} block the quote`,
+          `${fmt(inventory.totals.later)} do not`,
+          inventory.totals.noLevel > 0 ? `${fmt(inventory.totals.noLevel)} on items with no level` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") + ". The TGQ tile counts each item's own TGQ, not questions."
+      : `${fmt(everyoneCount)} question${everyoneCount === 1 ? "" : "s"} outstanding, on every item.`;
 
   /** What the app guessed each level-less line is, keyed the way the table asks. */
   const levelSuggestions: Record<string, LevelSuggestion> = {};
@@ -741,7 +774,7 @@ function DraftsView() {
               // project with no contacts read "Everyone 0" beside "Nobody
               // assigned 3128" (found-in-use, 2026-10-12). A colleague's group
               // holds a copy of the same questions and is never added on.
-              { id: "", label: "Everyone", count: designerQuestionCount + blockedQuestions },
+              { id: "", label: <span title={everyoneMeaning}>Everyone</span>, count: everyoneCount },
               ...inventory.groups.map((group) => ({
                 id: group.contact.id,
                 // A COLLEAGUE IS MARKED, not just sorted last. `groupByContact`
@@ -761,7 +794,11 @@ function DraftsView() {
               })),
               {
                 id: NOBODY,
-                label: "Nobody assigned",
+                label: (
+                  <span title={`${fmt(nobodyQuestions)} question${nobodyQuestions === 1 ? "" : "s"} on items with no contact to ask: no designer code, or one that matches nobody under Contacts.`}>
+                    Nobody assigned
+                  </span>
+                ),
                 count: nobodyQuestions,
                 tone: "warn" as const,
                 hidden: nobody.length === 0,
@@ -950,12 +987,37 @@ function DraftsView() {
           )}
         </p>
 
-        <ContactsPanel
-          projectId={project.id}
-          contacts={data.contacts}
-          suggestedCodes={inventory.suggestedCodes}
-          onChanged={() => void load()}
-        />
+        {/* IN A CARD, like the project page's (review 3.8a, 2026-11-16): the
+            table's header floated with no box around it. With nobody recorded
+            the add form is open and has no Close — it is the next step. */}
+        <Card
+          flush
+          title={
+            <>
+              Contacts
+              <Tip>
+                The designer code matches the BOQ&rsquo;s own wording, and is what ties a record&rsquo;s questions to
+                a person.
+              </Tip>
+            </>
+          }
+          actions={
+            data.contacts.length > 0 ? (
+              <Button size="xs" onClick={() => setAddingContact(!addingContactOpen)}>
+                {addingContactOpen ? "Close" : "Add"}
+              </Button>
+            ) : undefined
+          }
+        >
+          <ContactsPanel
+            projectId={project.id}
+            contacts={data.contacts}
+            suggestedCodes={inventory.suggestedCodes}
+            adding={addingContactOpen}
+            onAddingChange={setAddingContact}
+            onChanged={() => void load()}
+          />
+        </Card>
 
         {contactTab === NOBODY ? (
           nobodyCard

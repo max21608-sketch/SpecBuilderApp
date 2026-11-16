@@ -401,7 +401,9 @@ export default function ChaseQuestionTable({
           onChange={(event) => setFilters((prev) => ({ ...prev, text: event.target.value }))}
           placeholder="Search a code, an item, a question or a BWS field"
           aria-label="Search the questions"
-          className="w-64 max-w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm"
+          // Wide enough for its own placeholder (review 3.8d, the fill-in's
+          // twin): at w-64 it was clipped.
+          className="w-96 max-w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm"
         />
         <select
           value={filters.runId}

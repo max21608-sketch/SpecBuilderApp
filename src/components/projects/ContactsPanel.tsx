@@ -499,9 +499,14 @@ export default function ContactsPanel({
               <Button type="submit" variant="primary" size="sm" disabled={busy || !name.trim()}>
                 {busy ? "Adding…" : "Add contact"}
               </Button>
-              <Button size="sm" variant="quiet" onClick={() => setOpen(false)}>
-                Cancel
-              </Button>
+              {/* NOTHING TO GO BACK TO, NO CANCEL (review 3.8a, 2026-11-16).
+                  With nobody recorded the form IS the next step, and a Cancel
+                  that closed it left an empty table and no way on. */}
+              {contacts.length > 0 && (
+                <Button size="sm" variant="quiet" onClick={() => setOpen(false)}>
+                  Cancel
+                </Button>
+              )}
               <span className="text-xs text-neutral-500">
                 The designer code matches the BOQ&rsquo;s own wording (
                 {suggestedCodes.length > 0 ? suggestedCodes.join(", ") : "e.g. LCS, TA"}) and is what routes a

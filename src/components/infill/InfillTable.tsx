@@ -178,7 +178,9 @@ export default function InfillTable({
           onChange={(event) => onFilters({ ...filters, text: event.target.value })}
           placeholder="Search a code, an item, an area or a question"
           aria-label="Search what is outstanding"
-          className="w-72 max-w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm"
+          // Wide enough for its own placeholder (review 3.8d): at w-72 it was
+          // clipped at "a que" on a 1440 screen.
+          className="w-96 max-w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm"
         />
         <select
           value={filters.runId}

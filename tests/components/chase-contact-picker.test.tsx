@@ -16,7 +16,7 @@
 // still counts the designer chases once.
 // ===========================================================================
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import DraftsPage from "@/app/dashboard/drafts/page";
 
@@ -203,5 +203,57 @@ describe("a project nobody has been assigned to yet", () => {
     await screen.findByRole("tab", { name: /Everyone/ });
     expect(screen.queryByText(/3 with nothing outstanding/)).toBeNull();
     expect(screen.getByText(/none with nothing outstanding · 1 with no category/)).toBeTruthy();
+  });
+});
+
+// ============================================================================
+// REVIEW 3.8, 2026-11-16: the contacts card on the chase screen, and what the
+// Everyone tab counts.
+// ============================================================================
+describe("the chase screen's contacts and counts (review 3.8)", () => {
+  function nobodyRecorded() {
+    const base = payload();
+    return {
+      ...base,
+      contacts: [],
+      inventory: {
+        ...base.inventory,
+        groups: [],
+        blocked: [
+          { recordId: "r-1", recordLabel: "P17231-001", itemDescription: "Stool", designer: "CB", questionCount: 84, kind: "nobody_to_ask", reason: "no contact for this designer" },
+        ],
+        totals: { ...base.inventory.totals, outstanding: 84, toQuote: 9, later: 30, noLevel: 50 },
+      },
+    };
+  }
+
+  it("puts Contacts in a card, keeps the add form open with nobody recorded, and offers no Cancel", async () => {
+    apiFetch.mockResolvedValue({ ok: true, status: 200, data: nobodyRecorded() });
+    render(<DraftsPage />);
+    expect(await screen.findByRole("heading", { level: 2, name: /Contacts/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add contact" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    // Nothing to close the form onto, so the card has no Close either.
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+  });
+
+  it("with contacts recorded, the form opens from the card's own Add and closes with Cancel", async () => {
+    const user = userEvent.setup();
+    render(<DraftsPage />);
+    await screen.findByRole("heading", { level: 2, name: /Contacts/ });
+    expect(screen.queryByRole("button", { name: "Add contact" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByRole("button", { name: "Add contact" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("button", { name: "Add contact" })).toBeNull();
+  });
+
+  it("says what the Everyone count counts, without changing it", async () => {
+    apiFetch.mockResolvedValue({ ok: true, status: 200, data: nobodyRecorded() });
+    render(<DraftsPage />);
+    const everyone = await screen.findByRole("tab", { name: /Everyone/ });
+    expect(everyone.textContent).toBe("Everyone84");
+    expect(within(everyone).getByTitle(/84 questions outstanding · 4 block the quote · 30 do not · 50 on items with no level/)).toBeTruthy();
+    expect(within(everyone).getByTitle(/The TGQ tile counts each item's own TGQ, not questions/)).toBeTruthy();
   });
 });

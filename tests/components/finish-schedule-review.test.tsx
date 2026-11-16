@@ -39,14 +39,14 @@ function held(code: string, over: Partial<LibraryFinish> = {}): LibraryFinish {
   };
 }
 
-function setup(staged: StagedFinishSchedule, library: LibraryFinish[]) {
+function setup(staged: StagedFinishSchedule, library: LibraryFinish[], tickNothing = false) {
   const onKind = vi.fn();
   const onAct = vi.fn();
   const review = reviewFinishSchedule(staged, library);
   const byEntry = new Map(review.map((row) => [row.entryId, row]));
   // Everything tickable, as the screen ticks it on arrival.
   const selected = new Set(
-    review
+    (tickNothing ? [] : review)
       .filter((row) => row.verdict && ["new", "fills", "enriches", "agrees"].includes(row.verdict.status))
       .map((row) => row.entryId),
   );
@@ -90,6 +90,12 @@ describe("the finishes schedule review", () => {
     );
   })();
   const library = [held("AB-MTL-01"), held("AB-STN-01", { description: "Grey limestone", kind: "stone" })];
+
+  it("with nothing ticked, says the next step rather than offering a zero-count action (review 3.8c)", () => {
+    setup(staged, library, true);
+    expect(screen.queryByRole("button", { name: /^Close 0/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Tick a finish to add it" })).toBeDisabled();
+  });
 
   it("lists FINISHES, each under the code the library files it by and the code as printed", () => {
     setup(staged, library);
