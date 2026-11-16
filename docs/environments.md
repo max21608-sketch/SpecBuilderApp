@@ -301,9 +301,10 @@ nobody typing it.
   `GRAPH_*` stays unset.
 
 **Blob.** A new store, PRIVATE, connected to the new Vercel project — which is
-what injects `BLOB_READ_WRITE_TOKEN`. Set `BLOB_STORE_ID` to the new store's
-id: registration checks an uploaded blob belongs to THIS store before fetching
-it, so a stale id from staging refuses every upload.
+what injects `BLOB_READ_WRITE_TOKEN`. `BLOB_STORE_ID` is NOT read by the app
+(corrected 2026-11-16, audit H9: this paragraph described a check no code
+performs). A blob is addressed by pathname under `projects/<projectId>/`, and
+the token is the store's, so a second store cannot be read by accident.
 
 **The queue.** Nothing extra to do, and this is worth stating because a queue
 topic has no consumer until the deploy declaring it lands. The
@@ -346,7 +347,7 @@ Requires explicit authorization for that specific action, every time.
 | `AUTH_SECRET` | `.env.local` | Vercel project | Vercel project — **a NEW value** | Vercel project |
 | `ANTHROPIC_API_KEY` | `.env.local` | Vercel project | Vercel project — may be the same key | Vercel project |
 | `BLOB_READ_WRITE_TOKEN` | `.env.local` | auto-injected | auto-injected by its OWN store | auto-injected |
-| `BLOB_STORE_ID` | `.env.local` | Vercel project | Vercel project — its own store's id | Vercel project |
+| `BLOB_STORE_ID` | not read by the app | injected by Vercel, unused | injected by Vercel, unused | — |
 | `APP_BASE_URL` | `.env.local` | Vercel project | Vercel project — the pilot URL | Vercel project |
 | `EMAIL_MODE` | `.env.local` | `disabled` | `disabled` | `disabled` |
 | `MAIL_INGESTION_MODE` | `.env.local` | `disabled` | `disabled` | `disabled` |
@@ -358,8 +359,8 @@ Requires explicit authorization for that specific action, every time.
 `CRON_SECRET`. A shared `AUTH_SECRET` makes a staging session cookie valid on
 pilot, which is the one thing separate environments exist to prevent; a shared
 `CRON_SECRET` lets one deployment's queue and cron callers reach the other's
-routes. `BLOB_READ_WRITE_TOKEN` and `BLOB_STORE_ID` belong to the store and
-cannot be shared even by accident. `ANTHROPIC_API_KEY` legitimately can be the
+routes. `BLOB_READ_WRITE_TOKEN` belongs to the store and cannot be shared
+even by accident. `ANTHROPIC_API_KEY` legitimately can be the
 same key — it is a billing credential, not an identity.
 
 Changing a variable does not change an existing deployment. Set it, then

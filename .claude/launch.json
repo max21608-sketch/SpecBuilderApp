@@ -2,14 +2,13 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "spec-builder",
+      "name": "spec-builder-local",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
         "run",
-        "dev"
+        "dev:local"
       ],
-      "port": 3000,
-      "url": "http://localhost:3000"
+      "port": 3100
     }
   ]
 }

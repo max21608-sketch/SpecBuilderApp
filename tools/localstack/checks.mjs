@@ -19,7 +19,7 @@ console.log(`[localstack] stack server on http://127.0.0.1:${stack.port} — dat
 
 let code = 0;
 try {
-  code = await run("lint", bin("eslint"), ["."], env);
+  code = await run("lint", bin("eslint"), [".", "--max-warnings=0"], env);
   if (code === 0) code = await run("typecheck", bin("tsc"), ["--noEmit"], env);
   if (code === 0) code = await run("tests (database tier required)", bin("vitest"), ["run"], { ...env, REQUIRE_DB_TESTS: "1" });
   if (code === 0) code = await run("build", bin("next"), ["build"], env);
