@@ -795,7 +795,10 @@ export default function SpecTable({
           The counts NEVER change with the filter. They are the run's own, so
           narrowing the screen can never make a run look finished. */}
       {records.length > 0 && (
-        <div className={`grid grid-cols-2 gap-2.5 ${tally.disagreements > 0 ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
+        // `mt-3`, the gap every other block in this column carries above
+        // itself (the Notes, the filter row, the table): without it the
+        // suggested-level banner sat directly on the tiles (review 3.3).
+        <div className={`mt-3 grid grid-cols-2 gap-2.5 ${tally.disagreements > 0 ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
           {/* ==================================================================
               EVERY TILE ON THIS STRIP COUNTS ITEMS, BECAUSE THAT IS WHAT
               PRESSING ONE LISTS.
