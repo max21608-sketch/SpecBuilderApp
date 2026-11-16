@@ -30,7 +30,7 @@ import type { BoqImport, Category, Import, Line, Reconciliation, Sheet } from "@
 import { billLineId } from "@/lib/needs-you";
 import { ITEM_LEVELS, ITEM_LEVEL_LABELS, isItemLevel } from "@/lib/spec-vocab";
 import { quantityNotGiven } from "@/lib/printed-number";
-import { pdfPageOfLine } from "@/lib/pdf-bill-source";
+import { pdfFlagsOfLine, pdfPageOfLine } from "@/lib/pdf-bill-source";
 import type { LineCheck } from "@/lib/pdf-bill-checks";
 import { readMockupQty } from "@/lib/bill-sheet-notices";
 import { fabricCodeDisplay, fabricFilingCode } from "@/lib/boq-row-kinds";
@@ -566,6 +566,7 @@ export default function BillLineRow({
   const chosenNone = isNoPicture(line.picture);
   const description = fabric ? undefined : descriptionPlan;
   const pdfPage = pdfPageOfLine(run.parsed?.pdfSource, sheet.sheetName, line.lineNo);
+  const pdfDoubts = pdfFlagsOfLine(run.parsed?.pdfSource, sheet.sheetName, line.lineNo);
   return (
     <>
     <Tr
@@ -632,6 +633,17 @@ export default function BillLineRow({
             condition): a few words in place, its page one
             click away in the first cell, red where a check
             failed, the whole sentence on hover. */}
+        {/* WHAT THE PDF READER DOUBTS ABOUT THIS LINE (C10): a few words in
+            place, amber, the whole sentence on hover and the page one click
+            away in the first cell. */}
+        {!transcribed && pdfPage !== null && pdfDoubts.length > 0 && (
+          <span
+            className={`mt-0.5 block max-w-[15rem] whitespace-normal font-sans text-[10.5px] font-medium ${TONE.warn.text}`}
+            title={pdfDoubts.join("\n")}
+          >
+            check against the PDF{pdfDoubts.length > 1 ? ` (${pdfDoubts.length})` : ""}
+          </span>
+        )}
         {transcribed && pdfPage !== null && (
           <span
             className={`mt-0.5 block max-w-[15rem] whitespace-normal font-sans text-[10.5px] ${flags.length > 0 ? `font-medium ${TONE.danger.text}` : TONE.guess.text}`}

@@ -4,6 +4,8 @@
 // of the bill that was refused on 2026-09-23 and invents every row
 // (`tests/fixtures/boq-shapes.ts`); nothing here is client material.
 import { describe, expect, it } from "vitest";
+import ExcelJS from "exceljs";
+import { displayedNumber } from "@/lib/sheet-display";
 import type { SheetData } from "read-excel-file/node";
 import { readSpreadsheetSheets } from "@/lib/intake-source";
 import {
@@ -13,6 +15,7 @@ import {
   readSheetWithColumns,
   REFERENCE_BOQ_ALIASES,
   sheetsNeedingColumns,
+  sheetsWithColumnsInDoubt,
   sheetWidth,
   type BoqLayout,
   type ParsedBoqSheet,
@@ -20,6 +23,7 @@ import {
 import {
   BOQ_ROLES,
   columnMappingProblem,
+  columnsAwaitingALook,
   columnsFromSelections,
   composeBoqArea,
   foldHeading,
@@ -441,5 +445,207 @@ describe("a person's mapping is checked in words", () => {
     expect(columnsFromSelections(selections).problem).toMatch(/Columns D and E are both set as code/);
     selections[3] = "ignore";
     expect(columnsFromSelections(selections)).toEqual({ columns: { code: 4 }, keep: [], problem: null });
+  });
+});
+
+// ---- audit C6 / C7 (2026-11-16): the reader's own doubt about its columns ----
+
+describe("two columns claiming one role are a question, never a silent first-wins (C6)", () => {
+  // `item` and `description` are BOTH synonyms of the item description. The
+  // first column used to win and the second vanished: every record was named
+  // "1.01" and the real description was never read, with no columns check.
+  const ITEM_AND_DESCRIPTION: SheetData = [
+    ["Item", "Code", "Description", "Qty"],
+    ["1.01", "ZZ-101", "Sofa", 2],
+    ["1.02", "ZZ-102", "Armchair", 4],
+  ];
+
+  it("stages the sheet with the doubt in words, naming both columns", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: ITEM_AND_DESCRIPTION }]).sheets);
+    expect(sheet.needsColumns).toBe(false);
+    expect(sheet.columnsDoubt).toMatch(/Columns A \(“Item”\) and C \(“Description”\)/);
+    expect(sheet.columnsDoubt).toMatch(/takes as the description/);
+    expect(sheet.columnsDoubt).toMatch(/column A was read as it/);
+  });
+
+  it("opens the Columns panel and holds the confirm until a person has looked", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: ITEM_AND_DESCRIPTION }]).sheets);
+    expect(columnsAwaitingALook(sheet)).toBe(true);
+    expect(sheetsWithColumnsInDoubt({ sheets: [sheet] })).toHaveLength(1);
+    // "The columns are right" is the look.
+    expect(sheetsWithColumnsInDoubt({ sheets: [{ ...sheet, columnsChecked: true }] })).toHaveLength(0);
+    expect(columnsAwaitingALook({ ...sheet, columnsChecked: true })).toBe(false);
+    // A person's own columns carry no doubt.
+    const person = readSheetWithColumns("Bill", ITEM_AND_DESCRIPTION, {
+      headerRow: 1,
+      headerRows: 1,
+      columns: { code: 1, itemDescription: 2, qty: 3 },
+    });
+    expect(person.columnsDoubt).toBeUndefined();
+    expect(person.lines.map((line) => line.itemDescription)).toEqual(["Sofa", "Armchair"]);
+  });
+
+  it("says nothing where each role has one column, so such a sheet stages as it always did", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: TYPICAL }]).sheets);
+    expect("columnsDoubt" in sheet).toBe(false);
+    expect(columnsAwaitingALook(sheet)).toBe(false);
+  });
+
+  it("counts one column read three ways as ONE claim on a two-row header", () => {
+    const sheet = first(
+      parseBoqSheets([
+        {
+          sheet: "Bill",
+          data: [
+            ["FF&E", "Item", "TOTAL"],
+            ["code", "description", "Q-ty"],
+            ["ZZ-1", "Sofa", 1],
+          ],
+        },
+      ]).sheets,
+    );
+    expect(sheet.headerRows).toBe(2);
+    expect("columnsDoubt" in sheet).toBe(false);
+  });
+});
+
+describe("a saved layout narrower than the known headings does not outrank them (C7)", () => {
+  // A person saved `Description | Qty` off a bill with no code column. Layouts
+  // are global, and that layout fitted every later bill printing those two
+  // headings — and outranked the synonyms, so the code was never read.
+  const NARROW: BoqLayout = {
+    id: "narrow",
+    name: "Somebody's two-column layout",
+    headerRows: 1,
+    mapping: { itemDescription: "description", qty: "qty" },
+  };
+  const BILL: SheetData = [
+    ["Code", "Description", "Qty", "Unit"],
+    ["ZZ-201", "Bench", 3, "nr"],
+  ];
+
+  it("lets the synonyms read the sheet, and says why in the sheet's doubt", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: BILL }], { layouts: [NARROW] }).sheets);
+    expect(sheet.mappingSource).toBe("synonym");
+    expect(sheet.lines[0]?.code).toBe("ZZ-201");
+    expect(sheet.columnsDoubt).toMatch(/saved layout “Somebody's two-column layout” fits this sheet but reads 2 columns/);
+    expect(sheet.columnsDoubt).toMatch(/known headings read 4/);
+    expect(sheetsWithColumnsInDoubt({ sheets: [sheet] })).toHaveLength(1);
+  });
+
+  it("still applies a layout that reads at least as much as the synonyms", () => {
+    const full: BoqLayout = {
+      ...NARROW,
+      id: "full",
+      mapping: { code: "code", itemDescription: "description", qty: "qty", qtyUnit: "unit" },
+    };
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: BILL }], { layouts: [full] }).sheets);
+    expect(sheet.mappingSource).toBe("layout");
+    expect("columnsDoubt" in sheet).toBe(false);
+  });
+
+  it("still applies a narrow layout where the synonyms cannot read the sheet at all", () => {
+    const sheet = first(
+      parseBoqSheets([{ sheet: "Bill", data: [["Spec Code", "Description", "Qty"], ["ZZ-1", "Stool", 1]] }], {
+        layouts: [{ ...NARROW, mapping: { code: "spec code", itemDescription: "description" } }],
+      }).sheets,
+    );
+    expect(sheet.mappingSource).toBe("layout");
+    expect(sheet.lines[0]?.code).toBe("ZZ-1");
+  });
+});
+
+describe("a header printed again above a section is passed over and counted (C9)", () => {
+  const SECTIONS: SheetData = [
+    ["Code", "Description", "Qty"],
+    ["ZZ-301", "Sofa", 2],
+    [null, null, null],
+    ["code", " DESCRIPTION ", "QTY"],
+    ["ZZ-302", "Armchair", 4],
+    ["Code", "Description", null],
+    ["ZZ-303", "Description of works", 1],
+    ["ZZ-304", "Description", 1],
+  ];
+
+  it("stages no record named “Description”, and says how many it passed over", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: SECTIONS }]).sheets);
+    expect(sheet.lines.map((line) => line.code)).toEqual(["ZZ-301", "ZZ-302", "ZZ-303", "ZZ-304"]);
+    expect(sheet.repeatedHeaderRows).toBe(2);
+    expect(describeHeader(sheet)).toMatch(/2 repeated heading rows under the header were passed over/);
+  });
+
+  it("matches the WHOLE cell: a line whose description merely contains a heading, or is one, stays a line", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: SECTIONS }]).sheets);
+    expect(sheet.lines.find((line) => line.code === "ZZ-303")?.itemDescription).toBe("Description of works");
+    // One cell equal to its heading is not a reprinted header: its code is real.
+    expect(sheet.lines.find((line) => line.code === "ZZ-304")?.itemDescription).toBe("Description");
+  });
+
+  it("adds nothing to a sheet with no reprint", () => {
+    const sheet = first(parseBoqSheets([{ sheet: "Bill", data: TYPICAL }]).sheets);
+    expect("repeatedHeaderRows" in sheet).toBe(false);
+  });
+});
+
+describe("an identifier cell reads as the sheet DISPLAYS it, never as its raw number (C13)", () => {
+  const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  /** A bill whose line numbers and codes are typed as NUMBERS and formatted, as a spreadsheet lets you. */
+  async function formattedBill(): Promise<Buffer> {
+    const book = new ExcelJS.Workbook();
+    const ws = book.addWorksheet("Bill");
+    ws.addRow(["Line", "Code", "Description", "Qty"]);
+    const rows: [number, number | string, string, number][] = [
+      [1.1, 12, "Sofa", 2],
+      [1.1, "ZZ-401", "Armchair", 1200],
+      [1.2, 7, "Table", 3],
+    ];
+    rows.forEach(([line, code, description, qty], n) => {
+      const row = ws.addRow([line, code, description, qty]);
+      // 1.10 under 1.1: the second line's number is DISPLAYED with two decimals.
+      row.getCell(1).numFmt = n === 1 ? "0.00" : "0.0";
+      if (typeof code === "number") row.getCell(2).numFmt = "0000";
+      row.getCell(4).numFmt = "#,##0";
+    });
+    return Buffer.from(await book.xlsx.writeBuffer());
+  }
+  const LINE_LAYOUT: BoqLayout = {
+    id: "line-layout",
+    name: "Line, code, description, qty",
+    headerRows: 1,
+    mapping: { sourceLine: "line", code: "code", itemDescription: "description", qty: "qty" },
+  };
+
+  it("keeps 1.10 apart from 1.1 and 0012 as 0012, and reads the quantity's VALUE", async () => {
+    const sheets = await readSpreadsheetSheets(await formattedBill(), "bill.xlsx", XLSX);
+    const sheet = first(parseBoqSheets(sheets, { layouts: [LINE_LAYOUT] }).sheets);
+    expect(sheet.lines.map((line) => [line.sourceLine, line.code, line.qty])).toEqual([
+      ["1.1", "0012", 2],
+      ["1.10", "ZZ-401", 1200],
+      ["1.2", "0007", 3],
+    ]);
+  });
+
+  it("reads the same through a person's columns", async () => {
+    const [source] = await readSpreadsheetSheets(await formattedBill(), "bill.xlsx", XLSX);
+    const sheet = readSheetWithColumns(
+      source!.sheet,
+      source!.data,
+      { headerRow: 1, headerRows: 1, columns: { sourceLine: 0, code: 1, itemDescription: 2, qty: 3 } },
+      "person",
+      source!.display,
+    );
+    expect(sheet.lines.map((line) => line.code)).toEqual(["0012", "ZZ-401", "0007"]);
+  });
+
+  it("renders only the zero patterns, and never a non-number", () => {
+    expect(displayedNumber(1.1, "0.00")).toBe("1.10");
+    expect(displayedNumber(12, "0000")).toBe("0012");
+    expect(displayedNumber(12, "#0.0")).toBe("12.0");
+    expect(displayedNumber(1.2, "0.0")).toBeNull(); // shows as it is
+    expect(displayedNumber(1200, "#,##0")).toBeNull(); // a separator: not an identifier format
+    expect(displayedNumber(0.5, "0%")).toBeNull();
+    expect(displayedNumber(12, "General")).toBeNull();
+    expect(displayedNumber("0012", "0000")).toBeNull();
+    expect(displayedNumber(-3, "0000")).toBeNull();
   });
 });

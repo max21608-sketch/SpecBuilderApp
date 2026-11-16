@@ -154,16 +154,20 @@ export const SEED_ACTOR = "seed";
  * reading behind the review page's open panel and the panel's own close
  * button, so the two cannot disagree about which sheet is unseen.
  *
- * A SEEDED layout, a known heading and a person's own columns never wait.
- * What the CONFIRM waits for is narrower still — a model's reading only
- * (`sheetsAwaitingColumnCheck`) — and unchanged.
+ * A SEEDED layout, a known heading and a person's own columns never wait —
+ * except where the reader DOUBTS its own reading (`columnsDoubt`, 2026-11-16:
+ * two columns claimed one role, or a narrower saved layout was passed over).
+ * What the CONFIRM waits for is narrower: a model's reading
+ * (`sheetsAwaitingColumnCheck`) and a doubted one (`sheetsWithColumnsInDoubt`).
  */
 export function columnsAwaitingALook(sheet: {
   mappingSource?: BoqMappingSource;
   layoutOrigin?: BoqLayoutOrigin | null;
   columnsChecked?: boolean;
+  columnsDoubt?: string | null;
 }): boolean {
   if (sheet.columnsChecked) return false;
+  if (sheet.columnsDoubt) return true;
   if (sheet.mappingSource === "model") return true;
   return sheet.mappingSource === "layout" && sheet.layoutOrigin !== "seed";
 }

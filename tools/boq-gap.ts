@@ -165,6 +165,9 @@ function describeSheet(sheet: ParsedBoqSheet): string[] {
     );
   }
   if (sheet.needsColumns) return out;
+  // The reader's own doubt about its columns (C6/C7, 2026-11-16): printed only
+  // where there is one, so a sheet nothing doubts prints exactly as before.
+  if (sheet.columnsDoubt) out.push(`  COLUMNS IN DOUBT: ${sheet.columnsDoubt}`);
   const lines = sheet.lines;
   const fabric = lines.filter((line) => line.rowKind === "finish_for");
   const items = lines.filter((line) => line.rowKind !== "finish_for");
@@ -173,7 +176,9 @@ function describeSheet(sheet: ParsedBoqSheet): string[] {
   out.push(
     `  lines: ${lines.length} · no code ${lines.filter((line) => !line.code).length} · no qty ${
       lines.filter((line) => line.qty === null).length
-    } · qty sum (items) ${qtySum} · skipped rows ${sheet.skippedRows}`,
+    } · qty sum (items) ${qtySum} · skipped rows ${sheet.skippedRows}${
+      sheet.repeatedHeaderRows ? ` · repeated heading rows ${sheet.repeatedHeaderRows}` : ""
+    }`,
   );
   out.push(`  row kinds by the bracket rule: ${fabric.length} fabric line(s), ${items.length} other, ${flagged.length} flagged`);
   for (const line of flagged.slice(0, 12)) out.push(`    row ${line.lineNo} ${line.code ?? ""}: ${line.rowKindFlag}`);

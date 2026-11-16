@@ -166,12 +166,18 @@ async function setColumns(run: BoqRunRow, body: z.infer<typeof SetColumns>, acto
   });
   if (problem) return json({ ok: false, code: "columns_invalid", error: problem }, 400);
 
-  const parsed = readSheetWithColumns(source.sheet, source.data, {
-    headerRow: body.headerRow,
-    headerRows: body.headerRows,
-    columns,
-    keep,
-  });
+  const parsed = readSheetWithColumns(
+    source.sheet,
+    source.data,
+    {
+      headerRow: body.headerRow,
+      headerRows: body.headerRows,
+      columns,
+      keep,
+    },
+    "person",
+    source.display,
+  );
 
   const version = await withTransaction(async (txn) => {
     const suggest = await loadLineSuggester(txn);

@@ -53,6 +53,20 @@ is the bill's quantity cell as printed where it gave no count, written by the
 confirm and cleared by a revision that prints a count, so the phase table and
 the record header print `quantityNotGiven(qty_raw)` too.
 
+**An identifier is read as the sheet DISPLAYS it** (2026-11-16, audit C13,
+`src/lib/sheet-display.ts`). `read-excel-file` hands back a numeric cell's
+value, so a line number formatted `0.00` read `1.10` as "1.1" (colliding with
+line 1.1) and a code formatted `0000` read `0012` as "12" — both confirmed on
+a synthetic workbook. `readSpreadsheetSheets` now also reads each cell's
+`numFmt` with ExcelJS (whose `.text` is NOT the display) and renders ONLY the
+zero patterns (`0000`, `0.00`, `#0.0`); the bill reader uses that text for the
+CODE, the bill's own LINE NUMBER and a FINISH CODE, and nothing else. A
+quantity keeps its value through `readQuantity` — a `#,##0` display would be
+`1,200`, which is refused — and any other format (separators, currency,
+percent, date) is left to the raw value rather than a second partial Excel
+formatter. A workbook ExcelJS cannot open reads exactly as before. The model's
+text flattener passes `display: false`.
+
 ### A BOQ has tabs, and each tab is a sub-quote
 
 `src/lib/boq-import.ts`, `src/lib/confirm-boq.ts`,
@@ -296,6 +310,18 @@ columns are plainly there was a dead end because of the words above them. Max:
   the nearer one ABOVE, flagged; otherwise only the model or a person places
   it. **The bracket alone placed 5 of 34** on the real bill (brackets such as
   `GR / MUR-FUR--04` name no item code); the model's reading placed all 34.
+  **The bracket counts only where the line ALSO looks like a finish**
+  (2026-11-16, audit C8, `bracketLineLooksLikeFinish`): its own code is a
+  finish code (`GR-FAB-13`, `FAB-19`, `F-FA-05`), its description names a
+  generic finish noun (fabric, COM, COL, leather, trim, finish…, never a
+  cloth's name — "Velvet sofa" is a sofa), or it carries a COM code.
+  Otherwise `CH-02 (CH-01)` ("as CH-01") is an ITEM, not CH-01's fabric, and
+  `CH-01 (TO BE CONFIRMED)` (the Ronnie Scott's schedule, found in use
+  2026-10-15) is an item whose ref carries the bill's qualifier: both stay
+  item lines, the client ref exactly as printed — never stripped, which would
+  change the pre-sale key silently — with an amber flag saying what the
+  bracket said. Every bracketed line on both Aman copies passes; `boq:gap`
+  moved only the Ronnie Scott's row 8 sentence.
   The confirm writes the description verbatim into the next free slot OF ITS
   KIND on that record (since 2026-10-06 — see the next section; it was "the
   next free COM slot" for every line), files the code through
@@ -308,6 +334,33 @@ columns are plainly there was a dead end because of the words above them. Max:
   human step.
 - **A formula cell with no cached result reads as blank**, never
   `[object Object]` — one real copy saved its `Line` column that way.
+- **Two columns claiming one role are a question, not a first-wins**
+  (2026-11-16, audit C6). `item` and `description` are both synonyms of the
+  item description, so `Item | Code | Description | Qty` read the line numbers
+  as every record's name and dropped the description, with no check. The
+  first column is still READ, but the sheet stages `columnsDoubt` naming both
+  columns; the Columns panel opens (`columnsAwaitingALook`) and the confirm
+  refuses it (`sheetsWithColumnsInDoubt`, `columns_in_doubt`) until a person
+  sets the columns or presses "The columns are right". One column read three
+  ways on a two-row header is one claim.
+- **A saved layout narrower than the known headings does not outrank them**
+  (2026-11-16, audit C7). Layouts are global and `layoutAt` only asks that
+  every heading a layout names is present, so a two-heading layout saved off
+  one bill fitted every bill printing those headings and the code column was
+  never read. A layout applies only where it maps at least as many columns as
+  the synonyms' own reading of the sheet; otherwise the synonyms read it and
+  the sheet carries a `columnsDoubt` naming the layout, held as above. Where
+  the synonyms cannot read the sheet at all (the Aman "Spec Code"), a layout
+  applies exactly as before.
+- **A header printed again above a section is passed over and counted**
+  (2026-11-16, audit C9). It used to stage as a record named "Description".
+  A row is a reprint where at least two of the columns being read carry text
+  and EVERY one of them folds (`foldHeading`) to that column's own heading
+  (joined, or either row of a two-row header) — whole cells only, never a
+  substring, so "Description of works" stays a line and so does a row with
+  one heading word in one cell. The count is `repeatedHeaderRows` on the
+  staged sheet (absent where none), and `describeHeader` says "2 repeated
+  heading rows under the header were passed over".
 
 **Read the specifications in this bill** registers the SAME stored file as an
 `ffe_schedule` document (`src/lib/bill-specifications.ts`, idempotent on
@@ -512,6 +565,31 @@ PDFs printed from Excel.
   Pictures are not carried.
 - Measured on the three real PDFs: 575 of 575 staged fields equal to the
   hand-converted workbook. 47 non-bill real PDFs: none reads as a bill.
+- **A line with no figure is still a line** (2026-11-16, audit C10,
+  `pageRows`). The 575 were on schedules where every line printed a number;
+  a `TBC`, `-` or blank quantity merged the line into its neighbour, a
+  description taller than the row's reach lost lines, and a page printed with
+  no header gave its title to row 1, none flagged. Now: a quantity printed as
+  WORDS anchors its own row (and reaches the bill as `qty_raw`, "quantity not
+  given"); a CODE no quantity claims — two separate code cells nearest one
+  figure, the farther one — anchors its own row, a code wrapped over lines
+  (`CH-01` / `(TO BE` / `CONFIRMED )`) being one cell; a row hung on words or
+  a code is kept only with BOTH a code and a description, so a footer's date
+  or a title is never a line; a piece beyond reach that continues its
+  column's text in the edge row a wrapped line apart is that cell's next
+  line; above the first row of a header-less page only half a row is read.
+  Two things are FLAGGED, never guessed (`PdfBillRow.flags` → the workbook's
+  `rowFlags` → `pdfSource.flags`, "check against the PDF" on the review line):
+  a DESCRIPTION holding text from two bands (two lines joined, one with
+  neither figure nor code), and a header-less page's first line holding a
+  separate band above it (perhaps the title). Only the description is asked
+  about bands, MEASURED: asking every column flagged 41 of 47 real rows whose
+  dimensions or notes cells carry a blank line. Re-measured on all 117 real
+  PDFs under `~/dev/localstack`: every read byte-identical before and after,
+  no flag raised, the same 114 refused. NOT done: a page with no figure and no
+  `TBC` at all still reads no rows (code anchors only supplement a page that
+  has a quantity); a title in a column where the first line has nothing is
+  still read into it, flagged only where it is a separate band.
 
 ### A PDF bill code cannot read is transcribed, and every line says so
 

@@ -22,9 +22,11 @@ import {
   type PdfTextItem,
 } from "@/lib/pdf-bill";
 import { readSpreadsheetSheets } from "@/lib/intake-source";
-import { parseBoqSheets } from "@/lib/boq-import";
+import { parseBoqSheets, REFERENCE_BOQ_ALIASES } from "@/lib/boq-import";
 
 type Text = { x: number; y: number; str: string; size?: number };
+
+const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 /** Column x positions on a landscape page, and where a centred figure goes. */
 const COL = { code: 40, description: 120, dims: 240, qty: 405, uom: 470, notes: 540 };
@@ -331,5 +333,151 @@ describe("the workbook it builds", () => {
       "projects/p1/uploads/Schedule (read from PDF).xlsx",
     );
     expect(pdfBillWorkbookFilename("Schedule.PDF")).toBe("Schedule (read from PDF).xlsx");
+  });
+});
+
+// ---- audit C10 (2026-11-16): rows that print no figure, long cells, a continuation's title ----
+
+describe("a line with no figure in its quantity is still its own line (C10)", () => {
+  it("reads a quantity printed as WORDS as that line's quantity, never merged into a neighbour", async () => {
+    const pdf = buildPdf([
+      landscape([
+        ...header(530),
+        ...line(490, { code: "QA-CH-01", description: ["ARMCHAIR"], qty: "9", uom: "EACH" }),
+        ...line(460, { code: "QA-CH-02", description: ["STOOL"], qty: "TBC", uom: "EACH" }),
+        ...line(430, { code: "QA-CH-03", description: ["SOFA"], qty: "2", uom: "EACH" }),
+      ]),
+    ]);
+    const read = await readPdfBill(pdf);
+    if (!read.ok) throw new Error(read.detail);
+    expect(read.rows.map((row) => [row.cells[0], row.cells[1], row.cells[3]])).toEqual([
+      ["QA-CH-01", "ARMCHAIR", "9"],
+      ["QA-CH-02", "STOOL", "TBC"],
+      ["QA-CH-03", "SOFA", "2"],
+    ]);
+    // Through the workbook and the bill reader: "quantity not given (the bill says “TBC”)".
+    const workbook = await pdfBillWorkbook(read);
+    // "ORDER QTY" is the model's or a person's to map; here, as a register would.
+    const parsed = parseBoqSheets(await readSpreadsheetSheets(workbook.bytes, "bill.xlsx", XLSX), {
+      aliases: [...REFERENCE_BOQ_ALIASES, { role: "qty", term: "order qty" }],
+    });
+    const lines = parsed.sheets?.[0]?.lines ?? [];
+    expect(lines.map((entry) => [entry.code, entry.qty, entry.qtyRaw ?? null])).toEqual([
+      ["QA-CH-01", 9, null],
+      ["QA-CH-02", null, "TBC"],
+      ["QA-CH-03", 2, null],
+    ]);
+  });
+
+  it("hangs a line with NO quantity on its code", async () => {
+    const blank: Text[] = [
+      { x: COL.code, y: 460, str: "QA-FB-02" },
+      { x: COL.description, y: 460, str: "STOOL FABRIC" },
+      { x: COL.uom, y: 460, str: "METRE" },
+    ];
+    const pdf = buildPdf([
+      landscape([
+        ...header(530),
+        ...line(490, { code: "QA-CH-01", description: ["ARMCHAIR"], qty: "9", uom: "EACH" }),
+        ...blank,
+        ...line(430, { code: "QA-CH-03", description: ["SOFA"], qty: "2", uom: "EACH" }),
+      ]),
+    ]);
+    const read = await readPdfBill(pdf);
+    if (!read.ok) throw new Error(read.detail);
+    expect(read.rows.map((row) => [row.cells[0], row.cells[1], row.cells[3], row.cells[4]])).toEqual([
+      ["QA-CH-01", "ARMCHAIR", "9", "EACH"],
+      ["QA-FB-02", "STOOL FABRIC", "", "METRE"],
+      ["QA-CH-03", "SOFA", "2", "EACH"],
+    ]);
+  });
+
+  it("keeps a code that wraps over three lines as ONE line's code", async () => {
+    const pdf = buildPdf([
+      landscape([
+        ...header(530),
+        ...line(470, { code: "QA-CH-01", description: ["POUFFE"], qty: "4", uom: "EACH" }).filter((text) => text.x !== COL.code),
+        { x: COL.code, y: 478, str: "QA-CH-01" },
+        { x: COL.code, y: 470, str: "(TO BE" },
+        { x: COL.code, y: 462, str: "CONFIRMED )" },
+      ]),
+    ]);
+    const read = await readPdfBill(pdf);
+    if (!read.ok) throw new Error(read.detail);
+    expect(read.rows).toHaveLength(1);
+    expect(read.rows[0]!.cells[0]).toBe("QA-CH-01\n(TO BE\nCONFIRMED )");
+  });
+
+  it("does not lose the lines of a description longer than the row's reach", async () => {
+    const description: Text[] = Array.from({ length: 14 }, (_, n) => ({ x: COL.description, y: 352 - n * 8, str: `SPEC LINE ${n + 1}` }));
+    const pdf = buildPdf([
+      landscape([
+        ...header(530),
+        { x: COL.code, y: 300, str: "QA-SO-01" },
+        { x: COL.qty + 6, y: 300, str: "1" },
+        ...description,
+      ]),
+    ]);
+    const read = await readPdfBill(pdf);
+    if (!read.ok) throw new Error(read.detail);
+    expect(read.rows).toHaveLength(1);
+    expect(read.rows[0]!.cells[1]!.split("\n")).toEqual(Array.from({ length: 14 }, (_, n) => `SPEC LINE ${n + 1}`));
+  });
+
+  it("flags a description holding text from two bands — a line with neither figure nor code, joined", async () => {
+    const pdf = buildPdf([
+      landscape([
+        ...header(530),
+        ...line(490, { code: "QA-CH-01", description: ["ARMCHAIR"], qty: "9", uom: "EACH" }),
+        { x: COL.description, y: 450, str: "A LINE WITH NO CODE" },
+        ...line(410, { code: "QA-CH-03", description: ["SOFA"], qty: "2", uom: "EACH" }),
+      ]),
+    ]);
+    const read = await readPdfBill(pdf);
+    if (!read.ok) throw new Error(read.detail);
+    const flagged = read.rows.filter((row) => (row.flags?.length ?? 0) > 0);
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0]!.flags![0]).toMatch(/two bands of the page/);
+    // And the workbook carries the row's flags beside its page.
+    const workbook = await pdfBillWorkbook(read);
+    expect(workbook.rowFlags?.some((flags) => flags.length > 0)).toBe(true);
+  });
+
+  it("carries no flags at all where nothing is doubted", async () => {
+    const read = await readPdfBill(twoPageSchedule());
+    if (!read.ok) throw new Error(read.detail);
+    expect(read.rows.every((row) => row.flags === undefined)).toBe(true);
+    expect("rowFlags" in (await pdfBillWorkbook(read))).toBe(false);
+  });
+});
+
+describe("a page printed with no header of its own (C10)", () => {
+  it("keeps a title more than half a row above the first line out of it", async () => {
+    const pdf = buildPdf([
+      landscape([...header(530), ...line(490, { code: "QA-CH-01", description: ["ARMCHAIR"], qty: "2", uom: "EACH" })]),
+      landscape([
+        { x: COL.code, y: 552, str: "__QA SCHEDULE CONTINUED" },
+        ...line(530, { code: "QA-CH-02", description: ["STOOL"], qty: "4", uom: "EACH" }),
+        ...line(490, { code: "QA-CH-03", description: ["SOFA"], qty: "1", uom: "EACH" }),
+      ]),
+    ]);
+    const read = await readPdfBill(pdf);
+    if (!read.ok) throw new Error(read.detail);
+    expect(read.rows.map((row) => row.cells[0])).toEqual(["QA-CH-01", "QA-CH-02", "QA-CH-03"]);
+  });
+
+  it("says so where text above the first line could not be told from the line's own", async () => {
+    const pdf = buildPdf([
+      landscape([...header(530), ...line(490, { code: "QA-CH-01", description: ["ARMCHAIR"], qty: "2", uom: "EACH" })]),
+      landscape([
+        { x: COL.code, y: 570, str: "__QA SCHEDULE CONTINUED" },
+        ...line(530, { code: "QA-CH-02", description: ["STOOL"], qty: "4", uom: "EACH" }),
+        ...line(410, { code: "QA-CH-03", description: ["SOFA"], qty: "1", uom: "EACH" }),
+      ]),
+    ]);
+    const read = await readPdfBill(pdf);
+    if (!read.ok) throw new Error(read.detail);
+    const first = read.rows.find((row) => row.page === 2)!;
+    expect(first.flags?.join(" ")).toMatch(/This page prints no header, and “FF&E CODE” of its first line holds text from above/);
   });
 });

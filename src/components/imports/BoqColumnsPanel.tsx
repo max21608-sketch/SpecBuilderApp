@@ -75,6 +75,8 @@ export type ColumnsPanelSheet = {
   needsColumns?: boolean;
   columnsNote?: string | null;
   columnsChecked?: boolean;
+  /** Why the reader doubts its own columns (C6/C7); the panel opens and the confirm waits. */
+  columnsDoubt?: string | null;
   preview?: string[][];
   /** What a model's reading dropped, in words (Step 2). */
   structure?: { notes?: string[] } | null;
@@ -398,6 +400,12 @@ export default function BoqColumnsPanel({
           under its heading. A price is never kept.
           {onAsk && " Asking the model is one small read, charged; setting the columns yourself is free."}
         </p>
+        {/* THE READER'S OWN DOUBT (audit C6/C7): two columns claimed one role,
+            or a narrower saved layout was passed over. Amber, in place, and
+            the confirm waits until somebody has looked. */}
+        {sheet.columnsDoubt && !sheet.needsColumns && (
+          <p className="mt-1 text-xs font-medium text-amber-800">{sheet.columnsDoubt}</p>
+        )}
         {(sheet.structure?.notes?.length ?? 0) > 0 && (
           <ul className="mt-1 list-inside list-disc text-xs text-amber-800">
             {sheet.structure?.notes?.map((note) => <li key={note}>{note}</li>)}

@@ -72,6 +72,19 @@ describe("a bill's list", () => {
     expect([...sheetsWaiting(items)].sort()).toEqual([1, 2]);
   });
 
+  it("sends a person to the columns the reader itself doubts, with its sentence as the why (C6/C7)", () => {
+    const doubt = "Columns A (“Item”) and C (“Description”) are all headings this reader takes as the description.";
+    const items = billNeedsYou({
+      single: false,
+      reading: false,
+      noLiveLines: false,
+      sheets: [{ index: 0, tab: "BILL", unmapped: false, unchecked: false, doubt, problems: [] }],
+    });
+    expect(items.map((entry) => [entry.words, entry.target, entry.why])).toEqual([
+      ["Check the columns on “BILL”, then press “The columns are right”", "sheet-0-columns", doubt],
+    ]);
+  });
+
   it("names no tab on a bill of one sheet, and says a read in progress with nowhere to go", () => {
     const items = billNeedsYou({
       single: true,
