@@ -14,7 +14,7 @@
 // Fixtures are synthetic. The option names are BWS's SHAPE, not a real row.
 // ============================================================================
 import { describe, it, expect } from "vitest";
-import { paletteForFinish } from "@/lib/finish-standard-palette";
+import { paletteForFinish, shortPaletteWhy } from "@/lib/finish-standard-palette";
 import {
   composeAttributeStatement,
   replacedItemStandard,
@@ -124,6 +124,30 @@ describe("which list a code's BW finish comes from — paletteForFinish", () => 
     expect(reading.why).toMatch(/set its kind/);
     // A register that could not be read offers nothing either.
     expect(paletteForFinish({ kind: "timber" }, [{ jsonId: 4 }], new Map()).palette).toBeNull();
+  });
+
+  // Review 3.7a: the library row prints a few words and keeps the sentence on
+  // its title. Every "none" sentence the function writes is run through the
+  // shortener here, so rewording one fails this test rather than putting the
+  // full sentence back on every row.
+  it("every 'no list' sentence has a few-word form for the row", () => {
+    const cases: [ReturnType<typeof paletteForFinish>, string][] = [
+      [paletteForFinish({ kind: "fabric" }, [{ jsonId: COM_1, fieldName: "COM 1" }], BY_FIELD), "no BW list for COM 1"],
+      [paletteForFinish({ kind: "fabric" }, [], BY_FIELD), "no BW finish for a fabric"],
+      [paletteForFinish({ kind: "leather" }, [], BY_FIELD), "no BW finish for a leather"],
+      [paletteForFinish({ kind: "stone" }, [], BY_FIELD), "no BW list for stone"],
+      [paletteForFinish({ kind: null }, [], BY_FIELD), "no kind set"],
+      [
+        paletteForFinish({ kind: null }, [{ jsonId: 4, fieldName: "Main timber finish" }, { jsonId: 5, fieldName: "Main metal finish" }], BY_FIELD),
+        "fields differ, no kind to decide",
+      ],
+    ];
+    for (const [reading, short] of cases) {
+      expect(reading.palette).toBeNull();
+      expect(shortPaletteWhy(reading.why)).toBe(short);
+    }
+    // A sentence it does not know comes back whole, never guessed at.
+    expect(shortPaletteWhy("Something new.")).toBe("Something new.");
   });
 });
 

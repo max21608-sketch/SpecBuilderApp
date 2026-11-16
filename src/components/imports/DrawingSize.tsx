@@ -267,6 +267,9 @@ function FigureRows({
   const askUnit = canTakeSlot(row) && (unitSource !== "printed" || row.unit === null);
   const askState = asksForState(row) && row.state === null;
   const reading = showMm ? millimetreReading(value, row.unit) : null;
+  // Named off the figure itself (review 3.9b), so a screen reader hears
+  // "Unit for 1'-9"" rather than "combobox" — the same words ObservationRows uses.
+  const figureName = (row.value ?? "").trim() || "this figure";
   const pick = (slot: SlotChoice) => {
     if (slot === current) return;
     if (slot === "note")
@@ -283,7 +286,7 @@ function FigureRows({
         onChange={(event) =>
           onChange(row, { unit: event.target.value || null })
         }
-        aria-label="printed in"
+        aria-label={`Unit for ${figureName} (printed in)`}
         className={`rounded border px-1 py-0.5 text-xs ${
           row.unit === null && row.attrGroup === "dimension"
             ? "border-amber-400 bg-amber-50"
@@ -307,7 +310,7 @@ function FigureRows({
           state: (event.target.value || null) as AttributeState | null,
         })
       }
-      aria-label="State"
+      aria-label={`State of ${figureName}`}
       className={`rounded border px-1 py-0.5 text-xs ${row.state === null ? "border-amber-400 bg-amber-50" : "border-neutral-300"}`}
     >
       <option value="">Stated or TBC?</option>

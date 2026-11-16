@@ -3,7 +3,7 @@
 // Rendered from a staged document and the server's verdicts, as the GET route
 // returns them, with no network. Every code and name is invented.
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within, waitFor } from "@testing-library/react";
+import { render, screen, within, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FinishScheduleTable } from "@/components/imports/FinishScheduleReview";
 import { RawFinishEntry } from "@/lib/extraction-schema";
@@ -39,14 +39,14 @@ function held(code: string, over: Partial<LibraryFinish> = {}): LibraryFinish {
   };
 }
 
-function setup(staged: StagedFinishSchedule, library: LibraryFinish[]) {
+function setup(staged: StagedFinishSchedule, library: LibraryFinish[], tickNothing = false) {
   const onKind = vi.fn();
   const onAct = vi.fn();
   const review = reviewFinishSchedule(staged, library);
   const byEntry = new Map(review.map((row) => [row.entryId, row]));
   // Everything tickable, as the screen ticks it on arrival.
   const selected = new Set(
-    review
+    (tickNothing ? [] : review)
       .filter((row) => row.verdict && ["new", "fills", "enriches", "agrees"].includes(row.verdict.status))
       .map((row) => row.entryId),
   );
@@ -91,11 +91,21 @@ describe("the finishes schedule review", () => {
   })();
   const library = [held("AB-MTL-01"), held("AB-STN-01", { description: "Grey limestone", kind: "stone" })];
 
+  it("with nothing ticked, says the next step rather than offering a zero-count action (review 3.8c)", () => {
+    setup(staged, library, true);
+    expect(screen.queryByRole("button", { name: /^Close 0/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Tick a finish to add it" })).toBeDisabled();
+  });
+
   it("lists FINISHES, each under the code the library files it by and the code as printed", () => {
     setup(staged, library);
     expect(screen.getAllByText("AB-TIM-01").length).toBeGreaterThan(0);
     expect(screen.getAllByText("printed AB TIM 01").length).toBeGreaterThan(0);
     expect(screen.getByText("NATURAL OAK; Finish: Stained")).toBeInTheDocument();
+    // The model's note on the document is folded to one line (review 3.7b),
+    // and its words are one press away.
+    expect(screen.queryByText(/Seven furniture entries left out/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /The model left a note on this document/ }));
     expect(screen.getByText(/Seven furniture entries left out/)).toBeInTheDocument();
   });
 

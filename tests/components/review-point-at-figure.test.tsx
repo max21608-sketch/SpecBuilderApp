@@ -196,7 +196,7 @@ describe("the unit control says what it does", () => {
     await userEvent.click(within(rowFor("2100")).getByRole("button", { name: "Edit value" }));
     const row = rowFor("2100");
     expect(within(row).getByText("printed in")).toBeVisible();
-    expect(within(row).getByLabelText("printed in")).toHaveValue("mm");
+    expect(within(row).getByLabelText(/printed in/)).toHaveValue("mm");
   });
 
   it("says the card-wide control relabels every figure, and offers inches", async () => {

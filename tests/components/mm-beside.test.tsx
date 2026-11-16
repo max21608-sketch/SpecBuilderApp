@@ -108,9 +108,9 @@ describe("the millimetres beside a figure", () => {
     await userEvent.clear(box);
     await userEvent.type(box, "20");
     expect(beside("20")).toBe("(508mm)");
-    await userEvent.selectOptions(within(rowFor("20")).getByLabelText("printed in"), "cm");
+    await userEvent.selectOptions(within(rowFor("20")).getByLabelText(/printed in/), "cm");
     expect(beside("20")).toBe("(200mm)");
-    await userEvent.selectOptions(within(rowFor("20")).getByLabelText("printed in"), "mm");
+    await userEvent.selectOptions(within(rowFor("20")).getByLabelText(/printed in/), "mm");
     expect(beside("20")).toBeNull();
   });
 });

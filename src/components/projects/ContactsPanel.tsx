@@ -411,6 +411,7 @@ export default function ContactsPanel({
               value={term}
               onChange={(e) => setTerm(e.target.value)}
               placeholder="Find in Capsule (name, company or email)"
+              aria-label="Find in Capsule (name, company or email)"
               className="min-w-[16rem] flex-1 rounded border border-neutral-300 px-2 py-1 text-sm"
             />
             <Button type="submit" size="sm" disabled={searching || term.trim().length < 2}>
@@ -456,12 +457,14 @@ export default function ContactsPanel({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Name"
+                aria-label="Name"
                 className="rounded border border-neutral-300 px-2 py-1 text-sm"
               />
               <input
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Email (optional)"
+                aria-label="Email (optional)"
                 type="email"
                 className="rounded border border-neutral-300 px-2 py-1 text-sm"
               />
@@ -469,11 +472,13 @@ export default function ContactsPanel({
                 value={organisation}
                 onChange={(e) => setOrganisation(e.target.value)}
                 placeholder="Organisation"
+                aria-label="Organisation"
                 className="rounded border border-neutral-300 px-2 py-1 text-sm"
               />
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value as ContactRole)}
+                aria-label="Role"
                 className="rounded border border-neutral-300 px-2 py-1 text-sm"
               >
                 {CONTACT_ROLES.map((value) => (
@@ -486,6 +491,7 @@ export default function ContactsPanel({
                 value={designerCode}
                 onChange={(e) => setDesignerCode(e.target.value)}
                 placeholder="Designer code"
+                aria-label="Designer code"
                 list="suggested-designer-codes"
                 className="rounded border border-neutral-300 px-2 py-1 text-sm"
               />
@@ -499,9 +505,14 @@ export default function ContactsPanel({
               <Button type="submit" variant="primary" size="sm" disabled={busy || !name.trim()}>
                 {busy ? "Adding…" : "Add contact"}
               </Button>
-              <Button size="sm" variant="quiet" onClick={() => setOpen(false)}>
-                Cancel
-              </Button>
+              {/* NOTHING TO GO BACK TO, NO CANCEL (review 3.8a, 2026-11-16).
+                  With nobody recorded the form IS the next step, and a Cancel
+                  that closed it left an empty table and no way on. */}
+              {contacts.length > 0 && (
+                <Button size="sm" variant="quiet" onClick={() => setOpen(false)}>
+                  Cancel
+                </Button>
+              )}
               <span className="text-xs text-neutral-500">
                 The designer code matches the BOQ&rsquo;s own wording (
                 {suggestedCodes.length > 0 ? suggestedCodes.join(", ") : "e.g. LCS, TA"}) and is what routes a

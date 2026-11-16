@@ -41,6 +41,7 @@ import { useNextStep } from "@/lib/use-next-step";
 import PageBody from "@/components/ui/PageBody";
 import Card from "@/components/ui/Card";
 import Note from "@/components/ui/Note";
+import ModelNote from "@/components/imports/ModelNote";
 import DocumentState from "@/components/imports/DocumentState";
 import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/intake-status";
 import Button from "@/components/ui/Button";
@@ -898,7 +899,7 @@ export default function DrawingsReview({
         </Note>
       )}
 
-      {staged.documentNotes && <Note tone="plain">The model noted: {staged.documentNotes}</Note>}
+      <ModelNote text={staged?.documentNotes} />
 
       {toChoose.length > 0 && (
         <Note tone="warn">

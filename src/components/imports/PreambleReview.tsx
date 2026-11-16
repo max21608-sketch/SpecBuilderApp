@@ -17,6 +17,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import PageBody from "@/components/ui/PageBody";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Note from "@/components/ui/Note";
+import ModelNote from "@/components/imports/ModelNote";
 import DocumentState from "@/components/imports/DocumentState";
 import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/intake-status";
 import Button from "@/components/ui/Button";
@@ -300,7 +301,7 @@ export default function PreambleReview({
   return shell(
     <>
       {error && <Note tone="danger">{error}</Note>}
-      {staged.documentNotes && <Note tone="plain">The model noted: {staged.documentNotes}</Note>}
+      <ModelNote text={staged?.documentNotes} />
 
       <Card
         flush

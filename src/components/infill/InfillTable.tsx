@@ -43,6 +43,7 @@
 import { useMemo, useState } from "react";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import Link from "next/link";
+import ExpandRowButton from "@/components/layout/ExpandRowButton";
 import Button from "@/components/ui/Button";
 import TgqCount from "@/components/drafts/TgqCount";
 import { ITEM_TGQ_WHERE_LABEL } from "@/lib/item-tgq";
@@ -178,7 +179,9 @@ export default function InfillTable({
           onChange={(event) => onFilters({ ...filters, text: event.target.value })}
           placeholder="Search a code, an item, an area or a question"
           aria-label="Search what is outstanding"
-          className="w-72 max-w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm"
+          // Wide enough for its own placeholder (review 3.8d): at w-72 it was
+          // clipped at "a que" on a 1440 screen.
+          className="w-96 max-w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm"
         />
         <select
           value={filters.runId}
@@ -322,7 +325,11 @@ function LineRows({
   return (
     <>
       <Tr className="cursor-pointer" onClick={onToggle}>
-        <Td className="px-0 text-center text-neutral-500">{open ? "▾" : "▸"}</Td>
+        {/* A real button for the keyboard, with aria-expanded (review 3.9a);
+            the row click stays as a convenience. */}
+        <Td className="px-0 text-center text-neutral-500">
+          <ExpandRowButton open={open} label={`Questions on ${line.code || line.recordLabel}`} onToggle={onToggle} />
+        </Td>
         <Td>
           {/* NOT PREFETCHED. Next prefetches every `<Link>` in the viewport,
               and 407 lines carry three record links each — a request per link

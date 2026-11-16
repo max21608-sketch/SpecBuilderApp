@@ -193,7 +193,7 @@ describe("the unit control", () => {
     // The column is gone -- it was 99px of em-dash on every row that is not a
     // measurement, and losing it is what stopped the card being clipped -- so
     // the unit is simply absent, which says the same thing more quietly.
-    expect(within(row).queryByLabelText("printed in")).toBeNull();
+    expect(within(row).queryByLabelText(/printed in/)).toBeNull();
   });
 
   it("offers the bulk unit control whenever the page holds a measurement", () => {
@@ -232,7 +232,7 @@ describe("the state control", () => {
     // textarea, whose display value does not match a newline literally.
     const row = screen.getAllByRole("row").find((candidate) => candidate.textContent?.includes("SUPPLIER: TO BID"));
     if (!row) throw new Error("the merged block did not render");
-    expect(within(row).queryByLabelText("State")).toBeNull();
+    expect(within(row).queryByLabelText(/^State of /)).toBeNull();
     expect(within(row).queryByRole("option", { name: "Stated" })).toBeNull();
   });
 
@@ -242,7 +242,7 @@ describe("the state control", () => {
     resetIds();
     renderCard([callout("ARMCHAIR", "Woven raffia", "UPH-07", { specFieldId: "field-com1" })]);
     const row = rowFor("Woven raffia");
-    expect(within(row).getByLabelText("State")).toBeInTheDocument();
+    expect(within(row).getByLabelText(/^State of /)).toBeInTheDocument();
     expect(within(row).getByRole("option", { name: "TBC" })).toBeInTheDocument();
   });
 
@@ -251,7 +251,7 @@ describe("the state control", () => {
     renderCard([
       figure("FRONT", "840", { attrGroup: "dimension", dimensionSlot: "W", unit: "mm", state: null }),
     ]);
-    expect(within(rowFor("840")).getByLabelText("State")).toBeInTheDocument();
+    expect(within(rowFor("840")).getByLabelText(/^State of /)).toBeInTheDocument();
   });
 });
 
@@ -309,7 +309,23 @@ describe("the table's width", () => {
     const figureCell = row.querySelectorAll("td")[0]!;
     expect(within(figureCell).getByText(/printed on the page/)).toBeInTheDocument();
     await userEvent.click(within(row).getByRole("button", { name: "Edit value" }));
-    expect(within(rowFor("640")).getByLabelText("printed in")).toHaveValue("mm");
+    expect(within(rowFor("640")).getByLabelText(/printed in/)).toHaveValue("mm");
+  });
+
+  it("names each control off the row's own figure, not as a bare combobox (review 3.9b)", async () => {
+    resetIds();
+    renderCard([
+      figure("FRONT", "1'-9\"", { attrGroup: "dimension", dimensionSlot: "W", unit: null, state: null }),
+      callout("ARMCHAIR", "Woven raffia", "UPH-07", { specFieldId: "field-com1" }),
+    ]);
+    const measured = rowFor("1'-9\"");
+    expect(within(measured).getByLabelText("Unit for 1'-9\" (printed in)")).toBeInTheDocument();
+    expect(within(measured).getByLabelText("State of 1'-9\"")).toBeInTheDocument();
+    const finish = rowFor("Woven raffia");
+    expect(within(finish).getByLabelText(/^Group for /)).toBeInTheDocument();
+    expect(within(finish).getByLabelText(/^BWS field for /)).toBeInTheDocument();
+    expect(within(finish).getByLabelText(/^Value for /)).toHaveValue("Woven raffia");
+    expect(within(finish).getByLabelText(/^State of /)).toBeInTheDocument();
   });
 });
 

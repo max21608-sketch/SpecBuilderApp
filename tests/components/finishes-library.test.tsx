@@ -338,14 +338,23 @@ describe("the codes the library cannot reach (row e2)", () => {
   });
 
   it("says what it means — that correcting them once is not possible", async () => {
-    // The consequence rather than the state. And the action beside it is the
-    // backfill, because nothing in the app links an unlinked attribute:
-    // `createFinish` writes the row and leaves `finish_id` null, so a button
-    // here would appear to work and change nothing.
     render(<FinishesLibrary projectId="proj-1" />);
     await screen.findByText(/not in the library yet/);
     expect(screen.getByText(/correcting them once is not possible/)).toBeInTheDocument();
-    expect(screen.getByText(/db:backfill-finishes/)).toBeInTheDocument();
+  });
+
+  it("names the next step on THIS screen, and no script (review 3.5)", async () => {
+    // The users are project managers. The note named `npm run
+    // db:backfill-finishes`, which is HISTORICAL. There is still no button:
+    // `createFinish` writes the row and leaves `finish_id` null, so a button
+    // here would appear to work and leave the note standing. The link is a
+    // person's act on each item's Specs tab, and the note says so.
+    render(<FinishesLibrary projectId="proj-1" />);
+    const banner = (await screen.findByText(/not in the library yet/)).closest("div")!;
+    expect(banner.textContent).not.toMatch(/npm|db:backfill/);
+    expect(banner.textContent).toContain("Add a finish");
+    expect(banner.textContent).toContain("Attach to a finish…");
+    expect(within(banner).getByRole("note").getAttribute("title")).toMatch(/does not link the items that carry it/);
   });
 });
 

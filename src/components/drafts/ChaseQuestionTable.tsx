@@ -55,6 +55,7 @@
 import { useMemo, useState } from "react";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import Link from "next/link";
+import ExpandRowButton from "@/components/layout/ExpandRowButton";
 import Button from "@/components/ui/Button";
 import TgqCount from "@/components/drafts/TgqCount";
 import { ITEM_TGQ_WHERE_LABEL } from "@/lib/item-tgq";
@@ -401,7 +402,9 @@ export default function ChaseQuestionTable({
           onChange={(event) => setFilters((prev) => ({ ...prev, text: event.target.value }))}
           placeholder="Search a code, an item, a question or a BWS field"
           aria-label="Search the questions"
-          className="w-64 max-w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm"
+          // Wide enough for its own placeholder (review 3.8d, the fill-in's
+          // twin): at w-64 it was clipped.
+          className="w-96 max-w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm"
         />
         <select
           value={filters.runId}
@@ -746,7 +749,17 @@ function LineRows({
             onChange={(event) => onToggleMany(visibleOnLine, event.target.checked)}
           />
         </Td>
-        <Td className="px-0 text-center text-neutral-500">{open ? "▾" : "▸"}</Td>
+        {/* A REAL BUTTON FOR THE KEYBOARD (review 3.9a, 2026-11-16). The row
+            was a bare <tr onClick>: no role, no focus, no aria-expanded, so a
+            keyboard could not open a line. The chevron is the button; the row
+            click stays as a convenience for the mouse. */}
+        <Td className="px-0 text-center text-neutral-500">
+          <ExpandRowButton
+            open={open}
+            label={`Questions on ${line.code || line.recordLabel}`}
+            onToggle={onToggleLine}
+          />
+        </Td>
         {/* THE ITEM, AND EVERYTHING THAT IDENTIFIES IT, IN ONE CELL. The run
             and the record number used to be columns of their own, which put
             four narrow columns between the code and the number that decides
@@ -896,7 +909,13 @@ function LineRows({
                     onChange={(event) => onToggleMany(questions, event.target.checked)}
                   />
                 </Td>
-                <Td className="px-0 text-center text-neutral-500">{optionOpen ? "▾" : "▸"}</Td>
+                <Td className="px-0 text-center text-neutral-500">
+                  <ExpandRowButton
+                    open={optionOpen}
+                    label={`Questions on ${option.name}`}
+                    onToggle={() => onToggleOption(option.recordId)}
+                  />
+                </Td>
                 <Td>
                   {/* The letter is coloured the way the drawings review colours
                       it — A is always sky — so a chip on a card and a row here

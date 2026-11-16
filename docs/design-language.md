@@ -272,7 +272,10 @@ Collected from CLAUDE.md so they are in one place. Each has bitten once.
   blocks it.
 - **No "Bring them in" on the finishes library.** `createFinish` writes the
   library row and links nothing, so the button would appear to work. The note
-  names today's route (`db:backfill-finishes`) in words.
+  names the next step a person can take on screen — Add a finish, then
+  *Attach to a finish…* on each item's Specs tab — and no script (review 3.5,
+  2026-11-16: the users are project managers, and the backfill it used to name
+  is historical).
 - **No "Preview the email" on the chase screen** — there is no preview route,
   and a button with no behaviour is the Columns chooser again.
 - **The BOQ review keeps its Category column**: it is the only place a

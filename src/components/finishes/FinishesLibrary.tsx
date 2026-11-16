@@ -59,6 +59,7 @@ import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
+import Tip from "@/components/ui/Tip";
 import SuggestButton from "@/components/ui/SuggestButton";
 import { Table, Th, Td, Tr, GroupRow } from "@/components/ui/Table";
 
@@ -813,11 +814,21 @@ export default function FinishesLibrary({
             </span>
           ))}
           .{" "}
-          {/* Bringing them in LINKS the attributes to the library rows, which
-              nothing in the app does: `createFinish` writes the row and leaves
-              `record_attributes.finish_id` null, so a button here would appear
-              to work and change nothing. The backfill is the action there is. */}
-          Bring them in with <code className="font-mono">npm run db:backfill-finishes -- --apply</code>.
+          {/* THE NEXT STEP ON THIS SCREEN, NOT A SCRIPT (review 3.5, 2026-11-16).
+              It named `npm run db:backfill-finishes`, to project managers, and
+              that script is HISTORICAL. No button here either: bringing a code
+              in means LINKING its items' specs to the library row, and
+              `createFinish` (behind Add a finish and the pasted list) writes the
+              row and leaves `record_attributes.finish_id` null — a button would
+              appear to work and leave this note standing. The link is a
+              person's act on each item's Specs tab, which shows the item's own
+              words beside the library's. */}
+          Next: add {data.unlinked.length === 1 ? "it" : "each"} with <b className="font-semibold">Add a finish</b>,
+          then <b className="font-semibold">Attach to a finish…</b> on each item&apos;s Specs tab.
+          <Tip>
+            Adding a code to the library does not link the items that carry it. Each item&apos;s spec is attached on its
+            own Specs tab, where its words sit beside the library&apos;s; this note goes when every one is attached.
+          </Tip>
         </Note>
       )}
 

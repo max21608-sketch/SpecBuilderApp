@@ -582,3 +582,38 @@ describe("what the screen ticked for you", () => {
     expect(screen.queryByText(/preselected/)).toBeNull();
   });
 });
+
+describe("a keyboard can open a line (review 3.9a)", () => {
+  it("opens a line with Enter on its chevron button, and says so in aria-expanded", async () => {
+    const user = userEvent.setup();
+    render(<Harness questions={[question({ prompt: "Seat foam density" }), question()]} />);
+    const chevron = screen.getByRole("button", { name: "Questions on S-301" });
+    expect(chevron.getAttribute("aria-expanded")).toBe("false");
+    chevron.focus();
+    await user.keyboard("{Enter}");
+    expect(chevron.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Seat foam density")).toBeTruthy();
+    await user.keyboard(" ");
+    expect(chevron.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Seat foam density")).toBeNull();
+  });
+
+  it("a configuration under it opens the same way", async () => {
+    const user = userEvent.setup();
+    render(<Harness questions={withOptionsForKeys()} />);
+    await user.click(screen.getByRole("button", { name: "Questions on S-301" }));
+    const option = screen.getByRole("button", { name: "Questions on S-301 A" });
+    expect(option.getAttribute("aria-expanded")).toBe("false");
+    option.focus();
+    await user.keyboard("{Enter}");
+    expect(option.getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
+function withOptionsForKeys() {
+  return [
+    question({ variantCount: 2 }),
+    question({ recordId: "opt-a", variantLabel: "A", parentId: "line-1", refs: "", parentRefs: "S-301", qty: null, parentQty: 45 }),
+    question({ recordId: "opt-b", variantLabel: "B", parentId: "line-1", refs: "", parentRefs: "S-301", qty: null, parentQty: 45 }),
+  ];
+}

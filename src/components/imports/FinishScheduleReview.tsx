@@ -42,6 +42,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import PageBody from "@/components/ui/PageBody";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Note from "@/components/ui/Note";
+import ModelNote from "@/components/imports/ModelNote";
 import Chip from "@/components/ui/Chip";
 import Button from "@/components/ui/Button";
 import SuggestButton from "@/components/ui/SuggestButton";
@@ -447,7 +448,7 @@ export default function FinishScheduleReview({
     return shell(
       <Card title="No finishes found">
         <p className="text-neutral-700">The model found no finish entries in this document.</p>
-        {staged?.documentNotes && <Note tone="plain">The model noted: {staged.documentNotes}</Note>}
+        <ModelNote text={staged?.documentNotes} />
       </Card>,
     );
   }
@@ -527,7 +528,7 @@ export function FinishScheduleTable({
     <>
       {error && <Note tone="danger">{error}</Note>}
       {notice && <Note tone="good">{notice}</Note>}
-      {staged.documentNotes && <Note tone="plain">The model noted: {staged.documentNotes}</Note>}
+      <ModelNote text={staged?.documentNotes} />
 
       <Card
         flush
@@ -657,19 +658,27 @@ export function FinishScheduleTable({
             Every finish arrives TBC; confirm it on the library.
           </span>
           <span className="flex-1" />
-          <Button
-            variant="primary"
-            onClick={() => onAct(chosen, "confirm")}
-            disabled={busy !== null || chosen.length === 0}
-          >
-            {busy === "confirm"
-              ? "Adding…"
-              : writes > 0
-                ? `Add ${writes} to the library`
-                : withSwatches
-                  ? `Confirm ${chosen.length} already held, with their swatches`
-                  : `Close ${chosen.length} already held`}
-          </Button>
+          {/* A ZERO-COUNT ACTION IS NOISE (review 3.8c, 2026-11-16). With
+              nothing ticked it read "Close 0 already held", disabled. With
+              nothing left to review there is no button at all; with rows
+              still pending and none ticked, it says the next step instead. */}
+          {pending.length > 0 && (
+            <Button
+              variant="primary"
+              onClick={() => onAct(chosen, "confirm")}
+              disabled={busy !== null || chosen.length === 0}
+            >
+              {busy === "confirm"
+                ? "Adding…"
+                : chosen.length === 0
+                  ? "Tick a finish to add it"
+                  : writes > 0
+                    ? `Add ${writes} to the library`
+                    : withSwatches
+                      ? `Confirm ${chosen.length} already held, with their swatches`
+                      : `Close ${chosen.length} already held`}
+            </Button>
+          )}
         </div>
       </Card>
 
