@@ -32,7 +32,7 @@
 import { z } from "zod";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
-import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
+import { withTransaction, transactionErrorResponse, transactionFailure, DomainConflictError } from "@/lib/db-transaction";
 import { assertBoqDocument, BOQ_SCHEMA_VERSION, type BoqDocument } from "@/lib/boq-import";
 import { loadBoqRun } from "@/lib/boq-run-source";
 import { loadBoqReadingRegisters, loadLineSuggester } from "@/lib/boq-stage";
@@ -268,8 +268,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
     return json({ ok: true, version: applied.version, lines: lineCount, outcome: outcomeText, charged: calls.length });
   } catch (cause) {
-    await release(id, user.email, { calls, outcome: { at, ok: false, text: cause instanceof Error ? cause.message : String(cause), charged: true } });
-    return transactionErrorResponse(cause);
+    // The outcome is printed on the bill's review, so it is the response's own
+    // sentence (a refusal, or "failed … reference ab12cd34"), never the cause's
+    // text, which can be a driver's (review 2.1).
+    const failure = transactionFailure(cause);
+    await release(id, user.email, { calls, outcome: { at, ok: false, text: failure.body.error, charged: true } });
+    return json(failure.body, failure.status);
   }
 }
 

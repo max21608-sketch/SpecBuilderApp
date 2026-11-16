@@ -36,8 +36,11 @@ vi.mock("@/lib/session", () => ({
 }));
 
 const files = new Map<string, { bytes: Buffer; contentType: string }>();
+/** When set, storing the transcribed workbook fails with this — a fault whose text is not for a person. */
+const workbookFault = vi.hoisted(() => ({ error: null as Error | null }));
 vi.mock("@vercel/blob", () => ({
   put: async (pathname: string, body: Buffer, options: { contentType?: string }) => {
+    if (workbookFault.error && pathname.endsWith(".xlsx")) throw workbookFault.error;
     files.set(pathname, { bytes: Buffer.from(body), contentType: options?.contentType ?? "application/octet-stream" });
     return { pathname, url: `https://blob.test/${pathname}` };
   },
@@ -161,6 +164,36 @@ describeIfDb("a PDF bill the model transcribes", () => {
     expect(parsed.sheets).toEqual([]);
     expect(parsed.pdfTranscription).toMatchObject({ state: "waiting", pageCount: 2 });
     expect(modelCalls.count).toBe(0);
+  });
+
+  // Review 2.1: the outcome is printed on the bill's review, and it held the
+  // cause's own text. Now it is the response's sentence, with the reference
+  // the log line carries.
+  it("records a failure it does not recognise as a sentence and a reference, never the cause's text", { timeout: 60_000 }, async () => {
+    const { POST } = await import("@/app/api/imports/[id]/transcribe/route");
+    const before = await staged();
+    workbookFault.error = Object.assign(new Error('__QA relation "blob_secret_table" does not exist'), { code: "42P01" });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await POST(
+        jsonRequest("POST", { version: before.version, requestId: "6f1d3a42-1111-4c2a-9a1e-0000000000c1" }),
+        params(runId),
+      );
+      const body = (await response.json()) as { ok: boolean; error?: string; reference?: string };
+      expect(response.status).toBe(500);
+      expect(body.reference).toMatch(/^[0-9a-f]{8}$/);
+      const outcome = ((await staged()).model_metadata?.transcription as { outcome?: { ok: boolean; text: string } }).outcome;
+      expect(outcome?.ok).toBe(false);
+      expect(outcome?.text).toBe(body.error);
+      expect(outcome?.text).toContain(body.reference!);
+      expect(outcome?.text).not.toContain("blob_secret_table");
+    } finally {
+      workbookFault.error = null;
+      errors.mockRestore();
+      // The next test counts the model calls of a clean transcription.
+      modelCalls.count = 0;
+      modelCalls.pageCounts.length = 0;
+    }
   });
 
   it("stores the transcription as the workbook beside the PDF, and stages it, every line marked with its page", { timeout: 60_000 }, async () => {

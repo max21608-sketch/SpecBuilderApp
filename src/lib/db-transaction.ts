@@ -28,7 +28,7 @@
 // Node runtime, so no `export const runtime` is needed, but do not import this
 // from middleware.
 // ============================================================================
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import pg from "pg";
 import { getEnvironment } from "@/lib/env";
 import { json, type Row } from "@/lib/db";
@@ -262,37 +262,53 @@ export function describeTransactionFailure(cause: unknown): string {
  * cannot tell a conflict from an outage.
  */
 export function transactionErrorResponse(cause: unknown): Response {
+  const failure = transactionFailure(cause);
+  return json(failure.body, failure.status);
+}
+
+export type TransactionFailure = {
+  status: number;
+  body: { ok: false; error: string; code?: string; conflict?: boolean; diff?: unknown; reference?: string };
+};
+
+/**
+ * What `transactionErrorResponse` answers, before it is a Response: for a
+ * route that also RECORDS the sentence (the transcription's outcome), so the
+ * row and the response say the same thing under the same reference. Logs
+ * exactly as the response would.
+ */
+export function transactionFailure(cause: unknown): TransactionFailure {
   if (cause instanceof DomainConflictError) {
-    return json(
-      {
+    return {
+      status: cause.status,
+      body: {
         ok: false,
         conflict: cause.status === 409,
         code: cause.code,
         error: cause.message,
         ...(cause.diff ? { diff: cause.diff } : {}),
       },
-      cause.status,
-    );
+    };
   }
 
   if (cause instanceof UncertainCommitError) {
     // The one case where "nothing was written" would be a lie.
     console.error(`guarded transaction commit uncertain: ${describeTransactionFailure(cause.cause)}`);
-    return json({ ok: false, code: "uncertain_commit", error: cause.message }, 503);
+    return { status: 503, body: { ok: false, code: "uncertain_commit", error: cause.message } };
   }
 
   if (isRetryablePostgresError(cause)) {
     // Logged, not returned: the reviewer gets a sentence they can act on and
     // the log gets the SQLSTATE somebody can diagnose from.
     console.error(`guarded transaction contended: ${describeTransactionFailure(cause)}`);
-    return json(
-      {
+    return {
+      status: 503,
+      body: {
         ok: false,
         code: "contended",
         error: "Something else was changing this at the same moment. Nothing was written — try again.",
       },
-      503,
-    );
+    };
   }
 
   // Never return a raw driver message: it carries table and column names, and
@@ -303,12 +319,21 @@ export function transactionErrorResponse(cause: unknown): Response {
   // "Key (code_norm)=(<the client's code>) already exists", "Failing row
   // contains (<every column>)" -- so client material reached the hosting
   // logs on every unexpected failure. `describeUnexpectedFailure` keeps what
-  // diagnoses it and drops what echoes a value. The reference ties the line to
-  // one failure among many; handing it back in the response is the routes'
-  // decision (audit 4.1), not this line's.
-  const reference = randomUUID();
+  // diagnoses it and drops what echoes a value.
+  //
+  // THE REFERENCE GOES BACK TO THE PERSON (review 2.1). It was generated and
+  // logged and never returned, so "it failed" could not be matched to its log
+  // line among a day's. Short, because somebody reads it out.
+  const reference = randomBytes(4).toString("hex");
   console.error(`guarded transaction failed: ${describeUnexpectedFailure(cause, reference)}`);
-  return json({ ok: false, error: "Nothing was written. The operation failed; check the logs." }, 500);
+  return {
+    status: 500,
+    body: {
+      ok: false,
+      reference,
+      error: `Nothing was written: this failed on the server's side for a reason the app does not recognise. Try it again, and quote reference ${reference} if it fails twice.`,
+    },
+  };
 }
 
 /**

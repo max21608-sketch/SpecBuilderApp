@@ -29,7 +29,7 @@
 // the topic undelivered.
 import { handleCallback, type MessageMetadata } from "@vercel/queue";
 import { type ExtractionQueueMessage } from "@/lib/extraction-queue";
-import { runDocumentExtraction, recordExtractionFailure } from "@/lib/extraction-run";
+import { runDocumentExtraction, recordExtractionFailure, terminalFailureText } from "@/lib/extraction-run";
 import { ClaimBusyError, MAX_DELIVERIES, redeliveryDelaySeconds, VISIBILITY_TIMEOUT_SECONDS } from "@/lib/extraction-claim";
 import { unverifiableCallbackReason } from "@/lib/queue-callback";
 
@@ -110,8 +110,9 @@ async function recordTerminalFailure(
   cause: unknown,
   metadata: MessageMetadata,
 ): Promise<void> {
-  const error = cause instanceof Error ? cause.message : String(cause);
-  const detail = `${error} (gave up after ${metadata.deliveryCount} attempts)`;
+  // Printed on the document's or the message's row: a sentence and a
+  // reference, never a driver's text (review 2.1).
+  const detail = terminalFailureText(cause, metadata.deliveryCount);
 
   // A mail fetch has no extraction run to fail: the terminal state goes on the
   // message row, where the inbox screen renders it with a Retry. Recording it

@@ -6,7 +6,13 @@
 // Source: found-in-use 2026-09-20, "An answer typed on the infill screen is
 // refused on the LOCAL dev server, and only there".
 import { describe, it, expect, vi } from "vitest";
-import { describeTransactionFailure, isRetryablePostgresError, transactionErrorResponse } from "@/lib/db-transaction";
+import {
+  DomainConflictError,
+  describeTransactionFailure,
+  isRetryablePostgresError,
+  transactionErrorResponse,
+  transactionFailure,
+} from "@/lib/db-transaction";
 
 function pgError(code: string, message: string): Error & { code: string } {
   const error = new Error(message) as Error & { code: string };
@@ -84,8 +90,13 @@ describe("transactionErrorResponse on an unexpected failure", () => {
     try {
       const response = transactionErrorResponse(constraintError());
       expect(response.status).toBe(500);
-      const body = (await response.json()) as { error: string };
+      const body = (await response.json()) as { error: string; reference?: string };
       expect(body.error).toMatch(/Nothing was written/);
+      // The reference reaches the person, so their report finds this line
+      // (review 2.1); the driver's words do not.
+      expect(body.reference).toMatch(/^[0-9a-f]{8}$/);
+      expect(body.error).toContain(`reference ${body.reference}`);
+      expect(body.error).not.toContain("project_finishes");
 
       expect(logged).toHaveLength(1);
       // Strings only: an object here is serialised whole, detail and all.
@@ -94,7 +105,7 @@ describe("transactionErrorResponse on an unexpected failure", () => {
       expect(line).toContain("23505");
       expect(line).toContain("constraint=project_finishes_code_key");
       expect(line).toContain("table=project_finishes");
-      expect(line).toMatch(/ref=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
+      expect(line).toContain(`ref=${body.reference}`);
       expect(line).not.toContain("INVENTED-CLOTH-01");
     } finally {
       spy.mockRestore();
@@ -114,5 +125,14 @@ describe("transactionErrorResponse on an unexpected failure", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe("transactionFailure", () => {
+  it("passes a refusal through unchanged and gives it no reference", () => {
+    const failure = transactionFailure(new DomainConflictError("import_version_stale", "This bill changed since the screen loaded.", { status: 409 }));
+    expect(failure.status).toBe(409);
+    expect(failure.body.error).toBe("This bill changed since the screen loaded.");
+    expect(failure.body.reference).toBeUndefined();
   });
 });
