@@ -130,6 +130,20 @@ a refusal replaced after the reload by the server's value plus "Your '450' was
 not saved: …" (G10) — before, the typed text stayed on the row and the next
 blur re-sent it over the other edit.
 
+**Two more screens under the same rule (2026-11-16, review 1.3 and 1.4).**
+A STAGED BILL's line, sheet and row-kind writes carry the version of the whole
+staged document (`intake_runs.version`), not one per line, because they address
+a line by position and a re-read moves the lines; a stale one is a 409 and
+nothing is written (`src/lib/import-route/bill.ts`). The screen sends them ONE
+AT A TIME and each uses the newest version it knows — the last reload's or the
+last write's — so a reviewer's own quick edits never refuse each other
+(`use-boq-import.ts`). Sending two at once is the false-409 this section is
+about. The record's Edit panel (`RecordDetails.tsx`) re-seeds its fields only
+when the record's id or version changes, never on a new `record` object, and a
+refused save leaves the panel OPEN with the text and the server's sentence: its
+comment said "keyed on the version" for months while the code re-seeded on
+every reload and closed before reading the result.
+
 ### The overview's numbers are a second question
 
 `src/lib/project-summary.ts`, `src/components/ui/StatTile.tsx`,

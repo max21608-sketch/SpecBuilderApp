@@ -21,6 +21,79 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-11-16 — The review build: six stages on `review-int`, NOT on staging
+
+Max, 2026-11-16: "review the app and code base, look for unfinished sections
+and issues with the code, generate a plan to fix any issues you find", then
+"do physical UI checks where you take screenshots", then "start 0 and 1 and
+… keep running through each stage until you're finished". The plan is
+`review-2026-11-16.md`; it carries each finding and what became of it.
+
+- **How.** Three read-only sweeps and a 30-screen screenshot walk on the local
+  stack (1920 and 1440), then Opus coders in worktrees, two at a time, onto
+  `review-int`; the walk repeated after the screen stages. The full suite with
+  the database tier required ran after Stage 1, after Stage 3 and at the end.
+- **Stage 0.** Typecheck and zero-warning lint were both failing on files that
+  are not app code (a tool's untracked `neon.ts`; the skills' helper scripts).
+  `.claude/launch.json` ran `npm run dev`, which in the main checkout is the
+  SANDBOX; it now runs the local stack. `BLOB_STORE_ID` is read by nothing
+  (audit H9) and the two documents that described a check against it say so.
+- **Stage 1, what could lose or misstate data.** The export reads its scope in
+  one REPEATABLE READ snapshot and REFUSES the file if a record's atoms are
+  missing, where it used to skip the record (`f3e17ac`); a `runId` that is not
+  one id is a 400 on all four outputs (`143c12b`). The record's Edit panel
+  keeps what is typed through a reload and a refused save (`0c376c4`).
+  Staged-bill edits carry the document's version (`fc7daa1`). A retired note's
+  stamp is written once (`0cb8ef2`). A bill's attachments and its read are one
+  transaction (`8f2a61a`). The transcription's deadline counts from the request
+  (`3131c10`). A checklist answer the file will not ship says so on its row
+  (`ed6e1f8`); "Edit value" says before the save that it will unlink a finish
+  (`1bbf99a`).
+- **Stage 2, errors a person cannot act on.** A stored or answered failure is
+  a sentence and a reference, never a driver's text (`bc6274a`); swallowed
+  errors log (`aa45eea`); sign-in tells a failed database from an unreachable
+  one (`7f26d09`); the twin chip lists a code once (`dc9c051`); a bill held for
+  transcription says "Needs transcribing" (`aa0a314`); an upload token needs a
+  project that exists (`dc7c0cc`).
+- **Stage 3, the screens.** The phase table fits its box (`73ba5f7`); dead ends
+  have a heading and a way back, with a not-found inside the shell (`6e810b1`,
+  `795ff4e`); the Specs table's Value column has the width (`e20c69d`); the
+  finishes note names the on-screen step, not an npm script (`e6fd2ff`); the
+  model's note, the BW-finish sentence and the inbox's rules are one click
+  away (`f01759c`); expanding rows open from a real button and inputs have
+  labels (`0cc6847`). Two findings were DROPPED on reading the code: the header
+  band narrower than the body, and "Check sheet" styled apart from the outputs
+  — both deliberate, both documented.
+- **Stage 4.** The snapshot writer is one statement for any number of records
+  (9 + 2N statements to 10; `3c72ffe`), with every trail test passing before
+  and after. The six bill-reader findings the audit confirmed and never staged
+  (C6–C10, C13) now FLAG what the reader used to guess (`4278b21`, `519e01e`,
+  `de8140d`, `a97132e`, `6462d04`); on the real bills the before/after
+  `boq:gap` differs in ONE line, the flag sentence on Ronnie Scott's row 8, on
+  purpose. The quote's metalwork template reads what the file ships (`c9080c1`).
+- **Stage 5.** Ten routes that had no behaviour test have one (26 tests, no
+  defect found); 28 fixtures no longer pick a seeded row by uuid order; the
+  client/server boundary test watches the session, the credentials, the model
+  SDK, the queue and Node's built-ins.
+- **One regression caught by the whole suite, not by a coder:** `after()`
+  throws outside a request scope, so two Graph webhook tests failed after 2.2
+  (`54efcf6`, `afterResponse`).
+- **Behaviour a person will notice.** "Accept all N" can print a smaller N: it
+  counts what the route will accept (live records on a live phase, a split
+  line through its configurations), not every row with a suggestion. A bill
+  with two columns claiming one role, or a saved layout narrower than the
+  known headings, is HELD at Confirm until somebody presses "The columns are
+  right". A bare count of seven or more digits in a mock-up quantity is now a
+  quantity.
+- **State: committed locally on `review-int`, not pushed, not deployed.**
+  GitHub is read-only for Claude under the organisation's policy, so the push
+  is Max's. No migration. Human acceptance is outstanding on every screen.
+  The CI workflow's move to `actions/*@v5` is unverified until CI runs.
+- **Still open, in `found-in-use.md` under 2026-11-16:** leaving the Specs tab
+  with the Edit panel open discards the text; a PDF page with nothing in its
+  quantity column; `global-error.tsx` unseen; whether a note's retire belongs
+  in the trail; 65 merged local branches not deleted (Max's yes needed).
+
 ## 2026-11-07 (evening) — Promoted to pilot at `3e96ba6` (v1.14); the first three CI runs with the database tier
 
 - **Staging first.** Max pushed `e7bec9b` (the complete audit build, 164

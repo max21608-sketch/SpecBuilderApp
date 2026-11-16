@@ -122,6 +122,21 @@ A filled sheet holds real values off real drawings and **never enters this
 repo**. What comes back is the finding — a code fix, an alias seeded from
 verified wording, or a dated line in `docs/plans/README.md`.
 
+**The scope is ONE SNAPSHOT, and a missing record refuses the file**
+(2026-11-16, review 1.1 and 1.2; `loadExportScope`, `collectScopeRows`,
+`readExportRunId` in `src/lib/export-scope.ts`). The id list and the atoms
+were separate statements under READ COMMITTED, and a record that vanished
+between them was skipped with `if (!record) continue;` — a file one record
+short, on the one output whose import REPLACES. Every read now shares a
+read-only REPEATABLE READ transaction, and a record the list named that the
+atoms do not hold fails the whole file with a 409 in words. The guard should be
+unreachable now; it stays, because it is what makes a short file impossible
+rather than unlikely. Never turn that refusal back into a skip, and never add a
+read to the scope outside the transaction. `runId` is read by
+`readExportRunId` on all four routes: not an id, empty, or given twice is a
+400, where the first two used to be a bodyless 500 and the third silently took
+the first phase.
+
 ### The quote file fills eight of twelve, and names the four it will not
 
 `db/migrations/0031_bws_boilerplates.sql`, `db/seed/0010_bws_boilerplates.sql`,

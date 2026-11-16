@@ -33,6 +33,38 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-11-16: seen during the review build (local stack, P99181), and left
+
+The review of 2026-11-16 (`docs/plans/review-2026-11-16.md`) fixed what it
+found; these are what it SAW and did not fix.
+
+### Leaving the record's Specs tab with the Edit panel open discards what was typed — OPEN
+
+Review 1.3 made the panel survive a reload and a refused save (seen in a
+browser: a stale-version save keeps the panel, the text and the server's
+sentence, and stores nothing). Pressing another tab unmounts the panel, and
+the text goes with it without a word. Smaller than what was fixed, and the
+same family.
+
+### A PDF bill page whose quantity column holds neither a number nor a word reads no rows — OPEN
+
+What is left of audit C10 after `6462d04`. Also: a continuation page's title
+within half a row of the first line stays in that line's cell, flagged "check
+against the PDF" rather than cut. Measured on the 117 real PDFs on the local
+stack: every read identical before and after, so neither case is in a bill
+this app has seen.
+
+### The chase tab's count and the TGQ tile are two numbers a hover reconciles — OPEN, wording
+
+"Everyone 3,695" counts QUESTIONS; the tile's 192 counts each item's own TGQ
+(gate rows on the matrix). The tab's hover now says so (`b5d0a39`). Not a
+defect in either number; still two numbers on one screen.
+
+### `global-error.tsx` has never been seen in a browser — UNVERIFIED
+
+Added by `6e810b1`. The dev overlay sits on top of it, so it needs a
+production build and a throw inside the layout to be looked at.
+
 ## 2026-11-07: the first CI run of the audit build, on GitHub's Postgres 17
 
 ### CI run #270 on `e7bec9b` failed both jobs while 4,951 tests passed locally — FIXED the same evening
@@ -56,7 +88,7 @@ that file.
 
 ## 2026-11-07: seen on staging, the first deploy of the audit build ahead of its migrations
 
-### Sign-in says it "could not reach the database" when the database is reachable and merely behind the code — OPEN, wording
+### Sign-in says it "could not reach the database" when the database is reachable and merely behind the code — FIXED 2026-11-16 (`7f26d09`: a database that was reached and failed answers 500 `sign_in_failed` with a reference)
 
 Seen by Max on staging at `e7bec9b`, minutes after the push and before 0050–0060
 were applied to the sandbox: the sign-in screen, in red, "Signing in could not
@@ -75,7 +107,7 @@ cause it has not checked.
 
 ## 2026-11-07: seen on the final walk of the audit build (local stack, T11071)
 
-### A twin chip's hover lists a code once per link, so a four-line family reads "GR-FUR-22, PL-FUR-22, PL-FUR-22, GR-FUR-22, GR-FUR-22" — OPEN, cosmetic
+### A twin chip's hover lists a code once per link, so a four-line family reads "GR-FUR-22, PL-FUR-22, PL-FUR-22, GR-FUR-22, GR-FUR-22" — FIXED 2026-11-16 (`dc9c051`)
 
 The phase table's "twin" chip (`twin_codes`) names every twin's codes without de-duplicating. The links behind it are right (58 pairs from the 36 accepted suggestions on the Aman bill copy, each pair once in `spec_record_twins`). Fold the list by code.
 
@@ -166,7 +198,7 @@ alone. Audit A1.
 From `docs/plans/spec-change-audit-2026-10-23.md` §3. Read in code at
 `8f64e03`; **not reproduced on a screen**.
 
-### A checklist answer typed over a field a spec holds is not what the file ships — OPEN
+### A checklist answer typed over a field a spec holds is not what the file ships — FIXED 2026-11-16 (`ed6e1f8`: the row says the file ships the spec, by the export's own predicate)
 
 The record's Checklist box edits any answer (`RecordChecklist.tsx:792`) and
 `editAnswer` writes it `manual`. The export takes the spec (`record_attributes`)
@@ -176,13 +208,13 @@ Checklist and not the BWS file or the check sheet, and nothing on the row says
 so. The Dimensions row has had no box since 2026-09-22; no other field has that
 guard.
 
-### "Edit value" on a library-linked finish can unlink it, and says so only after — OPEN
+### "Edit value" on a library-linked finish can unlink it, and says so only after — FIXED 2026-11-16 (`1bbf99a`: said on the form before the save)
 
 `attribute-correct.ts:225-249` unlinks the spec where the new words conflict
 with the library's description. The message comes after saving
 (`records/[id]/page.tsx:638`).
 
-### A preamble note's Retire and Flag open no change set — OPEN
+### A preamble note's Retire and Flag open no change set — PARTLY FIXED 2026-11-16 (`0cb8ef2`: flagging a retired note no longer re-stamps who retired it; whether a note belongs in the change trail is still Max's question)
 
 `projects/[id]/notes/[noteId]` runs outside a transaction, so its audit rows
 belong to no change. Flagging a retired note re-stamps `retired_at`.
@@ -201,7 +233,7 @@ the recording, and each one marks a frame that was looked at.
 When a size line ends with `SH450` after the unit, W and D come out unitless.
 Seen on an invented bill during the C2 walk. Not diagnosed.
 
-### The pack screen calls a waiting transcribed bill "Ready to review" — OPEN (seen by C2's walk)
+### The pack screen calls a waiting transcribed bill "Ready to review" — FIXED 2026-11-16 (`aa0a314`: "Needs transcribing")
 
 A PDF bill registered WAITING for its transcription (`pdfTranscription.state =
 "waiting"`, `sheets: []`) shows on the pack screen as "Ready to review". It
@@ -290,7 +322,7 @@ metal finish, *"Read as a metal from the bill's FINISH / REFERENCE column, kept
 whole"* (frame 39:50). Max described it on the call as a notes column (40:15).
 Classifying the cell whole is by design. The item name in a BWS field is not.
 
-### A client ref carries the schedule's "(TO BE CONFIRMED)" — OPEN, not discussed
+### A client ref carries the schedule's "(TO BE CONFIRMED)" — FIXED 2026-11-16 (`a97132e`: an item line, its ref exactly as printed, flagged amber)
 
 The phase table shows `CH-01 (TO BE CONFIRMED)` as a client ref (frame 45:48).
 The schedule's qualifier on its code became part of the pre-sale key.

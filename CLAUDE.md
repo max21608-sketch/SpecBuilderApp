@@ -651,6 +651,25 @@ CI's database tier went green on GitHub's Postgres 17 only on the third run
 Human acceptance is outstanding on every screen the build touched until Max
 has walked it.
 
+**The review build (2026-11-16).** Max asked for the app and the code read
+again for what is unfinished or wrong, with screenshots, and then "keep running
+through each stage until you're finished" (`docs/plans/review-2026-11-16.md`;
+the dated entry in `docs/plans/README.md` lists every item and its commit). Six
+stages are on **`review-int`: committed locally, NOT pushed, NOT on staging** —
+GitHub is read-only for Claude under the organisation's policy, so the push is
+Max's. What it changed that a later change could undo: the export reads one
+REPEATABLE READ snapshot and REFUSES a file with a record missing
+(`docs/load-bearing/exports.md`); staged-bill writes carry the document's
+version and go out one at a time (`docs/load-bearing/screens.md`); the bill
+reader holds a sheet whose columns are in doubt and flags a bracket it cannot
+place (`docs/load-bearing/bills.md`); the snapshot writer is one statement
+(`docs/load-bearing/database-and-trail.md`); `npm run lint` is
+`--max-warnings=0`; `.claude/launch.json` runs the LOCAL STACK only, because
+`npm run dev` in the main checkout is the sandbox. No migration. All four
+checks pass on the local stack with the database tier required (5,120 tests);
+30 screens were walked at 1920 and 1440 before and after. Human acceptance is
+outstanding on every screen it touched, and CI has not run on it.
+
 **Explicitly excluded, so it is not built speculatively:** feeding preamble
 notes into later model calls; a BWS *import* file carrying job numbers; images
 and scanned documents other than a bill; splitting an oversize drawing set; M6
@@ -667,7 +686,9 @@ diary and the README):
   design; the gate model's assumptions (`docs/plans/matrix-assumptions.md`,
   Max standing in for him since 2026-09-17); the level guess rules; the
   question-to-BWS-field mapping; Q4/Q6/Q7/Q8 from the Ronnie Scott's plan.
-- **Max:** `origin/production` (delete or record); whether to enforce the full
+- **Max:** pushing `review-int` to `staging` (the review build, 2026-11-16);
+  whether a preamble note's retire belongs in the change trail; deleting the
+  65 merged local branches; `origin/production` (delete or record); whether to enforce the full
   CSP after the browser walk; reclaiming pilot's audit-log space; a chased
   record changing category (a migration); whether the bill's Confirm names
   unaccepted category suggestions; the phase-control decisions P1–P4; the
