@@ -495,7 +495,12 @@ export default function SpecTable({
   const summaryRef = useRef(onSummary);
   summaryRef.current = onSummary;
 
+  // THE LATEST LOAD WINS (review 4A, G16): "Show retired" pressed twice in a
+  // second starts two loads, and the slower must not paint the table the
+  // person has already left.
+  const latestLoad = useRef(0);
   const load = useCallback(async () => {
+    const ticket = ++latestLoad.current;
     const query = new URLSearchParams({ projectId, runId });
     if (showRetired) query.set("includeRetired", "1");
     if (namedQuestions) query.set("withToQuote", "1");
@@ -507,6 +512,7 @@ export default function SpecTable({
       phase?: PhaseInfo | null;
       projectWide?: number;
     }>(`/api/records?${query.toString()}`);
+    if (ticket !== latestLoad.current) return;
     if (!res.ok) {
       setError(res.error);
       return;

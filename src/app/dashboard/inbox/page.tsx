@@ -27,7 +27,7 @@
 // and produced nothing is a different thing from one waiting to be reviewed,
 // and it now says so instead of looking identical.
 // ============================================================================
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
@@ -195,10 +195,20 @@ function InboxView() {
    * the projects list's rule — and "Ruled on this week" would read zero on
    * exactly the screen it appears on if the request hid them.
    */
+  //
+  // THE LATEST LOAD WINS (review 4A, G16, 2026-11-16). Changing the project
+  // starts a new load while the old one may still be in flight, and whichever
+  // answered LAST used to paint — project A's mail under project B's name. Each
+  // load takes a ticket; an answer whose ticket is no longer the newest is
+  // dropped, whether it was a filter change or an action's reload that
+  // overtook it.
+  const latestLoad = useRef(0);
   const load = useCallback(async () => {
+    const ticket = ++latestLoad.current;
     const query = new URLSearchParams({ includeTriaged: "1" });
     if (projectId) query.set("projectId", projectId);
     const res = await apiFetch<Payload>(`/api/email-messages?${query.toString()}`);
+    if (ticket !== latestLoad.current) return;
     if (!res.ok) {
       setError(res.error);
       return;
