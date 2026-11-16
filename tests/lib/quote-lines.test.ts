@@ -8,7 +8,16 @@ import {
   pickBoilerplate,
   type QuoteBoilerplate,
 } from "@/lib/quote-lines";
-import { composeWorkbook, toCsv, type ExportAttribute, type ExportRecord, type ExportScope } from "@/lib/bws-export";
+import {
+  cellsByField,
+  composeWorkbook,
+  toCsv,
+  type ExportAnswer,
+  type ExportAttribute,
+  type ExportRecord,
+  type ExportScope,
+} from "@/lib/bws-export";
+import type { Finish } from "@/lib/finishes";
 
 const record = (overrides: Partial<ExportRecord> = {}): ExportRecord => ({
   id: "rec-1",
@@ -82,10 +91,59 @@ describe("the boilerplate, by Matthew's own rule", () => {
     // "Populated" cannot mean "carries any string": a metal finish recorded as
     // TBC is somebody saying it is not decided, and it must not silently move
     // the item onto a different boilerplate and a different price.
-    expect(hasMetalFinish([attribute({ specFieldJsonId: 5, value: "Antique brass" })])).toBe(true);
-    expect(hasMetalFinish([attribute({ specFieldJsonId: 5, value: "TBC" })])).toBe(false);
-    expect(hasMetalFinish([attribute({ specFieldJsonId: 35, value: "  none " })])).toBe(false);
-    expect(hasMetalFinish([attribute({ specFieldJsonId: 1, value: "Mohair" })])).toBe(false);
+    expect(metal([attribute({ specFieldJsonId: 5, value: "Antique brass" })])).toBe(true);
+    expect(metal([attribute({ specFieldJsonId: 5, value: "TBC" })])).toBe(false);
+    expect(metal([attribute({ specFieldJsonId: 35, value: "  none " })])).toBe(false);
+    expect(metal([attribute({ specFieldJsonId: 1, value: "Mohair" })])).toBe(false);
+    // A placement does not make a non-answer an answer.
+    expect(metal([attribute({ specFieldJsonId: 5, value: "None", qualifier: "legs" })])).toBe(false);
+  });
+});
+
+/** What the quote reads: the cells the BWS file ships for this record. */
+const metal = (attributes: ExportAttribute[], answers: ExportAnswer[] = []) =>
+  hasMetalFinish(cellsByField(scope({ attributes, answers }), record(), attributes, answers));
+
+const metalFinish = (overrides: Partial<Finish> = {}): Finish => ({
+  id: "fin-1",
+  code: "ZZ-MTL-01",
+  codeNorm: "ZZ-MTL-01",
+  codeOrigin: "client",
+  kind: "metal",
+  description: null,
+  supplierRaw: null,
+  reference: null,
+  colour: null,
+  state: "confirmed",
+  standard: null,
+  ...overrides,
+});
+
+describe("the template reads what the BWS file SHIPS in MF1/MF2, not the attributes alone (F8)", () => {
+  const sofa = () => record({ matrixCodes: ["S"] } as Partial<ExportRecord>) as ExportRecord & { matrixCodes: string[] };
+  const productCode = (over: Partial<ExportScope>) =>
+    composeQuoteSheet({ ...scope({ records: [sofa()] }), ...over }, register).rows[0]?.[8];
+
+  it("prices a metal finish that is only a confirmed checklist ANSWER on the with-Metalwork template", () => {
+    const answers: ExportAnswer[] = [{ recordId: "rec-1", specFieldJsonId: 5, value: "Antique brass", qualifier: null }];
+    expect(productCode({ answers })).toBe(".BW-Sofa,with-Metalwork-BOILERPLATE");
+    expect(productCode({ answers: [{ ...answers[0]!, value: "TBC" }] })).toBe(".BW-Sofa,Simple-BOILERPLATE");
+  });
+
+  it("counts a spec LINKED to a library finish by what the file writes for it", () => {
+    // The drawing gave the code alone; the library says what it is.
+    const linked = attribute({ specFieldJsonId: 5, value: "", finish: metalFinish({ description: "Antique brass" }) });
+    expect(productCode({ attributes: [linked] })).toBe(".BW-Sofa,with-Metalwork-BOILERPLATE");
+  });
+
+  it("counts the library's BW standard in force on a client's TBC (the half that already worked, held)", () => {
+    const tbc = attribute({
+      specFieldJsonId: 35,
+      value: "TBC",
+      state: "tbc",
+      finish: metalFinish({ state: "tbc", standard: { value: "BW Antique Brass", optionId: null, state: "proposed" } }),
+    });
+    expect(productCode({ attributes: [tbc] })).toBe(".BW-Sofa,with-Metalwork-BOILERPLATE");
   });
 });
 

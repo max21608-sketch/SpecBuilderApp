@@ -158,6 +158,15 @@ quote cannot cover a different set of records from the file.
 - **"Populated" excludes a non-answer.** A metal finish recorded as `TBC` or
   `None` does not move an item onto the metalwork boilerplate and a different
   price. This repo's reading, and a question for Matthew.
+- **"Populated" is read off the CELLS THE BWS FILE SHIPS** (2026-11-16, audit
+  F8, `hasMetalFinish` over `cellsByField`). It read the record's attributes
+  alone, so a metal finish that was only a confirmed checklist ANSWER — or a
+  spec linked to a library finish whose own words were empty — priced the
+  item on the Simple template while the file shipped the metal. Never a
+  second rule beside the composer: the cell already holds the answer
+  precedence, the library's description and the BW standard in force (that
+  last half already worked and a test now holds it). The placement is taken
+  back off before the non-answer check, so `None - legs` is still none.
 - **None of the nine seating families has a Hero boilerplate**; six cabinetry
   families do. His rule says nothing about a hero sofa because there is no hero
   sofa code. Also a question for him.

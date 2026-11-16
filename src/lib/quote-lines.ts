@@ -43,8 +43,15 @@
 // ============================================================================
 import { compareRecordOrder } from "@/lib/record-label";
 import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
-import { renderAnswerValue, renderAttributeValue, type ExportAttribute, type ExportRecord, type ExportScope } from "@/lib/bws-export";
-import { shippedStandardValue, standardInForce } from "@/lib/bw-standard";
+import {
+  cellsByField,
+  renderAnswerValue,
+  renderAttributeValue,
+  type ExportAttribute,
+  type ExportCell,
+  type ExportRecord,
+  type ExportScope,
+} from "@/lib/bws-export";
 import type { AttributeUnit, DimensionSlot } from "@/lib/spec-vocab";
 
 /** The column order of Matthew's own file, unchanged. */
@@ -130,17 +137,36 @@ export function pickBoilerplate(
 
 const NON_ANSWERS = new Set(["", "tbc", "none", "n/a", "na", "not required", "-"]);
 
-/** Does this record carry a metal finish that is actually a finish? */
-export function hasMetalFinish(attributes: ExportAttribute[]): boolean {
-  return attributes.some((attribute) => {
-    if (attribute.specFieldJsonId !== 5 && attribute.specFieldJsonId !== 35) return false;
-    // A BW standard metal proposed beside a client's "TBC" makes it a
-    // metalwork item (0041): the standard is what ships. Otherwise the page's
-    // own words, exactly as before. The standard IN FORCE, so a metal code's
-    // BW finish set in the library (0045) counts on every item carrying it.
-    const value = (shippedStandardValue(standardInForce(attribute)) ?? attribute.value ?? "").trim().toLowerCase();
-    return !NON_ANSWERS.has(value);
+/** The two BWS metal finish fields, MF1 and MF2 in Matthew's rule. */
+const METAL_FINISH_JSON_IDS = [5, 35] as const;
+
+/**
+ * Does this record SHIP a metal finish that is actually a finish?
+ *
+ * READ OFF THE CELLS THE BWS FILE WRITES (`cellsByField`, audit F8,
+ * 2026-11-06), never a second rule beside them. It read the record's
+ * ATTRIBUTES alone, so a metal finish that existed only as a confirmed
+ * checklist ANSWER priced the item on the Simple template while the file
+ * shipped the metal; and it read an attribute's own words, so a spec linked
+ * to a library finish whose words were the code shipped the library's
+ * description in the file and counted as nothing here. The cell is the
+ * composer's answer to both, including a BW standard in force (0041/0045). Its
+ * placement (0029) is taken off before asking whether the value is a
+ * non-answer, so "None - legs" is still none.
+ */
+export function hasMetalFinish(cells: ReadonlyMap<number, ExportCell>): boolean {
+  return METAL_FINISH_JSON_IDS.some((jsonId) => {
+    const cell = cells.get(jsonId);
+    if (!cell) return false;
+    return !NON_ANSWERS.has(withoutPlacement(cell).trim().toLowerCase());
   });
+}
+
+/** A cell's value with its placement taken back off — the inverse of `joinQualifier`'s suffix. */
+function withoutPlacement(cell: ExportCell): string {
+  const placement = cell.qualifier?.trim();
+  if (!placement || !cell.value.endsWith(placement)) return cell.value;
+  return cell.value.slice(0, cell.value.length - placement.length).replace(/\s*(?:-|\n)\s*$/, "");
 }
 
 /**
@@ -247,14 +273,15 @@ export function composeQuoteSheet(
 
   for (const record of [...scope.records].sort(compareRecordOrder)) {
     const mine = scope.attributes.filter((attribute) => attribute.recordId === record.id);
-    const answers = scope.answers
-      .filter((answer) => answer.recordId === record.id)
-      .map((answer) => ({
-        specFieldJsonId: answer.specFieldJsonId,
-        value: answer.value,
-        qualifier: answer.qualifier,
-      }));
-    const boilerplate = pickBoilerplate(record.matrixCodes ?? [], hasMetalFinish(mine), register);
+    const mineAnswered = scope.answers.filter((answer) => answer.recordId === record.id);
+    const answers = mineAnswered.map((answer) => ({
+      specFieldJsonId: answer.specFieldJsonId,
+      value: answer.value,
+      qualifier: answer.qualifier,
+    }));
+    // The template is chosen from what the BWS file SHIPS in MF1/MF2 (F8).
+    const shipped = cellsByField(scope, record, mine, mineAnswered);
+    const boilerplate = pickBoilerplate(record.matrixCodes ?? [], hasMetalFinish(shipped), register);
 
     rows.push([
       TYPE,
