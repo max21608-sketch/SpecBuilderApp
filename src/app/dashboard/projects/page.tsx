@@ -271,11 +271,11 @@ function ProjectsView() {
       >
         <h2 className="font-medium text-neutral-900">Add a project</h2>
         <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <input value={number} onChange={(e) => setNumber(e.target.value)} placeholder="P17231"
+          <input value={number} onChange={(e) => setNumber(e.target.value)} placeholder="P17231" aria-label="BWS project number"
                  className="border border-neutral-300 rounded px-3 py-2 text-sm" />
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Project name"
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Project name" aria-label="Project name"
                  className="border border-neutral-300 rounded px-3 py-2 text-sm" />
-          <input value={client} onChange={(e) => setClient(e.target.value)} placeholder="Client (optional)"
+          <input value={client} onChange={(e) => setClient(e.target.value)} placeholder="Client (optional)" aria-label="Client (optional)"
                  className="border border-neutral-300 rounded px-3 py-2 text-sm" />
         </div>
         <Button type="submit" variant="primary" disabled={saving} className="mt-3">
@@ -339,6 +339,7 @@ function ProjectsView() {
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search a number, a name, or a client"
+          aria-label="Search a number, a name, or a client"
           className="border border-neutral-300 rounded px-3 py-2 text-sm w-72"
         />
         {focus !== null && (

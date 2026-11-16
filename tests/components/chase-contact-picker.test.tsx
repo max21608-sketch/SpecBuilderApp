@@ -235,6 +235,10 @@ describe("the chase screen's contacts and counts (review 3.8)", () => {
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     // Nothing to close the form onto, so the card has no Close either.
     expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    // Each box is named by more than its placeholder (review 3.9b).
+    for (const name of ["Name", "Email (optional)", "Organisation", "Role", "Designer code", "Find in Capsule (name, company or email)"]) {
+      expect(screen.getByLabelText(name)).toBeTruthy();
+    }
   });
 
   it("with contacts recorded, the form opens from the card's own Add and closes with Cancel", async () => {

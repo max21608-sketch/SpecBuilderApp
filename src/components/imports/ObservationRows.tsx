@@ -808,6 +808,15 @@ export function ObservationRow({
   // right often enough to be worth filling in, never certain enough to slip
   // past unread.
   const guessed = Boolean((observation.slotSuggested && observation.dimensionSlot) || observation.groupSuggested);
+  // WHAT A SCREEN READER HEARS FOR THIS ROW'S CONTROLS (review 3.9b,
+  // 2026-11-16). A walk counted 72 unlabelled controls on one pack review: six
+  // selects and a box per row, each read out as "combobox". Each is named off
+  // the row's own label and figure, so it says "Unit for 1'-9"" instead.
+  const rowLabel =
+    attributeDisplayLabel({ label: observation.labelRaw, slot: observation.dimensionSlot }) ||
+    (observation.value ?? "").trim().split("\n")[0] ||
+    "this row";
+  const rowFigure = (observation.value ?? "").trim().split("\n")[0] || rowLabel;
   // What this row can be given, rather than what the vocabulary holds.
   // `dimension` is never offered here: it is unwritable without a slot, and the
   // slot column sends both together.
@@ -846,6 +855,7 @@ export function ObservationRow({
           value={observation.attrGroup}
           disabled={groupOptions.length < 2}
           onChange={(event) => callbacks.onChange(observation, { attrGroup: event.target.value as AttributeGroup })}
+          aria-label={`Group for ${rowLabel}`}
           className="border border-neutral-300 rounded px-1 py-0.5 text-xs disabled:bg-neutral-50 disabled:text-neutral-500"
           title={
             observation.unit !== null
@@ -886,6 +896,7 @@ export function ObservationRow({
               if (event.target.value === (observation.value ?? "")) return;
               callbacks.onChange(observation, { value: event.target.value || null });
             }}
+            aria-label={`Value for ${rowLabel}`}
             className="w-full min-w-[18rem] border border-neutral-300 rounded px-2 py-1 text-sm"
           />
         ) : (
@@ -899,6 +910,7 @@ export function ObservationRow({
                 if (event.target.value === (observation.value ?? "")) return;
                 callbacks.onChange(observation, { value: event.target.value || null });
               }}
+              aria-label={`Value for ${rowLabel}`}
               className="w-full min-w-0 border border-neutral-300 rounded px-2 py-1 text-sm"
             />
             {/* THE MILLIMETRES, RIGHT BESIDE THE FIGURE (Max, 2026-10-12):
@@ -952,7 +964,7 @@ export function ObservationRow({
             <select
               value={observation.unit ?? ""}
               onChange={(event) => callbacks.onChange(observation, { unit: event.target.value || null })}
-              aria-label="printed in"
+              aria-label={`Unit for ${rowFigure} (printed in)`}
               className={`border rounded px-1 py-0.5 text-xs ${
                 observation.unit === null && observation.attrGroup === "dimension"
                   ? "border-amber-400 bg-amber-50"
@@ -1152,6 +1164,7 @@ export function ObservationRow({
                   dimensionSlot: slot ? (slot as DimensionSlot) : null,
                 });
               }}
+              aria-label={`Dimension for ${rowFigure}`}
               className={`border rounded px-1 py-0.5 text-xs ${
                 observation.slotSuggested ? "border-amber-400 bg-amber-50" : "border-neutral-300"
               }`}
@@ -1215,6 +1228,7 @@ export function ObservationRow({
           <select
             value={observation.specFieldId ?? ""}
             onChange={(event) => callbacks.onChange(observation, { specFieldId: event.target.value || null })}
+            aria-label={`BWS field for ${rowLabel}`}
             className={`border rounded px-1 py-0.5 text-xs max-w-[12rem] ${
               observation.groupSuggested ? "border-amber-400 bg-amber-50" : "border-neutral-300"
             }`}
@@ -1247,7 +1261,7 @@ export function ObservationRow({
             onChange={(event) =>
               callbacks.onChange(observation, { state: (event.target.value || null) as AttributeState | null })
             }
-            aria-label="State"
+            aria-label={`State of ${rowLabel}`}
             className={`border rounded px-1 py-0.5 text-xs ${
               observation.state === null ? "border-amber-400 bg-amber-50" : "border-neutral-300"
             }`}

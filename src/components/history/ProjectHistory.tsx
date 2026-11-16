@@ -239,12 +239,14 @@ export default function ProjectHistory({
             autoFocus
             onChange={(event) => setBaselineLabel(event.target.value)}
             placeholder="Issued to client, 16 Sep"
+            aria-label="Name this point"
             className="mt-2 w-full rounded border border-neutral-300 px-2 py-1"
           />
           <input
             value={baselineReason}
             onChange={(event) => setBaselineReason(event.target.value)}
             placeholder="What was issued, and to whom"
+            aria-label="What was issued, and to whom"
             className="mt-2 w-full rounded border border-neutral-300 px-2 py-1"
           />
           <div className="mt-2 flex items-center gap-2">

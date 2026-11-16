@@ -264,3 +264,24 @@ describe("InfillTable", () => {
     expect(screen.getByText("Nothing matches those filters.")).toBeInTheDocument();
   });
 });
+
+describe("a keyboard can open a line (review 3.9a)", () => {
+  it("opens with Enter on the chevron button, which reports aria-expanded", async () => {
+    const user = userEvent.setup();
+    render(<Harness lines={[line()]} questionsByLine={{ "line-1": [question()] }} />);
+    const chevron = screen.getByRole("button", { name: "Questions on S-301" });
+    expect(chevron).toHaveAttribute("aria-expanded", "false");
+    chevron.focus();
+    await user.keyboard("{Enter}");
+    expect(chevron).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Main fabric")).toBeInTheDocument();
+    // One press is one toggle: the button stops the row's own click.
+    await user.keyboard(" ");
+    expect(chevron).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("labels the search box by more than its placeholder (review 3.9b)", () => {
+    render(<Harness lines={[line()]} />);
+    expect(screen.getByLabelText("Search what is outstanding")).toHaveAttribute("type", "search");
+  });
+});
