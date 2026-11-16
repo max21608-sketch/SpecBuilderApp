@@ -197,9 +197,16 @@ describe("the inbox — an automatic assignment", () => {
   it("states the charge once, at the top, where a morning's post is visible", async () => {
     render(<InboxPage />);
     await screen.findByText("AC-101 lounge armchair, revised specification");
-    expect(
-      screen.getByText(/assigned and read automatically the moment it arrives — one charged model call each/),
-    ).toBeInTheDocument();
+    // In the one visible sentence (the approval gate is never folded away)…
+    expect(screen.getByText(/read automatically — one charged model call each/)).toBeInTheDocument();
+    // …and the full routing rule one hover away, beside it (review 3.7c).
+    const rules = screen
+      .getAllByRole("note")
+      .find((tip) => /assigned and read automatically the moment it arrives/.test(tip.getAttribute("title") ?? ""));
+    expect(rules).toBeDefined();
+    expect(rules!.getAttribute("title")).toMatch(/one charged model call each/);
+    expect(rules!.getAttribute("title")).toMatch(/daily cap of automatic reads/);
+    expect(rules!.parentElement!.textContent).toContain("How mail is placed");
   });
 
   it("names the project a weak signal pointed at, without choosing it", async () => {

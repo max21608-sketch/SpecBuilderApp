@@ -3,7 +3,7 @@
 // Rendered from a staged document and the server's verdicts, as the GET route
 // returns them, with no network. Every code and name is invented.
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within, waitFor } from "@testing-library/react";
+import { render, screen, within, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FinishScheduleTable } from "@/components/imports/FinishScheduleReview";
 import { RawFinishEntry } from "@/lib/extraction-schema";
@@ -96,6 +96,10 @@ describe("the finishes schedule review", () => {
     expect(screen.getAllByText("AB-TIM-01").length).toBeGreaterThan(0);
     expect(screen.getAllByText("printed AB TIM 01").length).toBeGreaterThan(0);
     expect(screen.getByText("NATURAL OAK; Finish: Stained")).toBeInTheDocument();
+    // The model's note on the document is folded to one line (review 3.7b),
+    // and its words are one press away.
+    expect(screen.queryByText(/Seven furniture entries left out/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /The model left a note on this document/ }));
     expect(screen.getByText(/Seven furniture entries left out/)).toBeInTheDocument();
   });
 

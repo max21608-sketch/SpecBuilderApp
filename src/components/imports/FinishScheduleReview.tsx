@@ -42,6 +42,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import PageBody from "@/components/ui/PageBody";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Note from "@/components/ui/Note";
+import ModelNote from "@/components/imports/ModelNote";
 import Chip from "@/components/ui/Chip";
 import Button from "@/components/ui/Button";
 import SuggestButton from "@/components/ui/SuggestButton";
@@ -447,7 +448,7 @@ export default function FinishScheduleReview({
     return shell(
       <Card title="No finishes found">
         <p className="text-neutral-700">The model found no finish entries in this document.</p>
-        {staged?.documentNotes && <Note tone="plain">The model noted: {staged.documentNotes}</Note>}
+        <ModelNote text={staged?.documentNotes} />
       </Card>,
     );
   }
@@ -527,7 +528,7 @@ export function FinishScheduleTable({
     <>
       {error && <Note tone="danger">{error}</Note>}
       {notice && <Note tone="good">{notice}</Note>}
-      {staged.documentNotes && <Note tone="plain">The model noted: {staged.documentNotes}</Note>}
+      <ModelNote text={staged?.documentNotes} />
 
       <Card
         flush

@@ -50,6 +50,7 @@ import PageBody from "@/components/ui/PageBody";
 import Card from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
+import ModelNote from "@/components/imports/ModelNote";
 import DocumentState from "@/components/imports/DocumentState";
 import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/intake-status";
 import Button from "@/components/ui/Button";
@@ -655,7 +656,7 @@ export default function SpecDocumentReview({
         <Note tone="good">Review complete — every proposal has been applied or ignored. Some answers may still be TBC.</Note>
       )}
 
-      {run.parsed?.documentNotes && tab === "pending" && <Note tone="plain">{run.parsed.documentNotes}</Note>}
+      {tab === "pending" && <ModelNote text={run.parsed?.documentNotes} />}
 
       {/* THE MESSAGE ITSELF, which had nowhere on this screen.
           ==============================================================

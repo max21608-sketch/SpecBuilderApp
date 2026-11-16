@@ -28,6 +28,8 @@
 import { useState } from "react";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
+import Tip from "@/components/ui/Tip";
+import { shortPaletteWhy } from "@/lib/finish-standard-palette";
 import SuggestButton from "@/components/ui/SuggestButton";
 import EvidenceUpload, { type UploadedEvidence } from "@/components/history/EvidenceUpload";
 import { apiFetch } from "@/lib/api-fetch";
@@ -104,11 +106,16 @@ export function FinishStandardCell({
   const offerable = Boolean(palette && isOfferable(palette));
   const items = itemsCarrying(finish);
 
-  // NOTHING TO CHOOSE, and nothing chosen: say why, in words.
+  // NOTHING TO CHOOSE, and nothing chosen: the fact in a few words, and why
+  // one hover away (review 3.7a). The full sentence repeated on all 55 rows of
+  // a library was furniture.
   if (!offerable && state === null) {
+    const why = finish.bw_palette_why ?? "No BW finish is offered for this code.";
+    const short = shortPaletteWhy(why);
     return (
       <span className="block text-[11px] text-neutral-500" data-bw-finish="none">
-        {finish.bw_palette_why ?? "No BW finish is offered for this code."}
+        <span title={why}>{short}</span>
+        {short !== why && <Tip>{why}</Tip>}
       </span>
     );
   }

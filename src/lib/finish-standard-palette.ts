@@ -63,6 +63,34 @@ export type FinishPaletteReading = {
   mixed: boolean;
 };
 
+/**
+ * THE FEW WORDS a library row prints where there is no BW finish to choose,
+ * with `why` one hover away (review 3.7a, 2026-11-16).
+ *
+ * Fifty-five rows each repeated "Its items sit in COM 1, which BWS keeps no
+ * list for — so there is no BW finish to choose." in their BW finish column:
+ * read once, then furniture. The row keeps the FACT ("no BW list for COM 1");
+ * the sentence goes on the cell's title and a `Tip`. Display only — it reads
+ * the sentence `paletteForFinish` already wrote and decides nothing, and a
+ * sentence it does not recognise comes back whole rather than guessed at.
+ * `tests/lib/finish-standard.test.ts` runs every `why` the "none" branches
+ * write through it, so a reworded sentence there fails a test instead of
+ * silently printing in full again.
+ */
+export function shortPaletteWhy(why: string): string {
+  const keepsNone = /^Its items sit in (.+), which BWS keeps no list for\b/.exec(why);
+  if (keepsNone) return `no BW list for ${keepsNone[1]}`;
+  const noKindList = /^BWS keeps no BW finish list for (.+)\.$/.exec(why);
+  if (noKindList) return `no BW list for ${noKindList[1]}`;
+  const comKind = /^A (fabric|leather) has no BW finish\b/.exec(why);
+  if (comKind) return `no BW finish for a ${comKind[1]}`;
+  if (/^Its items sit in different fields .* and it has no timber or metal kind\b/.test(why)) {
+    return "fields differ, no kind to decide";
+  }
+  if (/^No item places it in a timber or metal field and it has no kind\b/.test(why)) return "no kind set";
+  return why;
+}
+
 function fieldList(uses: readonly FinishUse[]): string {
   const names = [...new Set(uses.map((use) => fieldDisplayName(use.fieldName, use.jsonId)).filter((name): name is string => Boolean(name)))];
   return names.length > 0 ? names.join(", ") : "BWS fields";

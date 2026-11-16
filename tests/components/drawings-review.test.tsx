@@ -32,7 +32,7 @@ vi.mock("@/lib/api-fetch", () => ({
   },
 }));
 
-function show(items: DrawingItem[], projectPayload?: unknown) {
+function show(items: DrawingItem[], projectPayload?: unknown, documentNotes: string | null = null) {
   project.current = projectPayload;
   fetched.current = {
     import: {
@@ -46,7 +46,7 @@ function show(items: DrawingItem[], projectPayload?: unknown) {
       claim_live: null,
       within_deadline: null,
       claim_count: 1,
-      parsed: { schemaVersion: 1, kind: "shop_drawings", filename: "S-100.pdf", documentNotes: null, items },
+      parsed: { schemaVersion: 1, kind: "shop_drawings", filename: "S-100.pdf", documentNotes, items },
     },
     resolution: [],
     specFields: [],
@@ -172,5 +172,26 @@ describe("the item navigator", () => {
     // Both cards are still on the page: the navigator scrolls, it does not filter.
     expect(screen.getAllByText("S-100").length).toBeGreaterThan(0);
     expect(screen.getAllByText("S-201").length).toBeGreaterThan(0);
+  });
+});
+
+describe("the model's note on the document (review 3.7b)", () => {
+  beforeEach(() => resetIds());
+
+  it("is folded to one line, with its text one press away", async () => {
+    const boilerplate = "Title block: DRAWN BY JS. CHECKED BY AB. DO NOT SCALE. ALL DIMENSIONS IN MM.";
+    show([item({ observations: [observation({ reviewStatus: "applied" })] })], undefined, boilerplate);
+    const toggle = await screen.findByRole("button", { name: /The model left a note on this document/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText(boilerplate)).toBeNull();
+    await userEvent.setup().click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText(boilerplate)).toBeTruthy();
+  });
+
+  it("is absent when the model left none", async () => {
+    show([item({ observations: [observation({ reviewStatus: "applied" })] })]);
+    await screen.findByText("Review complete");
+    expect(screen.queryByText(/The model left a note/)).toBeNull();
   });
 });

@@ -37,6 +37,7 @@ import Tabs from "@/components/ui/Tabs";
 import Card from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
+import Tip from "@/components/ui/Tip";
 import StatTile from "@/components/ui/StatTile";
 import Button, { buttonClass } from "@/components/ui/Button";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
@@ -44,6 +45,13 @@ import { useUrlTab } from "@/lib/use-url-tab";
 import { WAITING_FOR_SLOT_LABEL } from "@/lib/intake-status";
 import { inboxBuckets, outcome } from "@/lib/inbox-outcome";
 import { assignCost } from "@/lib/email-assign-cost";
+
+/**
+ * How mail is placed, in full: the inbox header's tip. The charge is said here
+ * AND in the visible sentence, because a charged read is an approval gate.
+ */
+const MAIL_PLACEMENT_RULES =
+  "Mail addressed to a project's inbox, or forwarded from it, is assigned and read automatically the moment it arrives — one charged model call each. Anything placed by a subject reference, a known sender or a header any sender could have written, or past a project's daily cap of automatic reads, waits below for you to confirm.";
 
 /** What a read turned up. Computed in the route by `describeChange`, per 0021. */
 type Found = {
@@ -260,7 +268,21 @@ function InboxView() {
         // visible, which is the 2026-09-15 precedent: asking per message was
         // ceremony rather than consent, and the decision belongs where a
         // morning's post can be seen at once.
-        subtitle="Mail addressed to a project's inbox, or forwarded from it, is assigned and read automatically the moment it arrives — one charged model call each. Anything placed by a subject reference, a known sender or a header any sender could have written, or past a project's daily cap of automatic reads, waits below for you to confirm."
+        //
+        // ONE SENTENCE, THE RULES ONE HOVER AWAY (review 3.7c, 2026-11-16).
+        // Three lines of routing rules stood ahead of the mail. The charge
+        // stays IN the sentence — it is the approval gate — and the full rule,
+        // charge included, is the "How mail is placed" tip beside it.
+        subtitle={
+          <>
+            Mail to a project&apos;s inbox is read automatically — one charged model call each — and anything less
+            certain waits below for you.{" "}
+            <span className="whitespace-nowrap">
+              How mail is placed
+              <Tip>{MAIL_PLACEMENT_RULES}</Tip>
+            </span>
+          </>
+        }
         actions={
           // AN .eml IS UPLOADED ON THE PROJECT IT BELONGS TO, through the pack
           // upload, because a spec document arrives as part of a delivery and

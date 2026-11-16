@@ -65,8 +65,21 @@ beforeEach(() => apiFetch.mockReset());
 describe("the library's BW finish cell", () => {
   it("says why there is nothing to choose, and offers nothing", () => {
     cell({ bw_palette_key: null, bw_palette_why: "A fabric has no BW finish — the COM fields carry no BWS list." }, null);
-    expect(screen.getByText(/A fabric has no BW finish/)).toBeInTheDocument();
+    // The row prints the fact; the sentence is on its title and its Tip.
+    expect(screen.getByText("no BW finish for a fabric")).toHaveAttribute(
+      "title",
+      "A fabric has no BW finish — the COM fields carry no BWS list.",
+    );
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("a row whose items sit in COM 1 prints a few words, with the full sentence one hover away (review 3.7a)", () => {
+    const why = "Its items sit in COM 1, which BWS keeps no list for — so there is no BW finish to choose.";
+    cell({ bw_palette_key: null, bw_palette_why: why }, null);
+    const fact = screen.getByText("no BW list for COM 1");
+    expect(fact).toHaveAttribute("title", why);
+    expect(screen.getByRole("note")).toHaveAttribute("title", why);
+    expect(screen.queryByText(why)).toBeNull();
   });
 
   it("unset: Set…, and how many items it would apply to", () => {
