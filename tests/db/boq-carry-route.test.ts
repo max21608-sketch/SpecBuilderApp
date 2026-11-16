@@ -51,8 +51,9 @@ describeIfDb("a decision carries across a bill's phases", () => {
     const categories = await client.query(
       `select c.id from item_categories c
        join requirements q on q.category_id = c.id
+       where c.created_by = 'seed'
        group by c.id having count(q.id) >= 1
-       order by c.id limit 2`,
+       order by c.slug limit 2`,
     );
     categoryId = categories.rows[0]!.id;
     otherCategoryId = categories.rows[1]!.id;

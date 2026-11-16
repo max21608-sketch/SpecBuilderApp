@@ -324,7 +324,8 @@ describeIfDb("the record is locked before the row an edit touches", () => {
   it("editAnswer waits for the record rather than deadlocking (B6)", async () => {
     const recordId = await record();
     const answer = await client.query(
-      `select id, version from spec_answers where record_id = $1 and state = 'missing' order by id limit 1`,
+      `select a.id, a.version from spec_answers a join requirements q on q.id = a.requirement_id
+        where a.record_id = $1 and a.state = 'missing' order by q.sort_order limit 1`,
       [recordId],
     );
     const result = await againstRecordsFirstWriter(recordId, LOCK_ANSWER, String(answer.rows[0].id), (sql) =>
