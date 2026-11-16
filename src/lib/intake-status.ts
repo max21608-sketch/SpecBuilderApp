@@ -196,6 +196,13 @@ export type ReviewProgress = {
    * needs nobody, the second is a button somebody has to press.
    */
   waitingForSlot?: boolean | null;
+  /**
+   * A PDF bill held until its transcription runs (`isAwaitingTranscription`
+   * in pdf-bill-checks.ts, sent by the routes as a flag). Its status is
+   * `parsed`, and "Ready to review" over a bill with no lines on it sent
+   * people looking for something to review (found in use, 2026-10-15).
+   */
+  awaitingTranscription?: boolean | null;
 };
 
 /**
@@ -233,10 +240,23 @@ export const WAITING_FOR_SLOT_MESSAGE =
   `Waiting — ${MAX_IN_FLIGHT_READS_PER_PACK} documents of this pack are being read. ` +
   `This one starts on its own when one of them finishes.`;
 
+/**
+ * A bill held for its transcription. The next step in two words: opening its
+ * review starts the (charged) transcription, which the upload row already
+ * said.
+ */
+export const AWAITING_TRANSCRIPTION_LABEL = "Needs transcribing";
+
+/** Held for transcription, as a status-aware question: only a `parsed` bill can be. */
+export function isHeldForTranscription(run: ReviewProgress): boolean {
+  return run.status === "parsed" && Boolean(run.awaitingTranscription);
+}
+
 /** The label for a document's state, with its count where there is one. */
 export function documentReviewLabel(run: ReviewProgress): string {
   if (hasPendingReview(run)) return `${run.pendingReview} to review`;
   if (run.status === "pending" && run.waitingForSlot) return WAITING_FOR_SLOT_LABEL;
+  if (isHeldForTranscription(run)) return AWAITING_TRANSCRIPTION_LABEL;
   return intakeStatusLabel(run.status);
 }
 
@@ -245,6 +265,8 @@ export function documentReviewTone(run: ReviewProgress): Tone {
   if (hasPendingReview(run)) return "warn";
   // Blue, like `queued`: the app is going to do this one and nobody is wanted.
   if (run.status === "pending" && run.waitingForSlot) return "info";
+  // Amber, like `parsed`: a person opens it, and that starts the transcription.
+  if (isHeldForTranscription(run)) return "warn";
   return intakeStatusTone(run.status);
 }
 
@@ -302,6 +324,8 @@ export function packTally(runs: ReviewProgress[]): PackTally {
       if (isReviewComplete(run)) acc.reviewed += 1;
       else if (isIntakeRunWorking(run.status)) acc.reading += 1;
       else if (run.status === "failed") acc.failed += 1;
+      // A bill held for its transcription is counted here too: it waits for
+      // a person to open it, which is what starts the transcription.
       else if (hasPendingReview(run) || run.status === "parsed") acc.toReview += 1;
       // A document waiting for a slot is NOT "not read yet": the app is going
       // to read it and nobody is wanted. Counted apart rather than folded into

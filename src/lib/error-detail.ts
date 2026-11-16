@@ -21,6 +21,7 @@
 // person who can act on it.
 // ============================================================================
 import { randomBytes } from "node:crypto";
+import { describeUnexpectedFailure } from "@/lib/db-transaction";
 
 const OWN_ERROR_NAMES = new Set(["Error", "UntrustedBlobError", "DomainConflictError"]);
 
@@ -36,10 +37,18 @@ export function showsErrorDetail(appEnv: string | undefined = process.env.APP_EN
   return appEnv === "development";
 }
 
-/** Logs the cause under a fresh reference and returns the reference. */
+/**
+ * Logs the cause under a fresh reference and returns the reference.
+ *
+ * ONE STRING, never the cause object (audit B9, carried here by review 2.1):
+ * a Postgres error logged whole carries its `detail`, which echoes the value
+ * that broke a constraint. `describeUnexpectedFailure` keeps the SQLSTATE,
+ * constraint, table and statement of a driver error, and the name, message
+ * and stack of anything else.
+ */
 export function reportFailure(scope: string, cause: unknown): string {
   const reference = randomBytes(4).toString("hex");
-  console.error(`[${scope}] failure ${reference}`, cause);
+  console.error(`[${scope}] failure ${reference} · ${describeUnexpectedFailure(cause, reference)}`);
   return reference;
 }
 
@@ -47,17 +56,21 @@ export function reportFailure(scope: string, cause: unknown): string {
  * The sentence to send for a failure: the app's own message where it wrote
  * one, otherwise `sentence` with the reference the log holds the cause under.
  * `ownMessages: false` where every cause is somebody else's (a database call),
- * so even a plain `Error` is not passed through.
+ * so even a plain `Error` is not passed through. `stored: true` where the
+ * sentence is written to a row rather than answered.
  */
 export function explainFailure(
   sentence: string,
   cause: unknown,
   scope: string,
-  options: { ownMessages?: boolean } = {},
+  options: { ownMessages?: boolean; stored?: boolean } = {},
 ): string {
   const own = options.ownMessages === false ? null : peopleMessage(cause);
   if (own) return own;
   const reference = reportFailure(scope, cause);
-  const detail = showsErrorDetail() ? ` (${cause instanceof Error ? cause.message : String(cause)})` : "";
+  // A sentence STORED on a row outlives the request and says the same on
+  // every deployment; the log line carries the cause, even on a developer's.
+  const detail =
+    !options.stored && showsErrorDetail() ? ` (${cause instanceof Error ? cause.message : String(cause)})` : "";
   return `${sentence} Reference ${reference}.${detail}`;
 }

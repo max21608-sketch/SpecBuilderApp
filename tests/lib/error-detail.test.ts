@@ -45,12 +45,19 @@ describe("explainFailure", () => {
       const said = explainFailure("Signing in could not reach the database.", driverError(), "login");
       expect(said).toMatch(/^Signing in could not reach the database\. Reference [0-9a-f]{8}\.$/);
       expect(said).not.toContain("users_email_key");
-      expect(console.error).toHaveBeenCalledWith(expect.stringMatching(/\[login\] failure [0-9a-f]{8}/), expect.anything());
+      // One string, so a driver error's echoing parts are not serialised whole.
+      expect(console.error).toHaveBeenCalledWith(expect.stringMatching(/\[login\] failure [0-9a-f]{8} .*sqlstate=23505/));
+      expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("secret@example.test");
     },
   );
 
   it("adds the cause's text on a developer's own deployment", () => {
     process.env.APP_ENV = "development";
     expect(explainFailure("It failed.", driverError(), "x")).toContain("users_email_key");
+  });
+
+  it("never adds it to a sentence stored on a row, even on a developer's deployment", () => {
+    process.env.APP_ENV = "development";
+    expect(explainFailure("It failed.", driverError(), "x", { stored: true })).toMatch(/^It failed\. Reference [0-9a-f]{8}\.$/);
   });
 });

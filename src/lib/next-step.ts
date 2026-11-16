@@ -75,6 +75,8 @@ export type NextStepDocument = {
   status: string;
   source_kind: string;
   document_kind: string | null;
+  /** A PDF bill held until its transcription runs. Absent reads as not held. */
+  awaiting_transcription?: boolean | null;
 };
 
 export type NextStepInput = {
@@ -173,7 +175,9 @@ export function nextStep(input: NextStepInput): NextStep | null {
   if (boq) {
     return {
       kind: "review_boq",
-      label: "Review the bill",
+      // A bill held for its transcription has nothing to review yet; opening
+      // it is what starts the transcription.
+      label: boq.awaiting_transcription ? "Transcribe the bill" : "Review the bill",
       href: importHref(boq.id),
       count: null,
       tone: "warn",

@@ -16,7 +16,7 @@
 // documents" a decidable question at registration and at every later read, so a
 // pathname can never send a store credential somewhere this app did not write.
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
-import { json } from "@/lib/db";
+import { json, sql } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { UPLOAD_CONTENT_TYPES } from "@/lib/intake-source-types";
 import { assertProjectScopedPathname, UntrustedBlobError } from "@/lib/blob-source";
@@ -53,6 +53,17 @@ export async function POST(request: Request): Promise<Response> {
         // browser builds it with projectUploadPrefix(); anything else is either
         // a bug or someone reaching for another project's namespace.
         assertProjectScopedPathname(pathname, projectId);
+        // AND THE PROJECT EXISTS (review 2.6). A uuid-shaped id was enough, so
+        // a file could be stored under a project this database has never
+        // held: a blob no registration can ever accept and nothing lists.
+        // Registration asks the same question; this asks it before the bytes
+        // are sent. An archived project is a project, as it is there.
+        const project = await sql`select id from projects where id = ${projectId}`;
+        if (!project[0]) {
+          throw new UntrustedBlobError(
+            "That project is not in this app any more, so nothing can be uploaded to it. Open the project again from the projects list.",
+          );
+        }
 
         return {
           // Private, always: the store holds NDA-covered client documents and a

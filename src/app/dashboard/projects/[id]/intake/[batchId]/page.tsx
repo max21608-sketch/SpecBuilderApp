@@ -25,7 +25,14 @@ import PageHeader from "@/components/ui/PageHeader";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import Button, { buttonClass } from "@/components/ui/Button";
 import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
-import { hasPendingReview, isIntakeRunInFlight, isIntakeRunWorking, isReviewComplete, packTally } from "@/lib/intake-status";
+import {
+  hasPendingReview,
+  isHeldForTranscription,
+  isIntakeRunInFlight,
+  isIntakeRunWorking,
+  isReviewComplete,
+  packTally,
+} from "@/lib/intake-status";
 import PackSummary from "@/components/imports/PackSummary";
 import DocumentState from "@/components/imports/DocumentState";
 import { formatDay } from "@/lib/format-day";
@@ -51,6 +58,8 @@ type Run = {
   waitingForSlot?: boolean | null;
   /** A bill waiting for somebody to say which column is which. */
   needsColumns?: boolean | null;
+  /** A PDF bill held until its transcription runs: nothing on it to review yet. */
+  awaitingTranscription?: boolean | null;
   /** False where the original was not kept. */
   sourcePreserved?: boolean | null;
   /** A model has already read this bill's columns (any-bill Step 2). */
@@ -145,6 +154,7 @@ function produced(run: Run): string {
   if (isStuckBill(run)) return run.status === "failed" ? "set its columns" : "waiting for its columns";
   if (run.status === "failed") return "a retry charges again";
   if (hasPendingReview(run)) return "waiting for you";
+  if (isHeldForTranscription(run)) return "open it to transcribe";
   if (run.status === "confirmed") return "review complete";
   if (run.status === "parsed") return "waiting for you";
   return "—";

@@ -17,7 +17,8 @@
 //
 // NOTHING HERE CHANGES WHAT A WRONG PASSWORD ANSWERS. A 401 with "incorrect
 // email or password" is still the only thing a failed sign-in says, and the
-// 503s below are reachable only when the deployment itself cannot serve.
+// 503 and the 500 below are reachable only when the deployment itself cannot
+// serve.
 //
 // TEN WRONG PASSWORDS LOCK THE EMAIL, OR THE ADDRESS, FOR A MINUTE (audit
 // A11): a 429 with the wait in words and in Retry-After, checked BEFORE the
@@ -32,6 +33,7 @@ import { verifyCredentials } from "@/lib/auth-node";
 import { setSessionCookie } from "@/lib/session";
 import { environmentProblemMessage } from "@/lib/env";
 import { explainFailure } from "@/lib/error-detail";
+import { isDatabaseConnectionFailure } from "@/lib/db-transaction";
 import { clientAddress, loginThrottle } from "@/lib/login-throttle";
 
 const Body = z.object({
@@ -39,19 +41,38 @@ const Body = z.object({
   password: z.string().min(1),
 });
 
-/** A failure reaching the database, in words, without pretending to know which. */
-function unreachable(cause: unknown): Response {
+/**
+ * A failure reaching the database, or inside it, in words. The two are told
+ * apart (review 2.3): before the migrations run, a missing column used to read
+ * "could not reach the database", and somebody went to check the network. The
+ * second sentence names no table, column or SQLSTATE — the caller is not
+ * signed in — and both carry the reference the log holds the cause under.
+ */
+function serverFailure(cause: unknown): Response {
+  if (isDatabaseConnectionFailure(cause)) {
+    const sentence =
+      "Signing in could not reach the database. This is the deployment, not your password — " +
+      "check DATABASE_URL and DATABASE_ENVIRONMENT on this project.";
+    // Every cause here is the database's, never a sentence this app wrote.
+    return json(
+      {
+        ok: false,
+        code: "database_unreachable",
+        error: explainFailure(sentence, cause, "login", { ownMessages: false }),
+      },
+      503,
+    );
+  }
   const sentence =
-    "Signing in could not reach the database. This is the deployment, not your password — " +
-    "check DATABASE_URL and DATABASE_ENVIRONMENT on this project.";
-  // Every cause here is the database's, never a sentence this app wrote.
+    "Signing in failed on the server's side — this is not your password. " +
+    "Try again in a minute, and quote the reference if it keeps failing.";
   return json(
     {
       ok: false,
-      code: "database_unreachable",
+      code: "sign_in_failed",
       error: explainFailure(sentence, cause, "login", { ownMessages: false }),
     },
-    503,
+    500,
   );
 }
 
@@ -87,7 +108,7 @@ export async function POST(req: Request): Promise<Response> {
   try {
     user = await verifyCredentials(parsed.data.email, parsed.data.password);
   } catch (cause) {
-    return unreachable(cause);
+    return serverFailure(cause);
   }
   if (!user) {
     loginThrottle.fail(keys);

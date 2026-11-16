@@ -14,7 +14,7 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import IntakeBatchUpload from "@/components/projects/IntakeBatchUpload";
-import { intakeStatusLabel, intakeStatusTone, isIntakeRunInFlight, isIntakeRunWorking } from "@/lib/intake-status";
+import { documentReviewLabel, documentReviewTone, isIntakeRunInFlight, isIntakeRunWorking } from "@/lib/intake-status";
 import { usePoll } from "@/lib/use-poll";
 import Button, { buttonClass } from "@/components/ui/Button";
 import Tip from "@/components/ui/Tip";
@@ -37,6 +37,8 @@ export type DocumentRun = {
   source_preserved: boolean;
   /** A bill waiting for somebody to say which column is which. */
   needs_columns?: boolean | null;
+  /** A PDF bill held until its transcription runs: nothing on it to review yet. */
+  awaiting_transcription?: boolean | null;
   structure_read?: boolean | null;
   // Null on anything uploaded before 0007, which is why the grouping below
   // keeps a home for runs that belong to no pack.
@@ -363,8 +365,11 @@ export default function DocumentsTab({
                           </p>
                         </Td>
                         <Td className="w-[16%]">
-                          <Chip tone={intakeStatusTone(run.status)} dot={isIntakeRunWorking(run.status)}>
-                            {intakeStatusLabel(run.status)}
+                          <Chip
+                            tone={documentReviewTone({ status: run.status, awaitingTranscription: run.awaiting_transcription })}
+                            dot={isIntakeRunWorking(run.status)}
+                          >
+                            {documentReviewLabel({ status: run.status, awaitingTranscription: run.awaiting_transcription })}
                           </Chip>
                         </Td>
                         <Td muted className="w-[22%]">

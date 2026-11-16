@@ -174,14 +174,24 @@ export async function GET(request: Request): Promise<Response> {
       -- 0060: the lines this one is a TWIN of (one item on several lines),
       -- each by its first client ref. A chip on the row, its codes on hover;
       -- nothing here counts or exports by it.
-      (select coalesce(array_agg(coalesce(
-                (select x.ref_value from spec_record_refs x
-                  where x.record_id = o.id and x.ref_system = 'boq_code' order by x.ref_value limit 1),
-                o.record_no::text) order by o.record_no), '{}')
-         from spec_record_twins t
-         join spec_records o on o.id = case when t.record_a = r.id then t.record_b else t.record_a end
-        where t.status = 'active' and o.status = 'active'
-          and (t.record_a = r.id or t.record_b = r.id)) as twin_codes,
+      --
+      -- EACH CODE ONCE (review 2.4): two twin lines can carry one code (the
+      -- same line on the main and the mock-up phase), and the hover printed
+      -- it once per line. Grouped by code and ordered by the first line that
+      -- carries it, because a DISTINCT inside array_agg cannot order by
+      -- a different expression.
+      (select coalesce(array_agg(twin.code order by twin.first_no, twin.code), '{}')
+         from (select tc.code, min(tc.record_no) as first_no
+                 from (select coalesce(
+                                (select x.ref_value from spec_record_refs x
+                                  where x.record_id = o.id and x.ref_system = 'boq_code' order by x.ref_value limit 1),
+                                o.record_no::text) as code,
+                              o.record_no
+                         from spec_record_twins t
+                         join spec_records o on o.id = case when t.record_a = r.id then t.record_b else t.record_a end
+                        where t.status = 'active' and o.status = 'active'
+                          and (t.record_a = r.id or t.record_b = r.id)) tc
+                group by tc.code) twin) as twin_codes,
       -- How much a document has actually said about this item. The intake
       -- stage's own progress measure: the cheat-sheet counts beside it measure
       -- a checklist that may not have been assigned yet.

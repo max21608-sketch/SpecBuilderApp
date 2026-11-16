@@ -48,6 +48,7 @@ import {
   type ExtractionRunOutcome,
 } from "@/lib/extraction-claim";
 import { handOffReadSlot } from "@/lib/extraction-slots";
+import { explainFailure } from "@/lib/error-detail";
 import { isRegisterFreeKind, normaliseUnit, type AttributeUnit, type DocumentKind } from "@/lib/spec-vocab";
 import { type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
 import { stageDrawings } from "@/lib/drawing-legacy";
@@ -127,7 +128,7 @@ export async function runDocumentExtraction({
     `;
     attachment = rows[0];
   } catch (cause) {
-    return await releaseAndThrow(claim, actor, message(cause));
+    return await releaseAndThrow(claim, actor, unrecognised(cause));
   }
   if (!attachment) return await fail(claim, actor, "The uploaded document could not be found.");
 
@@ -142,7 +143,7 @@ export async function runDocumentExtraction({
     // A refusal by the trust boundary is about THIS file and will say the same
     // thing every time. A transport fault will not.
     if (cause instanceof UntrustedBlobError) return await fail(claim, actor, cause.message);
-    return await releaseAndThrow(claim, actor, message(cause));
+    return await releaseAndThrow(claim, actor, unrecognised(cause));
   }
 
   // Parsing is deterministic: a file that will not parse parses no better on
@@ -151,7 +152,13 @@ export async function runDocumentExtraction({
   try {
     source = await prepareDocumentSource(blob.bytes, String(attachment.filename), String(attachment.content_type ?? ""));
   } catch (cause) {
-    return await fail(claim, actor, message(cause));
+    // The reader's own refusals are sentences ("This PDF has 140 pages…") and
+    // pass through; a parser library's text gets a reference instead.
+    return await fail(
+      claim,
+      actor,
+      explainFailure("This document could not be opened for reading.", cause, "extraction", { stored: true }),
+    );
   }
 
   // ---- the registers, loaded BEFORE the model call ------------------------
@@ -191,7 +198,7 @@ export async function runDocumentExtraction({
       registers = await loadExtractionRegisters(claim.projectId, { intakeRunId: claim.runId });
     }
   } catch (cause) {
-    return await releaseAndThrow(claim, actor, message(cause));
+    return await releaseAndThrow(claim, actor, unrecognised(cause));
   }
 
   // ---- the model ----------------------------------------------------------
@@ -255,7 +262,12 @@ export async function runDocumentExtraction({
     return await fail(
       claim,
       actor,
-      `The document was read, but what came back could not be staged: ${message(cause)}. Nothing was staged; the model's answer is kept with this document.`,
+      explainFailure(
+        "The document was read, but what came back could not be staged. Nothing was staged; the model's answer is kept with this document.",
+        cause,
+        "extraction",
+        { ownMessages: false, stored: true },
+      ),
       result,
     );
   }
@@ -298,7 +310,7 @@ export async function runDocumentExtraction({
     // The model run is already paid for, so releasing re-runs it. That is still
     // the right trade against leaving a stuck row: this is a DB fault, which
     // means nothing was staged either.
-    return await releaseAndThrow(claim, actor, message(cause));
+    return await releaseAndThrow(claim, actor, unrecognised(cause));
   }
 }
 
@@ -364,8 +376,35 @@ function stageOutput(
   return { staged: document, stagedCount: document.lines.length };
 }
 
-function message(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
+/**
+ * `intake_runs.error` is printed on the document's row, so it is a sentence
+ * for a person and never a driver's or a library's own text (review 2.1): a
+ * database error names tables and columns and can echo a stored value. The
+ * cause goes to the log under the reference the sentence carries, so a
+ * person reading it out is enough to find the line. A failure this file DOES
+ * classify (a model refusal, a timeout, an untrusted file) keeps its own
+ * sentence and never comes through here.
+ */
+function unrecognised(cause: unknown): string {
+  return explainFailure(UNRECOGNISED_FAILURE, cause, "extraction", { ownMessages: false, stored: true });
+}
+
+export const UNRECOGNISED_FAILURE =
+  "The read failed for a reason this app does not recognise — try it again, and quote the reference if it fails twice.";
+
+/**
+ * What the row says once the queue has given up on a message. A sentence this
+ * app wrote (every `releaseAndThrow` throws one, and so does a retryable model
+ * failure) passes through; anything else (the claim statement's own driver
+ * error, a busy claim that never cleared) is the unrecognised sentence and a
+ * reference. A Graph failure is the mail path's, and its messages are ours.
+ */
+export function terminalFailureText(cause: unknown, deliveryCount: number): string {
+  const own =
+    cause instanceof Error && (cause.name === "GraphError" || cause.name === "GraphNotConfiguredError")
+      ? cause.message
+      : explainFailure(UNRECOGNISED_FAILURE, cause, "queue", { stored: true });
+  return `${own} (gave up after ${deliveryCount} attempts)`;
 }
 
 /** Why a claim did not land. Never guesses — reads the row and says. */

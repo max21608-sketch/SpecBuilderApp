@@ -24,8 +24,10 @@
 // subscription that answers slowly. So this enqueues and returns 202; nothing
 // is fetched, parsed or read inside the request.
 // ============================================================================
+import { after } from "next/server";
 import { z } from "zod";
 import { sql } from "@/lib/db";
+import { reportFailure } from "@/lib/error-detail";
 import { assertGraphId, mailIngestionEnabled } from "@/lib/graph-client";
 import {
   clientStateMatches,
@@ -140,11 +142,21 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // Not awaited before responding: Graph's clock is the constraint, and a
-  // missed timestamp is cosmetic.
-  void sql`
-    update graph_subscriptions set last_notification_at = now()
-    where subscription_id = any(${[...subscriptions.keys()]}::text[])
-  `.catch(() => {});
+  // missed timestamp is cosmetic. But REGISTERED with the runtime through
+  // `after` (review 2.2): a bare promise left behind a returned Response may
+  // be frozen with the function before it lands, and its empty catch meant a
+  // failure left no trace either.
+  const subscriptionIds = [...subscriptions.keys()];
+  after(async () => {
+    try {
+      await sql`
+        update graph_subscriptions set last_notification_at = now()
+        where subscription_id = any(${subscriptionIds}::text[])
+      `;
+    } catch (cause) {
+      reportFailure("recording when Graph last notified", cause);
+    }
+  });
 
   return new Response(null, { status: 202 });
 }

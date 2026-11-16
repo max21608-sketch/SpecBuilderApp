@@ -94,6 +94,7 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "@/lib/db";
 import { withTransaction, type TxnSql } from "@/lib/db-transaction";
+import { reportFailure } from "@/lib/error-detail";
 import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
 import { ATTEMPT_DEADLINE_HOURS, MAX_IN_FLIGHT_READS_PER_PACK } from "@/lib/extraction-claim";
 
@@ -267,7 +268,11 @@ export async function dispatchNextWaiting(scope: ReadScope, actor: string): Prom
     // Committed. The publish is outside it, for the reason it always is.
     await publishAttempt(opened.runId, opened.attemptId, actor);
     return opened.runId;
-  } catch {
+  } catch (cause) {
+    // Swallowed for the caller, never for the log (review 2.2): without this
+    // line a pack's next document waited for the hourly sweep with no trace
+    // of why it had not started.
+    reportFailure(`starting the next deferred read of project ${scope.projectId}, batch ${scope.batchId ?? "none"}`, cause);
     return null;
   }
 }
@@ -289,8 +294,9 @@ export async function handOffReadSlot(runId: string, actor: string): Promise<voi
       { projectId: String(row.project_id), batchId: row.batch_id ? String(row.batch_id) : null },
       actor,
     );
-  } catch {
+  } catch (cause) {
     // A read that landed must not be reported as failed because the pack's
-    // next document could not be started.
+    // next document could not be started. But it is logged, naming the read.
+    reportFailure(`handing on the read slot of document ${runId}`, cause);
   }
 }

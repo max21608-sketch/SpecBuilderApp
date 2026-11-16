@@ -156,6 +156,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
               ) as s
               where s->>'needsColumns' = 'true' and coalesce(s->>'ignored', 'false') <> 'true'
            )) as needs_columns,
+           -- A PDF bill HELD until its transcription runs: nothing on it to
+           -- review yet. THE SAME EXPRESSION as /api/projects/[id]/batches,
+           -- and isAwaitingTranscription in src/lib/pdf-bill-checks.ts.
+           (r.source_kind = 'boq_xlsx' and r.status = 'parsed'
+              and r.parsed->'pdfTranscription'->>'state' = 'waiting') as awaiting_transcription,
            -- A CONFIRMED BILL's specification read, where one was asked for:
            -- registered from the bill's own file under a request id derived
            -- from the bill's run (src/lib/bill-specifications.ts).

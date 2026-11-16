@@ -26,17 +26,22 @@ vi.mock("@/lib/session", () => ({
   }),
 }));
 
-// The document never leaves this file.
+// The document never leaves this file. `blobFault` makes the read fail the
+// way a store or driver fault does: with text that is not for a person.
+const blobFault = { error: null as Error | null };
 vi.mock("@/lib/blob-source", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/blob-source")>();
   return {
     ...actual,
-    readTrustedBlob: async () => ({
-      bytes: Buffer.from("__QA"),
-      contentType: "application/pdf",
-      size: 4,
-      pathname: "projects/qa/doc.pdf",
-    }),
+    readTrustedBlob: async () => {
+      if (blobFault.error) throw blobFault.error;
+      return {
+        bytes: Buffer.from("__QA"),
+        contentType: "application/pdf",
+        size: 4,
+        pathname: "projects/qa/doc.pdf",
+      };
+    },
     // Registration asks the store what it actually holds, rather than
     // believing the client's claim about it.
     headTrustedBlob: async (pathname: string) => ({
@@ -202,6 +207,7 @@ describeIfDb("extraction attempts", () => {
   beforeEach(() => {
     model.mode = "ok";
     staging.throws = false;
+    blobFault.error = null;
     queueMode.mode = "ok";
     published.length = 0;
   });
@@ -514,6 +520,21 @@ describeIfDb("extraction attempts", () => {
     expect(after.error).toMatch(/__QA 503/);
   });
 
+  // Review 2.1: the driver's text reached the document's row, which the
+  // screen prints. A classified failure (the transient one above) keeps its
+  // own sentence; an unclassified one is a sentence and a reference.
+  it("records an unrecognised fault as a sentence and a reference, never the driver's text", async () => {
+    blobFault.error = Object.assign(new Error('__QA relation "attachments_secret" does not exist'), { code: "42P01" });
+    const attemptId = await queueAttempt();
+    await expect(run(attemptId)).rejects.toThrow(/does not recognise/);
+
+    const after = await row();
+    expect(after.status).toBe("queued");
+    expect(after.error).toMatch(/does not recognise/);
+    expect(after.error).toMatch(/Reference [0-9a-f]{8}\./);
+    expect(after.error).not.toMatch(/attachments_secret/);
+  });
+
   it("records a refusal terminally, WITHOUT throwing", async () => {
     // Throwing would buy the same refusal three more times at full price.
     model.mode = "refusal";
@@ -540,7 +561,9 @@ describeIfDb("extraction attempts", () => {
     expect(after.status).toBe("failed");
     expect(after.claim_token).toBeNull();
     expect(after.error).toMatch(/could not be staged/);
-    expect(after.error).toMatch(/__QA cannot read properties/);
+    // The row is printed: a sentence and a reference, not the TypeError (review 2.1).
+    expect(after.error).not.toMatch(/__QA cannot read properties/);
+    expect(after.error).toMatch(/Reference [0-9a-f]{8}\./);
     // Paid for, so kept.
     expect(after.raw_response).toEqual({ __qa: true });
     expect(after.model_metadata.requestId).toBe("req___qa");

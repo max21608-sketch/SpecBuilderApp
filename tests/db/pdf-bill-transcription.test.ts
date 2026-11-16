@@ -36,8 +36,11 @@ vi.mock("@/lib/session", () => ({
 }));
 
 const files = new Map<string, { bytes: Buffer; contentType: string }>();
+/** When set, storing the transcribed workbook fails with this — a fault whose text is not for a person. */
+const workbookFault = vi.hoisted(() => ({ error: null as Error | null }));
 vi.mock("@vercel/blob", () => ({
   put: async (pathname: string, body: Buffer, options: { contentType?: string }) => {
+    if (workbookFault.error && pathname.endsWith(".xlsx")) throw workbookFault.error;
     files.set(pathname, { bytes: Buffer.from(body), contentType: options?.contentType ?? "application/octet-stream" });
     return { pathname, url: `https://blob.test/${pathname}` };
   },
@@ -129,6 +132,7 @@ describeIfDb("a PDF bill the model transcribes", () => {
       await client.query(`delete from spec_records where project_id = $1`, [projectId]);
       await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
       await client.query(`delete from intake_runs where project_id = $1`, [projectId]);
+      await client.query(`delete from intake_batches where project_id = $1`, [projectId]);
       await client.query(`delete from attachments where entity_type = 'project' and entity_id = $1`, [projectId]);
       await client.query(`delete from projects where id = $1`, [projectId]);
     }
@@ -161,6 +165,57 @@ describeIfDb("a PDF bill the model transcribes", () => {
     expect(parsed.sheets).toEqual([]);
     expect(parsed.pdfTranscription).toMatchObject({ state: "waiting", pageCount: 2 });
     expect(modelCalls.count).toBe(0);
+
+    // The lists say it waits for its transcription, not "Ready to review"
+    // (review 2.5): the Documents tab's row and the pack's.
+    const { GET: project } = await import("@/app/api/projects/[id]/route");
+    const overview = (await (await project(new Request("http://localhost/test?only=documents"), params(projectId))).json()) as {
+      documents: { id: string; awaiting_transcription?: boolean }[];
+    };
+    expect(overview.documents.find((doc) => doc.id === runId)?.awaiting_transcription).toBe(true);
+    // Registered with no pack here; the pack screen lists a run by its batch.
+    const batchId = (
+      await client.query(
+        `insert into intake_batches (project_id, label, created_by, updated_by) values ($1, '__QA pack', 'qa', 'qa') returning id`,
+        [projectId],
+      )
+    ).rows[0].id;
+    await client.query(`update intake_runs set batch_id = $2 where id = $1`, [runId, batchId]);
+    const { GET: batches } = await import("@/app/api/projects/[id]/batches/route");
+    const packs = (await (await batches(new Request("http://localhost/test"), params(projectId))).json()) as {
+      batches: { runs: { id: string; awaitingTranscription?: boolean }[] }[];
+    };
+    expect(packs.batches.flatMap((batch) => batch.runs).find((run) => run.id === runId)?.awaitingTranscription).toBe(true);
+  });
+
+  // Review 2.1: the outcome is printed on the bill's review, and it held the
+  // cause's own text. Now it is the response's sentence, with the reference
+  // the log line carries.
+  it("records a failure it does not recognise as a sentence and a reference, never the cause's text", { timeout: 60_000 }, async () => {
+    const { POST } = await import("@/app/api/imports/[id]/transcribe/route");
+    const before = await staged();
+    workbookFault.error = Object.assign(new Error('__QA relation "blob_secret_table" does not exist'), { code: "42P01" });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await POST(
+        jsonRequest("POST", { version: before.version, requestId: "6f1d3a42-1111-4c2a-9a1e-0000000000c1" }),
+        params(runId),
+      );
+      const body = (await response.json()) as { ok: boolean; error?: string; reference?: string };
+      expect(response.status).toBe(500);
+      expect(body.reference).toMatch(/^[0-9a-f]{8}$/);
+      const outcome = ((await staged()).model_metadata?.transcription as { outcome?: { ok: boolean; text: string } }).outcome;
+      expect(outcome?.ok).toBe(false);
+      expect(outcome?.text).toBe(body.error);
+      expect(outcome?.text).toContain(body.reference!);
+      expect(outcome?.text).not.toContain("blob_secret_table");
+    } finally {
+      workbookFault.error = null;
+      errors.mockRestore();
+      // The next test counts the model calls of a clean transcription.
+      modelCalls.count = 0;
+      modelCalls.pageCounts.length = 0;
+    }
   });
 
   it("stores the transcription as the workbook beside the PDF, and stages it, every line marked with its page", { timeout: 60_000 }, async () => {

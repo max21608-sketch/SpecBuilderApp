@@ -41,7 +41,7 @@ function transcribeNote(code: TranscribableReason, pages: number | null): { line
 }
 import { loadBoqReadingRegisters } from "@/lib/boq-stage";
 import { requireWriter } from "@/lib/route-guards";
-import { explainFailure } from "@/lib/error-detail";
+import { explainFailure, reportFailure } from "@/lib/error-detail";
 
 // 300, not 60: a PDF over the fast model's page ceiling is identified by the
 // READING model (`classifyModelFor`), which has to take in up to 600 pages
@@ -49,6 +49,16 @@ import { explainFailure } from "@/lib/error-detail";
 // the route answers a slow look in words rather than Vercel answering it with
 // an HTML 504 the screen can only call "took too long".
 export const maxDuration = 300;
+
+/**
+ * The bill reader works without the saved headings, so a failure to load them
+ * degrades the look rather than failing it — and is logged, because a bill
+ * whose columns went unread for that reason is otherwise a mystery.
+ */
+function registersUnread(cause: unknown): null {
+  reportFailure("loading the bill-reading registers for a look", cause);
+  return null;
+}
 
 /**
  * The HTTP status a failed look answers with. The body is what the screen
@@ -279,7 +289,7 @@ export async function POST(request: Request): Promise<Response> {
 
   let pdfBill: { lines: number; pages: number; transcribe?: true; reason?: string } | null = null;
   if (result.decision?.importType === "boq" && source.type === "pdf") {
-    const registers = await loadBoqReadingRegisters(sql).catch(() => null);
+    const registers = await loadBoqReadingRegisters(sql).catch(registersUnread);
     const read = await readPdfBill(blob.bytes, registers ? { aliases: registers.aliases } : {});
     // CODE COULD NOT PUT ITS TEXT BACK INTO A TABLE: the model transcribes it
     // (C2), every line marked. Filed as a bill; the row says so and that the
@@ -323,7 +333,7 @@ export async function POST(request: Request): Promise<Response> {
     // wrong question. So it is HELD with one sentence naming the next step,
     // the model's reading beside it, and nothing is registered or charged.
     // ==========================================================================
-    const registers = await loadBoqReadingRegisters(sql).catch(() => null);
+    const registers = await loadBoqReadingRegisters(sql).catch(registersUnread);
     const read = await readPdfBill(blob.bytes, registers ? { aliases: registers.aliases } : {});
     if (read.ok) {
       return json(

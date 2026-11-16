@@ -28,7 +28,7 @@
 // Node runtime, so no `export const runtime` is needed, but do not import this
 // from middleware.
 // ============================================================================
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import pg from "pg";
 import { getEnvironment } from "@/lib/env";
 import { json, type Row } from "@/lib/db";
@@ -201,6 +201,44 @@ export async function withTransaction<T>(fn: (sql: TxnSql) => Promise<T>): Promi
 // Postgres error codes worth distinguishing at a route boundary. A deadlock or
 // a lock timeout is retryable by a human pressing the button again; a unique or
 // FK violation is not.
+/** Node's own socket and resolver failures: the connection never formed. */
+const CONNECTION_ERRNOS = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EPIPE",
+]);
+
+/**
+ * Did this fail REACHING the database, rather than inside it?
+ *
+ * The two need different sentences (review 2.3): a missing column before the
+ * migrations have run is the server's fault, and calling it "could not reach
+ * the database" sends a person to check the network. Connection-level means:
+ * SQLSTATE class 08 (connection exception), 28 (the database refused the
+ * credentials), 3D000 (no such database), 57P01–03 and 53300 (shut down, not
+ * accepting, too many connections); a Node socket or resolver errno; a
+ * driver error that carries no SQLSTATE at all (Neon's HTTP driver wraps a
+ * failed fetch that way, with `sourceError`); a failed `fetch`; and
+ * `db.ts`'s own "DATABASE_URL is not set". Any other SQLSTATE was answered by
+ * a database that was reached.
+ */
+export function isDatabaseConnectionFailure(cause: unknown): boolean {
+  if (!(cause instanceof Error)) return false;
+  const code = (cause as { code?: unknown }).code;
+  if (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)) {
+    return code.startsWith("08") || code.startsWith("28") || ["3D000", "57P01", "57P02", "57P03", "53300"].includes(code);
+  }
+  if (typeof code === "string" && CONNECTION_ERRNOS.has(code)) return true;
+  if (cause.name === "NeonDbError") return true;
+  if (cause.name === "TypeError" && /fetch failed/i.test(cause.message)) return true;
+  return /^DATABASE_URL is not set/.test(cause.message);
+}
+
 const RETRYABLE_PG_CODES = new Set([
   "40001", // serialization_failure
   "40P01", // deadlock_detected
@@ -262,37 +300,53 @@ export function describeTransactionFailure(cause: unknown): string {
  * cannot tell a conflict from an outage.
  */
 export function transactionErrorResponse(cause: unknown): Response {
+  const failure = transactionFailure(cause);
+  return json(failure.body, failure.status);
+}
+
+export type TransactionFailure = {
+  status: number;
+  body: { ok: false; error: string; code?: string; conflict?: boolean; diff?: unknown; reference?: string };
+};
+
+/**
+ * What `transactionErrorResponse` answers, before it is a Response: for a
+ * route that also RECORDS the sentence (the transcription's outcome), so the
+ * row and the response say the same thing under the same reference. Logs
+ * exactly as the response would.
+ */
+export function transactionFailure(cause: unknown): TransactionFailure {
   if (cause instanceof DomainConflictError) {
-    return json(
-      {
+    return {
+      status: cause.status,
+      body: {
         ok: false,
         conflict: cause.status === 409,
         code: cause.code,
         error: cause.message,
         ...(cause.diff ? { diff: cause.diff } : {}),
       },
-      cause.status,
-    );
+    };
   }
 
   if (cause instanceof UncertainCommitError) {
     // The one case where "nothing was written" would be a lie.
     console.error(`guarded transaction commit uncertain: ${describeTransactionFailure(cause.cause)}`);
-    return json({ ok: false, code: "uncertain_commit", error: cause.message }, 503);
+    return { status: 503, body: { ok: false, code: "uncertain_commit", error: cause.message } };
   }
 
   if (isRetryablePostgresError(cause)) {
     // Logged, not returned: the reviewer gets a sentence they can act on and
     // the log gets the SQLSTATE somebody can diagnose from.
     console.error(`guarded transaction contended: ${describeTransactionFailure(cause)}`);
-    return json(
-      {
+    return {
+      status: 503,
+      body: {
         ok: false,
         code: "contended",
         error: "Something else was changing this at the same moment. Nothing was written — try again.",
       },
-      503,
-    );
+    };
   }
 
   // Never return a raw driver message: it carries table and column names, and
@@ -303,12 +357,21 @@ export function transactionErrorResponse(cause: unknown): Response {
   // "Key (code_norm)=(<the client's code>) already exists", "Failing row
   // contains (<every column>)" -- so client material reached the hosting
   // logs on every unexpected failure. `describeUnexpectedFailure` keeps what
-  // diagnoses it and drops what echoes a value. The reference ties the line to
-  // one failure among many; handing it back in the response is the routes'
-  // decision (audit 4.1), not this line's.
-  const reference = randomUUID();
+  // diagnoses it and drops what echoes a value.
+  //
+  // THE REFERENCE GOES BACK TO THE PERSON (review 2.1). It was generated and
+  // logged and never returned, so "it failed" could not be matched to its log
+  // line among a day's. Short, because somebody reads it out.
+  const reference = randomBytes(4).toString("hex");
   console.error(`guarded transaction failed: ${describeUnexpectedFailure(cause, reference)}`);
-  return json({ ok: false, error: "Nothing was written. The operation failed; check the logs." }, 500);
+  return {
+    status: 500,
+    body: {
+      ok: false,
+      reference,
+      error: `Nothing was written: this failed on the server's side for a reason the app does not recognise. Try it again, and quote reference ${reference} if it fails twice.`,
+    },
+  };
 }
 
 /**

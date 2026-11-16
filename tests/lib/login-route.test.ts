@@ -81,3 +81,48 @@ describe("POST /api/auth/login when the database cannot be reached", () => {
     }
   });
 });
+
+// Review 2.3: any database error used to read "could not reach the database",
+// so a missing column before the migrations ran sent somebody to check the
+// network. A database that WAS reached and failed says so, names no schema to
+// a caller who is not signed in, and is still not the password.
+describe("POST /api/auth/login when the database was reached and failed", () => {
+  it("says the sign-in failed on the server's side, with a reference, and names no column", async () => {
+    const saved = process.env.APP_ENV;
+    process.env.APP_ENV = "pilot";
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    state.throws = Object.assign(new Error('column "token_version" does not exist'), {
+      name: "NeonDbError",
+      code: "42703",
+    });
+    try {
+      const response = await signIn(`schema${address}@example.test`, `192.0.2.${address + 100}`);
+      expect(response.status).toBe(500);
+      const body = (await response.json()) as { code: string; error: string };
+      expect(body.code).toBe("sign_in_failed");
+      expect(body.error).toMatch(/failed on the server's side.*not your password.*Reference [0-9a-f]{8}/);
+      expect(body.error).not.toMatch(/reach the database/);
+      expect(body.error).not.toContain("token_version");
+    } finally {
+      spy.mockRestore();
+      if (saved === undefined) delete process.env.APP_ENV;
+      else process.env.APP_ENV = saved;
+    }
+  });
+});
+
+describe("isDatabaseConnectionFailure", () => {
+  it("tells a connection failure from a failure inside a database that answered", async () => {
+    const { isDatabaseConnectionFailure } = await import("@/lib/db-transaction");
+    const err = (message: string, extra: Record<string, unknown> = {}) => Object.assign(new Error(message), extra);
+    expect(isDatabaseConnectionFailure(err("x", { code: "ECONNREFUSED" }))).toBe(true);
+    expect(isDatabaseConnectionFailure(err("x", { code: "08006" }))).toBe(true);
+    expect(isDatabaseConnectionFailure(err("x", { code: "28P01" }))).toBe(true);
+    expect(isDatabaseConnectionFailure(err("Error connecting to database: fetch failed", { name: "NeonDbError" }))).toBe(true);
+    expect(isDatabaseConnectionFailure(new TypeError("fetch failed"))).toBe(true);
+    expect(isDatabaseConnectionFailure(err("DATABASE_URL is not set"))).toBe(true);
+    expect(isDatabaseConnectionFailure(err("x", { name: "NeonDbError", code: "42703" }))).toBe(false);
+    expect(isDatabaseConnectionFailure(err("x", { code: "42P01" }))).toBe(false);
+    expect(isDatabaseConnectionFailure(new TypeError("Cannot read properties of undefined"))).toBe(false);
+  });
+});
