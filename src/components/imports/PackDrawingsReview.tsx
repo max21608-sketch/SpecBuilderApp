@@ -491,7 +491,7 @@ export default function PackDrawingsReview({
         // The rows this press reaches on this document, as the screen showed
         // them, each at the ledger's version (`patchBulkUnit`).
         const expected = (run.staged?.items ?? [])
-          .filter((item) => scope === "run" || item.id === itemId)
+          .filter((item) => scope !== "item" || item.id === itemId)
           .flatMap(measuredRows)
           .map((row) => ({ id: row.id, version: versions.row(row.id, row.version) }));
         const res = await apiFetch<{ versions?: WrittenVersions }>(`/api/imports/${run.importId}`, {

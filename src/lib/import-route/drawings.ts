@@ -103,8 +103,8 @@ export async function patchBulkUnit(id: string, raw: unknown, actor: string): Pr
       if (moved > 0) {
         throw new DomainConflictError(
           "bulk_unit_stale",
-          `${moved} figure${moved === 1 ? "" : "s"} changed since your screen loaded, in another tab or by somebody else, ` +
-            "so no unit was set. Check the reloaded document, then set the unit again.",
+          `${moved} figure${moved === 1 ? "" : "s"} changed since this screen loaded, so no unit was set. ` +
+            "Check the reloaded document, then set the unit again.",
         );
       }
 

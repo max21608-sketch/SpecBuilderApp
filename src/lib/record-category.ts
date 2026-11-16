@@ -328,7 +328,7 @@ export async function acceptSuggestedLevels(
   if (expectedCount !== undefined && ids.length !== expectedCount) {
     throw new DomainConflictError(
       "levels_stale",
-      `The suggested levels changed since your screen loaded: it showed ${expectedCount}, there ${
+      `The suggested levels changed since this screen loaded: it showed ${expectedCount}, there ${
         ids.length === 1 ? "is" : "are"
       } now ${ids.length}. Nothing was accepted. Check them, then accept again.`,
     );

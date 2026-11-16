@@ -304,7 +304,7 @@ describeIfDb("BOQ confirm concurrency", () => {
     ]) {
       const refused = await send({ ...body, version: shown });
       expect(refused.status, JSON.stringify(body)).toBe(409);
-      expect(((await refused.json()) as { error: string }).error).toContain("changed since your screen loaded it");
+      expect(((await refused.json()) as { error: string }).error).toContain("changed since this screen loaded");
     }
     // Nothing of ours was written; only theirs.
     expect((await client.query(`select parsed from intake_runs where id = $1`, [runId])).rows[0].parsed).toEqual(moved);

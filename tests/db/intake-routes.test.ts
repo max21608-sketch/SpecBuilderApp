@@ -557,7 +557,7 @@ describeIfDb("intake routes", () => {
     const { PATCH } = await import("@/app/api/imports/[id]/route");
     const res = await PATCH(patch({ bulkUnit: { scope: "run", unit: "mm", expected: shown } }), params(runId));
     expect(res.status).toBe(409);
-    expect((await res.json()).error).toContain("1 figure changed since your screen loaded");
+    expect((await res.json()).error).toContain("1 figure changed since this screen loaded");
     const after = (await client.query(`select parsed, version from intake_runs where id = $1`, [runId])).rows[0];
     expect(after.version).toBe(before.version);
     expect(after.parsed).toEqual(before.parsed);

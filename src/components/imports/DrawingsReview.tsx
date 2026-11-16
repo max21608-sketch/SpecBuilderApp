@@ -444,7 +444,7 @@ export default function DrawingsReview({
       // ledger's version: a figure somebody else changed is refused, not
       // overwritten unseen.
       const expected = (run?.parsed?.items ?? [])
-        .filter((item) => scope === "run" || item.id === itemId)
+        .filter((item) => scope !== "item" || item.id === itemId)
         .flatMap(measuredRows)
         .map((row) => ({ id: row.id, version: versions.row(row.id, row.version) }));
       const res = await apiFetch<{ versions?: WrittenVersions }>(`/api/imports/${importId}`, {

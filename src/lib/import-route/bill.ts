@@ -270,8 +270,7 @@ export async function getBillReview(run: Row): Promise<Response> {
 // ---- the BOQ's positional autosave -----------------------------------------
 const BILL_VERSION_MISSING = "Send the version of this bill you were shown.";
 const BILL_MOVED =
-  "This bill was changed since your screen loaded it, in another tab or by somebody else, so nothing was saved. " +
-  "Check the reloaded bill, then make your change again.";
+  "This bill changed since this screen loaded, so nothing was saved. Check the reloaded bill, then make your change again.";
 
 /** Whether a write that matched no row missed because the bill moved on, rather than because the line went. */
 async function billMoved(id: string, expectedVersion: number): Promise<boolean> {
