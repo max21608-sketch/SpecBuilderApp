@@ -291,7 +291,7 @@ function ProjectOverview() {
     void loadInboxCount();
   }, [projectId, load, loadContacts, loadContactsOutstanding, loadInboxCount]);
 
-  useDocumentsPoll(projectId, docs);
+  useDocumentsPoll(projectId, docs, load);
 
   // THE NUMBERS ONLY, after the Project-wide card writes: the summary and the
   // completion move, and nothing else should. Never through `load()`, which

@@ -766,6 +766,7 @@ function LineRows({
             whether to chase it. */}
         <Td>
           <Link
+            prefetch={false}
             href={`/dashboard/records/${line.lineId}`}
             target="_blank"
             rel="noopener noreferrer"
@@ -814,6 +815,7 @@ function LineRows({
             // A LINK, because it goes somewhere: the record screen is where a
             // level is set. New tab, so a half-made selection survives it.
             <Link
+              prefetch={false}
               href={`/dashboard/records/${line.lineId}`}
               target="_blank"
               rel="noopener noreferrer"
@@ -832,6 +834,7 @@ function LineRows({
         <Td num className={total.later > 0 ? "text-neutral-600" : "text-neutral-400"}>{total.later}</Td>
         <Td className="text-right">
           <Link
+            prefetch={false}
             href={`/dashboard/records/${line.lineId}`}
             target="_blank"
             rel="noopener noreferrer"
@@ -865,6 +868,7 @@ function LineRows({
               <span className="text-neutral-900">{row.label}</span>
               <span className="text-neutral-400"> — not asked, </span>
               <Link
+                prefetch={false}
                 href={`/dashboard/records/${row.recordId}?tab=specs${row.where === "details" ? "#item-details" : ""}`}
                 target="_blank"
                 rel="noopener noreferrer"

@@ -364,6 +364,7 @@ export default function ProjectHistory({
                     <span className="text-xs text-neutral-400">v{record.fromVersion} → v{record.toVersion}</span>
                   )}
                   <Link
+                    prefetch={false}
                     href={`/dashboard/records/${record.recordId}`}
                     className="ml-auto text-xs text-neutral-500 underline hover:text-neutral-900"
                   >
@@ -459,6 +460,7 @@ export default function ProjectHistory({
                   <p className="text-neutral-800">
                     {first ? (
                       <Link
+                        prefetch={false}
                         href={`/dashboard/records/${first.id}`}
                         className="text-blue-700 no-underline hover:underline"
                       >

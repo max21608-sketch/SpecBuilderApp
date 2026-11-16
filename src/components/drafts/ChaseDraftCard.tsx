@@ -355,6 +355,7 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                 <Tr tone={item.staleReasons.length ? "warn" : "plain"}>
                   <Td>
                     <Link
+                      prefetch={false}
                       href={`/dashboard/records/${item.recordId}`}
                       className="font-mono text-blue-700 no-underline hover:underline"
                     >

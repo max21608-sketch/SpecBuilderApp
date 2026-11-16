@@ -282,7 +282,7 @@ export default function InfillRow({
                already does. */
             <span className="text-xs text-amber-800">
               No checklist row for this question yet.{" "}
-              <Link href={`/dashboard/records/${question.recordId}`} className="underline" target="_blank" rel="noopener noreferrer">
+              <Link prefetch={false} href={`/dashboard/records/${question.recordId}`} className="underline" target="_blank" rel="noopener noreferrer">
                 Open the item
               </Link>
             </span>

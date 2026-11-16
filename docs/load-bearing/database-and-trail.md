@@ -73,6 +73,16 @@ Five things here are load-bearing.
   the coverage assertion in `tests/db/change-history.test.ts` is per RECORD —
   every record a change wrote spec content to has a version under that
   change (121 change sets, 1,537 pairs, 0 gaps on the local stack).
+- **Every record's version is ONE insert** (2026-11-16, review 4A). It was a
+  `max(snapshot_no)` and an `insert` per record, 9 + 2N statements, so a
+  300-line bill confirm sent 609 inside its transaction; it is ten whatever N
+  is (`tests/db/snapshot-batch.test.ts`). Each row still takes its OWN
+  record's max + 1, through a lateral subquery over an `unnest` of the composed
+  rows in sorted order. Max + 1 is safe because `snapshotRecords` itself locks
+  every record `for update` before it reads a number — in the function, not in
+  the callers, so no caller can reach the insert without it — and one
+  statement's subquery cannot see its own rows, which never matters because
+  the ids are distinct.
 - **The diff pairs supersessions** (atoms schema 9, audit E6). Since 0033
   nothing is corrected in place, so keying on the row id read every
   correction as removed + added. Each attribute in a version carries

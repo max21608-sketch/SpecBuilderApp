@@ -689,6 +689,7 @@ function DraftsView() {
             <Tr key={row.recordId}>
               <Td>
                 <Link
+                  prefetch={false}
                   href={`/dashboard/records/${row.recordId}`}
                   className="font-mono text-blue-700 no-underline hover:underline"
                 >
@@ -1064,7 +1065,7 @@ function DraftsView() {
             <ul className="mt-1 space-y-0.5">
               {inventory.uncategorised.map((row) => (
                 <li key={row.recordId}>
-                  <Link href={`/dashboard/records/${row.recordId}`} className="underline">
+                  <Link prefetch={false} href={`/dashboard/records/${row.recordId}`} className="underline">
                     {row.recordLabel}
                   </Link>{" "}
                   {row.itemDescription} — no category, so there is no checklist to measure it against
@@ -1072,7 +1073,7 @@ function DraftsView() {
               ))}
               {inventory.unauthored.map((row) => (
                 <li key={String(row.id)}>
-                  <Link href={`/dashboard/records/${String(row.id)}`} className="underline">
+                  <Link prefetch={false} href={`/dashboard/records/${String(row.id)}`} className="underline">
                     {String(row.record_label ?? "")}
                   </Link>{" "}
                   {String(row.item_description)} — {String(row.category_name)} has no requirements authored yet

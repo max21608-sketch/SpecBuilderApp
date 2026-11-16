@@ -666,7 +666,7 @@ export default function FinishesLibrary({
                 <ul className="space-y-0.5">
                   {finish.used_on.map((use) => (
                     <li key={`${use.recordId}:${use.attributeLabel}`} className="text-xs">
-                      <Link href={`/dashboard/records/${use.recordId}`} className="text-neutral-700 underline hover:text-neutral-900">
+                      <Link prefetch={false} href={`/dashboard/records/${use.recordId}`} className="text-neutral-700 underline hover:text-neutral-900">
                         <span className="font-mono">{use.label}</span> {use.itemDescription}
                       </Link>
                       <span className={runFilter && use.runId === runFilter ? "text-neutral-600" : "text-neutral-400"}>

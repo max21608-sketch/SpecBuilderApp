@@ -302,4 +302,39 @@ describe("while a document is being read", () => {
       vi.useRealTimers();
     }
   });
+
+  it("asks for the whole payload ONCE when a tick finds nothing left in flight, and then stops", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      serve();
+      await screen.findByText("First pack");
+      const whole = () => calls.filter((call) => call.method === "GET" && call.url === `/api/projects/${PROJECT}`);
+      const slice = () => calls.filter((call) => call.method === "GET" && call.url === `/api/projects/${PROJECT}?only=documents`);
+      const loadsBefore = whole().length;
+      // Still reading: the tick takes the slice and nothing else.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(slice().length).toBe(1);
+      expect(whole().length).toBe(loadsBefore);
+      // The read finishes: the next tick finds nothing in flight, and THAT is
+      // when the numbers move, so the page loads once.
+      (routes.current[`/api/projects/${PROJECT}`] as { documents: unknown[] }).documents = [
+        doc({ id: "doc-5", filename: "d.pdf", status: "parsed" }),
+      ];
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(slice().length).toBe(2);
+      expect(whole().length).toBe(loadsBefore + 1);
+      // And the poll has stopped.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15000);
+      });
+      expect(slice().length).toBe(2);
+      expect(whole().length).toBe(loadsBefore + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

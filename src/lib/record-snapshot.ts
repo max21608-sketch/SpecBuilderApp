@@ -132,27 +132,39 @@ export async function snapshotRecords(
 
   const atoms = await loadRecordAtoms(txn, pending);
 
-  for (const recordId of pending) {
-    const record = atoms.get(recordId);
-    // A record deleted inside this transaction has no state to record. Nothing
-    // in the app deletes one — retiring is a status — so this is defensive.
-    if (!record) continue;
-
-    const numbers = await txn`
-      select coalesce(max(snapshot_no), 0) as last from record_snapshots where record_id = ${recordId}
-    `;
-    const next = Number(numbers[0]?.last ?? 0) + 1;
-
+  // A record deleted inside this transaction has no state to record. Nothing
+  // in the app deletes one — retiring is a status — so this is defensive.
+  const toWrite = pending.filter((recordId) => atoms.has(recordId));
+  if (toWrite.length > 0) {
+    // ONE STATEMENT FOR EVERY RECORD (2026-11-16, review 4A). This was a
+    // `select max(snapshot_no)` and an `insert` per record — 600 statements
+    // inside a 300-line bill confirm's transaction. Each row's number is still
+    // its own record's max + 1, read by a lateral subquery; what makes that
+    // safe is the `for update` above, which every caller passes through
+    // because it is in THIS function, not in the callers. The subquery sees
+    // the table as it stood before the statement, and the ids are distinct,
+    // so no row in the batch can see another. Rows go in sorted order
+    // (`with ordinality`), as the loop wrote them.
     const inserted = await txn`
       insert into record_snapshots
         (record_id, change_set_id, snapshot_no, schema_version, composer_version, atoms, cells)
-      values
-        (${recordId}, ${changeSetId}, ${next}, ${RECORD_ATOMS_SCHEMA_VERSION}, ${COMPOSER_VERSION},
-         ${JSON.stringify(record)}::jsonb, ${JSON.stringify(composeStoredCells(record))}::jsonb)
-      returning snapshot_no
+      select v.record_id, ${changeSetId}::uuid, coalesce(m.last, 0) + 1,
+             ${RECORD_ATOMS_SCHEMA_VERSION}::integer, ${COMPOSER_VERSION}::integer,
+             v.atoms::jsonb, v.cells::jsonb
+        from unnest(${toWrite}::uuid[], ${toWrite.map((id) => JSON.stringify(atoms.get(id)))}::text[],
+                    ${toWrite.map((id) => JSON.stringify(composeStoredCells(atoms.get(id)!)))}::text[])
+             with ordinality as v(record_id, atoms, cells, ord)
+        left join lateral (
+          select max(s.snapshot_no) as last from record_snapshots s where s.record_id = v.record_id
+        ) m on true
+       order by v.ord
+      returning record_id, snapshot_no
     `;
-    if (inserted[0]) {
-      written.set(recordId, Number(inserted[0].snapshot_no));
+    const numbers = new Map(inserted.map((row) => [String(row.record_id), Number(row.snapshot_no)]));
+    for (const recordId of toWrite) {
+      const no = numbers.get(recordId);
+      if (no === undefined) continue;
+      written.set(recordId, no);
       seen.add(`${changeSetId}:${recordId}`);
     }
   }

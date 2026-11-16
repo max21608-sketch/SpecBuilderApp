@@ -159,7 +159,18 @@ export type ProjectDocuments = ReturnType<typeof useProjectDocuments>;
  * page's own load effect, so the order the effects are declared in is the
  * order it was.
  */
-export function useDocumentsPoll(projectId: string, docs: ProjectDocuments) {
+export function useDocumentsPoll(
+  projectId: string,
+  docs: ProjectDocuments,
+  /**
+   * The page's whole load, run ONCE when a tick finds nothing left in flight
+   * (review 4A, 2026-11-16). The tick asks for the documents only, so the
+   * numbers a finished read moves — the records, the summary, the phases —
+   * were stale until somebody reloaded. This is when they change, and the
+   * only time the whole payload is worth asking for.
+   */
+  onSettled?: () => void | Promise<void>,
+) {
   const { documents, setDocuments, setFailedDocuments } = docs;
   // THE OVERVIEW POLLS ITS DOCUMENTS while any is being read or waiting for a
   // slot (found-in-use 2026-09-23: "you have to reload the page to get it to
@@ -180,7 +191,14 @@ export function useDocumentsPoll(projectId: string, docs: ProjectDocuments) {
     if (!res.ok) return; // a failed tick is retried by the next one; load() owns the banner
     setDocuments(res.data.documents);
     setFailedDocuments(Number(res.data.failedDocuments ?? 0));
-  }, [projectId, setDocuments, setFailedDocuments]);
+    // A tick only runs while something was in flight, so a tick that finds
+    // nothing in flight IS the moment the set emptied. The render it causes
+    // stops the poll, so this fires once.
+    const stillInFlight = (res.data.documents ?? []).some((run) =>
+      isIntakeRunInFlight({ status: run.status, waitingForSlot: run.waiting_for_slot }),
+    );
+    if (!stillInFlight) void onSettled?.();
+  }, [projectId, setDocuments, setFailedDocuments, onSettled]);
   usePoll(pollDocuments, { intervalMs: 5000, active: documentsInFlight });
 }
 
