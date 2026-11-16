@@ -370,20 +370,37 @@ export async function applyProjectWide(
     targets.map((row) => row.recordId),
   );
 
+  // NO CHECKLIST ROW YET: created `missing` first, inside this change, so the
+  // edit below is the ordinary edit with its ordinary lock. ONE insert for
+  // every such row (review 4A, 2026-11-16), not one per row — the records are
+  // already locked above, and the rows are new, so nothing else can see them.
+  const missing = targets.filter((row) => !row.answerId);
+  const createdFor = new Map<string, { id: string; version: number }>();
+  if (missing.length > 0) {
+    const created = await txn`
+      insert into spec_answers (record_id, requirement_id, spec_field_id, state, created_by, updated_by)
+      select t.record_id, q.id, q.spec_field_id, 'missing', ${actor}, ${actor}
+        from unnest(${missing.map((row) => row.recordId)}::uuid[], ${missing.map((row) => row.requirementId)}::uuid[])
+             with ordinality as t(record_id, requirement_id, ord)
+        join requirements q on q.id = t.requirement_id
+       order by t.ord
+      returning id, version, record_id, requirement_id
+    `;
+    for (const row of created) {
+      createdFor.set(`${String(row.record_id)}:${String(row.requirement_id)}`, {
+        id: String(row.id),
+        version: Number(row.version),
+      });
+    }
+  }
+
   for (const row of targets) {
     let answerId = row.answerId;
     let version = row.answerVersion;
-    // NO CHECKLIST ROW YET: created `missing` first, inside this change, so
-    // the edit below is the ordinary edit with its ordinary lock.
     if (!answerId) {
-      const created = await txn`
-        insert into spec_answers (record_id, requirement_id, spec_field_id, state, created_by, updated_by)
-        select ${row.recordId}, q.id, q.spec_field_id, 'missing', ${actor}, ${actor}
-          from requirements q where q.id = ${row.requirementId}
-        returning id, version
-      `;
-      answerId = String(created[0]!.id);
-      version = Number(created[0]!.version);
+      const created = createdFor.get(`${row.recordId}:${row.requirementId}`)!;
+      answerId = created.id;
+      version = created.version;
     }
     await editAnswer(txn, {
       answerId,

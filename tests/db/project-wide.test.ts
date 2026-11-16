@@ -264,4 +264,29 @@ describeIfDb("a project-wide question, answered once", () => {
     const body = (await (await GET(new Request("http://localhost/test"), params(projectId))).json()) as { toQuote: number };
     expect((await loadProjectSummary(projectId)).projectWide).toBe(body.toQuote);
   });
+
+  it("creates the checklist row for items that have none, in one insert, and answers each of them", async () => {
+    // Two items whose Access row was never made: the batch insert's path
+    // (review 4A, 2026-11-16).
+    const recordD = await record(4, categoryA);
+    const recordE = await record(5, categoryB);
+    for (const id of [recordD, recordE]) {
+      await client.query(`delete from spec_answers where id = $1`, [(await accessAnswer(id)).id]);
+      expect(await accessAnswer(id)).toBeUndefined();
+    }
+    const question = await card();
+    const blank = question.rows.filter((row) => row.answerId === null).map((row) => row.recordId);
+    expect(blank.sort()).toEqual([recordD, recordE].sort());
+
+    const result = await answer({ key: question.key, value: "__QA Rows made", state: "confirmed", seen: seen(question) });
+    expect(result.status).toBe(200);
+    for (const id of [recordD, recordE]) {
+      expect(await accessAnswer(id)).toMatchObject({ state: "confirmed", value: "__QA Rows made", source_kind: "manual" });
+    }
+    const snapshots = await client.query(`select record_id from record_snapshots where change_set_id = $1`, [
+      String(result.body.changeSetId),
+    ]);
+    const versioned = snapshots.rows.map((row) => String(row.record_id));
+    expect(versioned).toEqual(expect.arrayContaining([recordD, recordE]));
+  });
 });
