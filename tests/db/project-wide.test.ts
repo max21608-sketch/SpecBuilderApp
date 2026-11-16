@@ -121,9 +121,14 @@ describeIfDb("a project-wide question, answered once", () => {
       )
     ).rows[0].id;
     const categories = await client.query(
-      `select q.category_id from requirements q join spec_fields f on f.id = q.spec_field_id
-        where f.json_id = 6 and q.section = $1
-        order by q.category_id limit 2`,
+      // By SLUG, among the seeded sheets only: uuid order differs per database,
+      // and a concurrent run's `__qa-` category sorts ahead of every real one.
+      `select q.category_id from requirements q
+         join spec_fields f on f.id = q.spec_field_id
+         join item_categories c on c.id = q.category_id
+        where f.json_id = 6 and q.section = $1 and c.slug not like '\\_\\_qa%'
+        group by q.category_id, c.slug
+        order by c.slug limit 2`,
       [PROJECT_WIDE_SECTION],
     );
     categoryA = categories.rows[0].category_id;
