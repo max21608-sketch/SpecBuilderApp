@@ -17,7 +17,7 @@
 import { json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { toCsv } from "@/lib/bws-export";
-import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
+import { loadExportScope, isScopeFailure, readExportRunId } from "@/lib/export-scope";
 import { composeCheckSheet, checkSheetFilename, CHECK_SHEET_VERDICTS } from "@/lib/export-check-sheet";
 import { contentDisposition } from "@/lib/content-disposition";
 import { requireUuid } from "@/lib/route-guards";
@@ -47,7 +47,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     }
   }
 
-  const runId = url.searchParams.get("runId");
+  const phase = readExportRunId(url.searchParams);
+  if (isScopeFailure(phase)) return json({ ok: false, error: phase.error }, phase.status);
+  const { runId } = phase;
   const format = url.searchParams.get("format") ?? "xlsx";
   if (format !== "xlsx" && format !== "csv") {
     return json({ ok: false, error: 'format must be "xlsx" or "csv".' }, 400);

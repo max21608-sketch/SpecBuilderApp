@@ -48,6 +48,7 @@ import {
 import { TRANSCRIPTION_CLAIM_MS, type PdfTranscription, type TranscriptionRecord } from "@/lib/pdf-bill-checks";
 import { documentClosedSentence } from "@/lib/intake-status";
 import { requireUuid, requireWriter } from "@/lib/route-guards";
+import { requestTimeBudget } from "@/lib/extraction-claim";
 
 export const maxDuration = 800;
 
@@ -70,6 +71,9 @@ const Body = z
 const CLAIM_EXPIRES_MS = TRANSCRIPTION_CLAIM_MS;
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
+  // The request's own clock: the model's deadline and the abort are both
+  // counted from HERE, so reading the PDF is time the model does not get.
+  const startedAt = Date.now();
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const denied = requireWriter(user);
@@ -167,7 +171,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // A PDF pdfjs cannot open still has pages the model can read; the code check says it could not run.
   }
 
-  const result = await transcribePdfBill({ base64: pdf.bytes.toString("base64"), pageCount: pageCount ?? 0 });
+  const budget = requestTimeBudget(startedAt, Date.now());
+  if (!budget) {
+    const text = "Reading this PDF used the whole time a transcription has, so the model was not called. Nothing was charged; transcribe it again.";
+    await release(id, user.email, { outcome: { at: new Date().toISOString(), ok: false, text, charged: false } });
+    return json({ ok: false, error: text, charged: false, retryable: true }, 503);
+  }
+  const result = await transcribePdfBill({
+    base64: pdf.bytes.toString("base64"),
+    pageCount: pageCount ?? 0,
+    deadlineMs: budget.modelDeadlineMs,
+    signal: AbortSignal.timeout(budget.abortMs),
+  });
   const at = new Date().toISOString();
   const calls = result.calls.map((call) => ({ ...call, at }));
 

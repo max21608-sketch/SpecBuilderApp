@@ -17,7 +17,7 @@
 // ============================================================================
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
-import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
+import { loadExportScope, isScopeFailure, readExportRunId } from "@/lib/export-scope";
 import { composeQuoteSheet, type QuoteBoilerplate } from "@/lib/quote-lines";
 import { toCsv } from "@/lib/bws-export";
 import { asciiFilenamePart, contentDisposition } from "@/lib/content-disposition";
@@ -41,7 +41,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       return json({ ok: false, error: `"${key}" is not accepted. Quote a whole phase, or the whole project.` }, 400);
     }
   }
-  const runId = url.searchParams.get("runId");
+  const phase = readExportRunId(url.searchParams);
+  if (isScopeFailure(phase)) return json({ ok: false, error: phase.error }, phase.status);
+  const { runId } = phase;
   const format = url.searchParams.get("format") ?? "csv";
   if (format !== "csv" && format !== "json") {
     return json({ ok: false, error: 'format must be "csv" or "json".' }, 400);

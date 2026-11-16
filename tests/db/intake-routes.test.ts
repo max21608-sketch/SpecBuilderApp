@@ -1196,6 +1196,37 @@ describeIfDb("intake routes", () => {
     expect(after.rows[0].flagged).toBe(true);
     expect(after.rows[0].retired_by).toBeTruthy();
 
+    // Flagging a note that is ALREADY retired keeps who retired it and when
+    // (review 2026-11-16, 1.5). The stamp is set to somebody else here so a
+    // re-stamp by this session's user cannot pass by coincidence.
+    await client.query(
+      `update project_notes set retired_by = '__qa earlier retirer', retired_at = '2026-01-02T03:04:05Z',
+              updated_by = 'qa' where id = $1`,
+      [noteId],
+    );
+    let current = await client.query(`select version from project_notes where id = $1`, [noteId]);
+    const unflag = await PATCH(patch({ flagged: false, version: current.rows[0].version }), {
+      params: Promise.resolve({ id: projectId, noteId }),
+    });
+    expect(unflag.status).toBe(200);
+    after = await client.query(
+      `select status, flagged, retired_by, retired_at from project_notes where id = $1`, [noteId]);
+    expect(after.rows[0].status).toBe("retired");
+    expect(after.rows[0].flagged).toBe(false);
+    expect(after.rows[0].retired_by).toBe("__qa earlier retirer");
+    expect(new Date(after.rows[0].retired_at).toISOString()).toBe("2026-01-02T03:04:05.000Z");
+
+    // Leaving retired clears both.
+    current = await client.query(`select version from project_notes where id = $1`, [noteId]);
+    const restore = await PATCH(patch({ status: "active", version: current.rows[0].version }), {
+      params: Promise.resolve({ id: projectId, noteId }),
+    });
+    expect(restore.status).toBe(200);
+    after = await client.query(`select status, retired_by, retired_at from project_notes where id = $1`, [noteId]);
+    expect(after.rows[0].status).toBe("active");
+    expect(after.rows[0].retired_by).toBeNull();
+    expect(after.rows[0].retired_at).toBeNull();
+
     await client.query(`delete from project_notes where id = $1`, [noteId]);
   });
 

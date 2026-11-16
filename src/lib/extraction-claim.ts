@@ -64,6 +64,32 @@ export const RUN_ABORT_MS = 770_000;
  */
 export const MODEL_DEADLINE_MS = 740_000;
 
+/**
+ * What is left of a REQUEST'S budget for its model call, counted from when the
+ * request started rather than when the call does.
+ *
+ * For a route that calls the model INSIDE the request (the PDF bill
+ * transcription), not the queue worker. Both numbers shrink by the time the
+ * request has already spent — reading the PDF, extracting its text — so the
+ * inequality holds against the platform's clock: the model gives up at 740 s
+ * of the request, the request's own abort at 770 s, and `maxDuration` (800 s)
+ * is never what stops it. Counted from the CALL, a slow start ran past 800 s,
+ * the function was killed with no failure written, and the claim it left
+ * blocked a retry until it expired.
+ *
+ * Null when no model time is left: the caller refuses before paying for a call
+ * that could not finish.
+ */
+export function requestTimeBudget(
+  startedAtMs: number,
+  nowMs: number,
+): { modelDeadlineMs: number; abortMs: number } | null {
+  const spent = Math.max(0, nowMs - startedAtMs);
+  const modelDeadlineMs = MODEL_DEADLINE_MS - spent;
+  if (modelDeadlineMs <= 0) return null;
+  return { modelDeadlineMs, abortMs: RUN_ABORT_MS - spent };
+}
+
 /** After this, a `parsing` row is presumed abandoned and can be reclaimed. */
 export const CLAIM_EXPIRY_SECONDS = 900;
 

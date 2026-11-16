@@ -74,7 +74,7 @@
 import { z } from "zod";
 import { readSpreadsheetSheets, pdfHasTextLayer, countPdfPages } from "@/lib/intake-source";
 import { blobPictureStore, stageBillRowImages, type PictureStore } from "@/lib/bill-images";
-import { sql, json } from "@/lib/db";
+import { sql, json, type Row } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { intakeSourceKind, outlookMsgAdvice, spreadsheetRefusal } from "@/lib/intake-source-types";
 import { scannedPdfRefusal } from "@/lib/document-classify";
@@ -87,7 +87,7 @@ import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/extraction-slots";
 import { dispatchRegisteredRead, insertSpecDocumentRun } from "@/lib/spec-registration";
 import { describeDuplicate, recordMessageUnlessKnown } from "@/lib/email-ingest";
 import { assignMessage } from "@/lib/email-registration";
-import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
+import { withTransaction, transactionErrorResponse, type TxnSql } from "@/lib/db-transaction";
 import { MAX_MODEL_PDF_BYTES } from "@/lib/upload-limits";
 import {
   PDF_BILL_SHEET,
@@ -447,14 +447,16 @@ async function registerBlobBoq(input: Registered, actor: string): Promise<Respon
     throw cause;
   }
 
-  const attachment = await sql`
-    insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
-    values ('project', ${input.projectId}, 'boq', ${blob.pathname}, ${input.filename},
-            ${blob.contentType || input.contentType || null}, ${blob.size}, ${actor})
-    returning id
-  `;
-
-  return parseBoqInto(input.projectId, String(attachment[0]?.id), input.filename, blob.bytes, actor, true, {
+  return parseBoqInto(input.projectId, input.filename, blob.bytes, actor, true, {
+    attach: async (txn) => {
+      const attachment = await txn`
+        insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
+        values ('project', ${input.projectId}, 'boq', ${blob.pathname}, ${input.filename},
+                ${blob.contentType || input.contentType || null}, ${blob.size}, ${actor})
+        returning id
+      `;
+      return { attachmentId: recordedId(attachment) };
+    },
     batchId: input.batchId ?? null,
     contentType: blob.contentType || input.contentType || "",
   });
@@ -527,31 +529,35 @@ async function registerPdfBoq(input: Registered, actor: string, store: PictureSt
     );
   }
 
-  const pdfAttachment = await sql`
-    insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
-    values ('project', ${input.projectId}, 'boq_pdf', ${blob.pathname}, ${input.filename},
-            ${blob.contentType || input.contentType || "application/pdf"}, ${blob.size}, ${actor})
-    returning id
-  `;
-  const workbookAttachment = await sql`
-    insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
-    values ('project', ${input.projectId}, 'boq', ${workbookPathname}, ${workbookFilename},
-            ${XLSX_CONTENT_TYPE}, ${workbook.bytes.length}, ${actor})
-    returning id
-  `;
-
-  return parseBoqInto(input.projectId, String(workbookAttachment[0]?.id), workbookFilename, workbook.bytes, actor, true, {
+  return parseBoqInto(input.projectId, workbookFilename, workbook.bytes, actor, true, {
+    attach: async (txn) => {
+      const pdfAttachment = await txn`
+        insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
+        values ('project', ${input.projectId}, 'boq_pdf', ${blob.pathname}, ${input.filename},
+                ${blob.contentType || input.contentType || "application/pdf"}, ${blob.size}, ${actor})
+        returning id
+      `;
+      const workbookAttachment = await txn`
+        insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
+        values ('project', ${input.projectId}, 'boq', ${workbookPathname}, ${workbookFilename},
+                ${XLSX_CONTENT_TYPE}, ${workbook.bytes.length}, ${actor})
+        returning id
+      `;
+      return {
+        attachmentId: recordedId(workbookAttachment),
+        pdfSource: {
+          attachmentId: recordedId(pdfAttachment),
+          filename: input.filename,
+          sheet: PDF_BILL_SHEET,
+          firstRow: workbook.firstRow,
+          pages: workbook.rowPages,
+        },
+      };
+    },
     batchId: input.batchId ?? null,
     contentType: XLSX_CONTENT_TYPE,
     // The phase is named after the PDF, not after "… (read from PDF)".
     phaseFilename: input.filename,
-    pdfSource: {
-      attachmentId: String(pdfAttachment[0]?.id),
-      filename: input.filename,
-      sheet: PDF_BILL_SHEET,
-      firstRow: workbook.firstRow,
-      pages: workbook.rowPages,
-    },
   });
 }
 
@@ -568,32 +574,42 @@ async function registerPdfForTranscription(
   blob: { pathname: string; contentType: string; size: number; bytes: Buffer },
   code: TranscribableReason,
 ): Promise<Response> {
-  const pdfAttachment = await sql`
-    insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
-    values ('project', ${input.projectId}, 'boq_pdf', ${blob.pathname}, ${input.filename},
-            ${blob.contentType || input.contentType || "application/pdf"}, ${blob.size}, ${actor})
-    returning id
-  `;
-  const attachmentId = String(pdfAttachment[0]?.id);
   const pageCount = countPdfPages(blob.bytes);
   const pdfTranscription: PdfTranscription = { state: "waiting", reason: transcriptionReason(code), pageCount };
-  const staged: BoqDocument = {
-    schemaVersion: BOQ_SCHEMA_VERSION,
-    filename: input.filename,
-    sourcePreserved: true,
-    sheets: [],
-    pdfSource: { attachmentId, filename: input.filename, sheet: PDF_BILL_SHEET, firstRow: 0, pages: [] },
-    pdfTranscription,
-  };
-  const run = await sql`
-    insert into intake_runs (project_id, attachment_id, batch_id, source_kind, status, parsed, created_by, updated_by)
-    values (${input.projectId}, ${attachmentId}, ${input.batchId ?? null}, 'boq_xlsx', 'parsed', ${JSON.stringify(staged)}::jsonb, ${actor}, ${actor})
-    returning id
-  `;
+  // The PDF's attachment and the run that names it stand or fall together: an
+  // attachment with no run is a stored bill nobody can open from any screen.
+  let importId: string;
+  try {
+    importId = await withTransaction(async (txn) => {
+      const pdfAttachment = await txn`
+        insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
+        values ('project', ${input.projectId}, 'boq_pdf', ${blob.pathname}, ${input.filename},
+                ${blob.contentType || input.contentType || "application/pdf"}, ${blob.size}, ${actor})
+        returning id
+      `;
+      const attachmentId = recordedId(pdfAttachment);
+      const staged: BoqDocument = {
+        schemaVersion: BOQ_SCHEMA_VERSION,
+        filename: input.filename,
+        sourcePreserved: true,
+        sheets: [],
+        pdfSource: { attachmentId, filename: input.filename, sheet: PDF_BILL_SHEET, firstRow: 0, pages: [] },
+        pdfTranscription,
+      };
+      const run = await txn`
+        insert into intake_runs (project_id, attachment_id, batch_id, source_kind, status, parsed, created_by, updated_by)
+        values (${input.projectId}, ${attachmentId}, ${input.batchId ?? null}, 'boq_xlsx', 'parsed', ${JSON.stringify(staged)}::jsonb, ${actor}, ${actor})
+        returning id
+      `;
+      return recordedId(run);
+    });
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
   return json(
     {
       ok: true,
-      importId: String(run[0]?.id),
+      importId,
       lines: 0,
       sheets: 0,
       skippedRows: 0,
@@ -650,32 +666,49 @@ async function registerDirectBoq(request: Request, actor: string): Promise<Respo
   if (!project[0]) return json({ ok: false, error: "No such project." }, 404);
 
   const bytes = Buffer.from(await file.arrayBuffer());
-  return parseBoqInto(projectId, null, file.name, bytes, actor, false);
+  return parseBoqInto(projectId, file.name, bytes, actor, false);
 }
 
 // ---- the shared BOQ parse --------------------------------------------------
 async function parseBoqInto(
   projectId: string,
-  attachmentId: string | null,
   filename: string,
   bytes: Buffer,
   actor: string,
   sourcePreserved: boolean,
   options: {
+    /**
+     * Records the stored original(s), inside the transaction that opens the
+     * run. Absent for a bill posted straight here, which keeps no original.
+     */
+    attach?: (txn: TxnSql) => Promise<{ attachmentId: string; pdfSource?: PdfBillSource }>;
     batchId?: string | null;
     contentType?: string;
     /** The name a phase is proposed from, where it is not `filename` (a PDF bill). */
     phaseFilename?: string;
-    /** The PDF a bill was read from, and each line's page. */
-    pdfSource?: PdfBillSource;
   } = {},
 ): Promise<Response> {
-  const run = await sql`
-    insert into intake_runs (project_id, attachment_id, batch_id, source_kind, status, created_by, updated_by)
-    values (${projectId}, ${attachmentId}, ${options.batchId ?? null}, 'boq_xlsx', 'parsing', ${actor}, ${actor})
-    returning id
-  `;
-  const runId = String(run[0]?.id);
+  // THE ATTACHMENTS AND THE RUN ARE ONE WRITE. They were separate statements,
+  // so a failure between them left an attachment row no run named — a stored
+  // bill no screen can reach — and the next upload of the same file made a
+  // second one. Only the inserts are inside: the parse and the row pictures
+  // (Blob I/O) run after the commit, and a failure there marks THIS run
+  // failed, which is a state the Documents tab shows.
+  let runId: string;
+  let pdfSource: PdfBillSource | undefined;
+  try {
+    ({ runId, pdfSource } = await withTransaction(async (txn) => {
+      const attached = options.attach ? await options.attach(txn) : null;
+      const run = await txn`
+        insert into intake_runs (project_id, attachment_id, batch_id, source_kind, status, created_by, updated_by)
+        values (${projectId}, ${attached?.attachmentId ?? null}, ${options.batchId ?? null}, 'boq_xlsx', 'parsing', ${actor}, ${actor})
+        returning id
+      `;
+      return { runId: recordedId(run), pdfSource: attached?.pdfSource };
+    }));
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
 
   // Terminal vs retryable is decided per step, not by one outer try/catch. A
   // file that is not a spreadsheet never becomes one, so it is terminal and
@@ -715,7 +748,7 @@ async function parseBoqInto(
     // A workbook built from a PDF's text holds no pictures — they are not
     // cells — and the review says so beside the PDF link.
     const pictures =
-      sourcePreserved && !options.pdfSource && intakeSourceKind(filename, options.contentType ?? "") === "xlsx"
+      sourcePreserved && !pdfSource && intakeSourceKind(filename, options.contentType ?? "") === "xlsx"
         ? await stageBillRowImages(bytes, { projectId, runId })
         : null;
 
@@ -728,7 +761,7 @@ async function parseBoqInto(
             sourcePreserved,
             sheets: stagedSheets,
             ...(pictures ? { rowImages: pictures.rowImages, rowImagesNote: pictures.rowImagesNote } : {}),
-            ...(options.pdfSource ? { pdfSource: options.pdfSource } : {}),
+            ...(pdfSource ? { pdfSource } : {}),
           })}::jsonb,
           updated_by = ${actor}
       where id = ${runId}
@@ -755,6 +788,12 @@ async function parseBoqInto(
     await fail(runId, actor, message);
     return json({ ok: false, error: message, importId: runId }, 500);
   }
+}
+
+/** The id an insert's `returning id` gave back; a missing row rolls the transaction back. */
+function recordedId(rows: Row[]): string {
+  if (!rows[0]) throw new Error("the row was not recorded");
+  return String(rows[0].id);
 }
 
 async function fail(runId: string, actor: string, error: string): Promise<void> {

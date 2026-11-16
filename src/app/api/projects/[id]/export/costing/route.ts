@@ -17,7 +17,7 @@
 // ============================================================================
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
-import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
+import { loadExportScope, isScopeFailure, readExportRunId } from "@/lib/export-scope";
 import { composeCostingSheet, costingRowCells, type CostingSource } from "@/lib/costing-sheet";
 import { toCsv } from "@/lib/bws-export";
 import { blobPathname, readTrustedBlob } from "@/lib/blob-source";
@@ -66,7 +66,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       return json({ ok: false, error: `"${key}" is not accepted. Cost a whole phase, or the whole project.` }, 400);
     }
   }
-  const runId = url.searchParams.get("runId");
+  const phase = readExportRunId(url.searchParams);
+  if (isScopeFailure(phase)) return json({ ok: false, error: phase.error }, phase.status);
+  const { runId } = phase;
   const format = url.searchParams.get("format") ?? "xlsx";
   if (format !== "xlsx" && format !== "csv" && format !== "json") {
     return json({ ok: false, error: 'format must be "xlsx", "csv" or "json".' }, 400);
