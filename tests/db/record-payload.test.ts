@@ -118,8 +118,9 @@ describeIfDb("record payload — waiting, who to ask, and quote readiness", () =
       `select c.id from item_categories c
          join requirements q on q.category_id = c.id
         where not exists (select 1 from spec_matrix_category_map m where m.item_category_id = c.id)
+          and c.created_by = 'seed'
         group by c.id having count(q.id) >= 3
-        order by c.id limit 1`,
+        order by c.slug limit 1`,
     );
     placeholderCategoryId = category.rows[0].id;
 
@@ -376,7 +377,8 @@ describeIfDb("record payload — waiting, who to ask, and quote readiness", () =
 
   it("returns the matrix rows where he wrote one", async () => {
     const mapped = await client.query(
-      `select item_category_id from spec_matrix_category_map limit 1`,
+      `select m.item_category_id from spec_matrix_category_map m
+         join item_categories c on c.id = m.item_category_id order by c.slug limit 1`,
     );
     if (mapped.rowCount === 0) return;
     const categoryId = mapped.rows[0].item_category_id;

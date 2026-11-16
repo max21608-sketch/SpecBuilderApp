@@ -63,7 +63,7 @@ describeIfDb("an email's dimensions", () => {
         where f.json_id = 3
           and exists (select 1 from requirements c join spec_fields cf on cf.id = c.spec_field_id
                        where c.category_id = q.category_id and cf.json_id = 1)
-        order by q.category_id limit 1`,
+        order by (select c.slug from item_categories c where c.id = q.category_id) limit 1`,
     );
     if (!category.rows[0]) throw new Error("no requirement maps to BWS field 3");
     categoryId = category.rows[0].category_id;

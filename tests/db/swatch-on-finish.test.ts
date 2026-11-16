@@ -78,7 +78,8 @@ describeIfDb("a swatch cropped off the page", () => {
     categoryId = (
       await client.query(
         `select c.id from item_categories c join requirements q on q.category_id = c.id
-         group by c.id having count(q.id) >= 1 order by c.id limit 1`,
+          where c.created_by = 'seed'
+         group by c.id having count(q.id) >= 1 order by c.slug limit 1`,
       )
     ).rows[0].id;
     fields = (await client.query(`select id, json_id, name from spec_fields order by sort_order`)).rows.map(

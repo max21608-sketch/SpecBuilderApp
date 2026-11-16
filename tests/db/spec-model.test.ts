@@ -168,7 +168,7 @@ describeIfDb("0002 spec model", () => {
     const otherField = await client.query(
       `select id from spec_fields where id not in (
          select spec_field_id from requirements where id = $1 and spec_field_id is not null
-       ) limit 1`,
+       ) order by json_id limit 1`,
       [requirement.rows[0].id],
     );
     await expect(

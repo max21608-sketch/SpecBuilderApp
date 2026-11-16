@@ -191,7 +191,8 @@ describeIfDb("the record is locked before the row an edit touches", () => {
       (
         await client.query(
           `select q.category_id from requirements q join spec_fields f on f.id = q.spec_field_id
-            where f.json_id = 3 order by q.category_id limit 1`,
+             join item_categories c on c.id = q.category_id
+            where f.json_id = 3 and c.created_by = 'seed' order by c.slug limit 1`,
         )
       ).rows[0].category_id,
     );
@@ -345,7 +346,7 @@ describeIfDb("the record is locked before the row an edit touches", () => {
          join requirements q on q.id = a.requirement_id
          left join spec_fields f on f.id = q.spec_field_id
         where a.record_id = $1 and a.state = 'missing' and coalesce(f.json_id, 0) <> 3
-        order by a.id limit 1`,
+        order by q.sort_order limit 1`,
       [recordId],
     );
     const row = answer.rows[0];

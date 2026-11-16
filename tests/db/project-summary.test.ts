@@ -113,6 +113,7 @@ describeIfDb("project summary", () => {
         group by q.category_id
        having count(*) filter (where tgq.is_tgq) > 0
           and count(*) filter (where not tgq.is_tgq) > 0
+        order by (select c.slug from item_categories c where c.id = q.category_id)
         limit 1`,
     );
     categoryId = category.rows[0].id;
@@ -257,6 +258,7 @@ describeIfDb("project summary", () => {
        having count(*) filter (where q.kind = 'readiness' and q.section is distinct from $1) > 0
           and count(*) filter (where q.section = $1 and q.kind = 'readiness') > 0
           and count(*) filter (where q.section = $1 and q.kind = 'spec_field') > 0
+        order by (select c.slug from item_categories c where c.id = q.category_id and c.created_by = 'seed') nulls last
         limit 1`,
       [PROJECT_WIDE_SECTION],
     );

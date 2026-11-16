@@ -83,7 +83,8 @@ describeIfDb("email intake", () => {
     const category = await client.query(
       `select c.id from item_categories c
        join requirements q on q.category_id = c.id and q.kind = 'spec_field'
-       group by c.id having count(q.id) >= 2 limit 1`,
+       where c.created_by = 'seed'
+       group by c.id having count(q.id) >= 2 order by c.slug limit 1`,
     );
     categoryId = category.rows[0].id;
 

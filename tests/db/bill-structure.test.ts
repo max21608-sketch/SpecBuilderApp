@@ -281,7 +281,8 @@ describeIfDb("a bill's structure, read; its fabric lines, written onto their ite
     const category = (
       await client.query(
         `select q.category_id from requirements q join spec_fields f on f.id = q.spec_field_id
-          where f.json_id in (1, 2) group by q.category_id having count(distinct f.json_id) = 2 limit 1`,
+          where f.json_id in (1, 2) group by q.category_id having count(distinct f.json_id) = 2
+          order by (select c.slug from item_categories c where c.id = q.category_id) limit 1`,
       )
     ).rows[0]?.category_id as string;
     expect(category).toBeTruthy();
