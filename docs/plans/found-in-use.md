@@ -60,6 +60,15 @@ this app has seen.
 (gate rows on the matrix). The tab's hover now says so (`b5d0a39`). Not a
 defect in either number; still two numbers on one screen.
 
+### A retired phase "can be brought back", and no screen brings it back — OPEN
+
+Found while writing the users' help file (`docs/help/spec-builder-help.md`).
+The retire panel says "Nothing is deleted, and the phase can be brought back"
+(`PhaseTabs.tsx`), and the route does restore one
+(`runs/[runId]/route.ts`, `restoreRun`), but no component calls it: a retired
+phase's tab is gone and nothing lists retired phases. The help file tells a
+user it is a request to Max.
+
 ### `global-error.tsx` has never been seen in a browser — UNVERIFIED
 
 Added by `6e810b1`. The dev overlay sits on top of it, so it needs a
