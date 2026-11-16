@@ -12,6 +12,7 @@ import {
   readUncodedFinish,
   resolveFinishCode,
   type Finish,
+  correctionUnlinksFinish,
 } from "@/lib/finishes";
 import { renderAttributeValue } from "@/lib/bws-export";
 
@@ -343,5 +344,21 @@ describe("resolveFinishCode", () => {
   it("says nothing at all about a spec with no code", () => {
     expect(resolveFinishCode(null, "Dark tinted wood", library).status).toBe("none");
     expect(resolveFinishCode("   ", "Dark tinted wood", library).status).toBe("none");
+  });
+});
+
+describe("correctionUnlinksFinish (review 1.9): the save's rule, asked before the save", () => {
+  const linked = { code: "FAB-01", description: "Yarn Harbour LW44102" };
+  it("unlinks where the new words disagree with the library's description", () => {
+    expect(correctionUnlinksFinish(linked, "Velvet Moss 04")).toBe(true);
+  });
+  it("keeps the link for the library's own words, a case change, the code alone, or nothing", () => {
+    expect(correctionUnlinksFinish(linked, "Yarn Harbour LW44102")).toBe(false);
+    expect(correctionUnlinksFinish(linked, "yarn harbour lw44102")).toBe(false);
+    expect(correctionUnlinksFinish(linked, "FAB-01")).toBe(false);
+    expect(correctionUnlinksFinish(linked, "")).toBe(false);
+  });
+  it("never unlinks from a finish the library has not described yet", () => {
+    expect(correctionUnlinksFinish({ code: "FAB-01", description: null }, "Velvet Moss 04")).toBe(false);
   });
 });

@@ -455,6 +455,35 @@ export function resolveFinishCode(
   return { status: "matched", finish, ...readAs };
 }
 
+/**
+ * WHETHER CORRECTING A LINKED SPEC'S WORDS UNLINKS IT from its library finish.
+ *
+ * `resolveFinishCode` asked about the row the spec is ALREADY linked to, by
+ * that row's own code (`attribute-correct.ts` says why not the spec's): a
+ * conflict links nothing, so the correction drops the link. One function, so
+ * the Edit value form can say so BEFORE the save (review 1.9) by the rule the
+ * save applies — it used to say so only afterwards. Takes the two fields the
+ * record screen holds; the rest of the row cannot change the answer.
+ */
+export function correctionUnlinksFinish(
+  finish: Pick<Finish, "code" | "description"> & Partial<Finish>,
+  value: string | null,
+): boolean {
+  const row: Finish = {
+    id: finish.id ?? "",
+    code: finish.code,
+    codeNorm: finish.codeNorm ?? normaliseFinishCode(finish.code),
+    codeOrigin: finish.codeOrigin ?? "client",
+    kind: finish.kind ?? null,
+    description: finish.description,
+    supplierRaw: finish.supplierRaw ?? null,
+    reference: finish.reference ?? null,
+    colour: finish.colour ?? null,
+    state: finish.state ?? "confirmed",
+  };
+  return resolveFinishCode(row.code, value, [row]).status === "conflict";
+}
+
 // ===========================================================================
 // FILING A FINISH THE CLIENT GAVE NO CODE FOR
 //

@@ -24,7 +24,7 @@ import {
   type AttributeUnit,
   type DimensionSlot,
 } from "@/lib/spec-vocab";
-import { isFinishGroup } from "@/lib/finishes";
+import { correctionUnlinksFinish, isFinishGroup } from "@/lib/finishes";
 import { attributeDisplayLabel, documentLabelTitle } from "@/lib/attribute-label";
 import { composeDimensionCell, toMillimetres, valueCarriesItsUnit } from "@/lib/dimensions";
 import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
@@ -708,15 +708,35 @@ export default function SpecsTab({
                               Any checklist answer it fills is recomposed.
                             </p>
                             <div className="mt-2 flex flex-wrap items-end gap-2">
-                              <label className="flex flex-col gap-0.5 text-xs text-neutral-600">
-                                Value
-                                <input
-                                  value={correctValue}
-                                  autoFocus
-                                  onChange={(event) => setCorrectValue(event.target.value)}
-                                  className="w-64 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900"
-                                />
-                              </label>
+                              <div className="flex flex-col">
+                                <label className="flex flex-col gap-0.5 text-xs text-neutral-600">
+                                  Value
+                                  <input
+                                    value={correctValue}
+                                    autoFocus
+                                    onChange={(event) => setCorrectValue(event.target.value)}
+                                    className="w-64 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900"
+                                  />
+                                </label>
+                                {/* SAID BEFORE THE SAVE, BY THE SAVE'S OWN RULE
+                                    (`correctionUnlinksFinish`). It used to be
+                                    said only afterwards, when the link was
+                                    already gone. */}
+                                {attribute.finish_id &&
+                                  attribute.finish_code &&
+                                  correctionUnlinksFinish(
+                                    { code: attribute.finish_code, description: attribute.finish_description },
+                                    correctValue,
+                                  ) && (
+                                    <span className={`mt-1 w-64 rounded border px-1.5 py-0.5 text-[11px] font-medium ${TONE.warn.note}`}>
+                                      Saving this unlinks it from {attribute.finish_code}: the library says otherwise.
+                                      To change the finish itself, use Change the finish…
+                                      <Tip>
+                                        {`The library describes ${attribute.finish_code} as “${attribute.finish_description ?? ""}”. A spec whose words disagree is not linked, so it stops following the library and ships its own words. If the finish is what changed, Change the finish… keeps this spec linked.`}
+                                      </Tip>
+                                    </span>
+                                  )}
+                              </div>
                               {/* Dimensions only: 0007 refuses a unit on
                                   anything else, and an empty select
                                   beside a fabric reads as a question. */}

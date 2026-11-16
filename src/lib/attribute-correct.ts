@@ -47,7 +47,7 @@
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { changeSetForEdit, type VerifiedEvidence } from "@/lib/change-sets";
-import { isFinishCodeOrigin, isFinishKind, resolveFinishCode, type Finish } from "@/lib/finishes";
+import { correctionUnlinksFinish, isFinishCodeOrigin, isFinishKind, type Finish } from "@/lib/finishes";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { recomposeAnswers } from "@/lib/attribute-retire";
 import { lockRecordOfAttribute } from "@/lib/record-lock";
@@ -251,8 +251,8 @@ export async function correctAttribute(
         colour: row.colour === null || row.colour === undefined ? null : String(row.colour),
         state: String(row.state) as AttributeState,
       };
-      const resolution = resolveFinishCode(finish.code, value, [finish]);
-      if (resolution.status === "conflict") {
+      // The same function the Edit value form asks before the save.
+      if (correctionUnlinksFinish(finish, value)) {
         finishId = null;
         finishUnlinked = true;
       }
