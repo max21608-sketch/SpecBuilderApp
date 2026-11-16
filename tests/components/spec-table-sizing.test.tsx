@@ -7,7 +7,7 @@
 // and names here are invented; only the lengths copy the real bill's.
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { ClientRefs, ItemName, ITEM_CLAMP } from "@/components/records/SpecTable";
+import { AfterGate, ClientRefs, ItemName, ITEM_CLAMP } from "@/components/records/SpecTable";
 import RecordTitle, { RECORD_TITLE_CHARS } from "@/components/records/RecordTitle";
 
 const LONG_NAME = "Bedframe & Headboard - TWIN (X18 = BED BASES - X1 HEADBOARD PER X2 BED BASES) with a long extra clause to be cut";
@@ -59,3 +59,16 @@ describe("the record title", () => {
     expect(container.querySelector("[title]")).toBeNull();
   });
 });
+
+// Review 3.1 (2026-11-16): the phase table ran 15px past its 1358px box at 1920
+// and 1440. The widest cells in TG0 and TG1 were the one-line "after TGQ"
+// chip, 96px each under a three-letter header; on two lines each column is as
+// wide as "after". jsdom has no layout, so what is held is the break itself.
+describe("a gate not yet reached", () => {
+  it("prints on two lines, the gate on the second", () => {
+    const { container } = render(<AfterGate gate="TGQ" />);
+    expect(container.querySelector("br")).not.toBeNull();
+    expect(container.textContent).toBe("afterTGQ");
+  });
+});
+

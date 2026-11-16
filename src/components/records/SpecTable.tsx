@@ -315,6 +315,26 @@ export function ItemName({ text }: { text: string }) {
 }
 
 /**
+ * A GATE NOT YET REACHED: "after TGQ", ON TWO LINES (2026-11-16, review 3.1).
+ * On one line it was the widest thing in TG0 and in TG1 — 96px each for a
+ * three-letter header — and the phase table ran 15px past its 1358px box at
+ * 1920 and at 1440. The words break where the "no category" cell's do, between
+ * the word and the gate, so the column is as wide as "after" and nothing is
+ * hidden. `Chip` is no-wrap, so the break is an explicit one.
+ */
+export function AfterGate({ gate }: { gate: Gate }) {
+  return (
+    <Chip tone="blocked" className="leading-4">
+      <span>
+        after
+        <br />
+        {GATE_SHORT_LABELS[gate]}
+      </span>
+    </Chip>
+  );
+}
+
+/**
  * A LEVEL SUGGESTION'S REASON, CUT TO ONE SHORT LINE. The evidence stays on
  * the row — a suggestion is never shown without what it was read from — but a
  * whole sentence under every button made every row five lines tall. The full
@@ -1519,9 +1539,11 @@ export default function SpecTable({
                                     : `${entry.outstanding} outstanding at ${gate} — open the record to see which`
                                 }
                               >
-                                <Chip tone={waitingFor ? "blocked" : "danger"}>
-                                  {waitingFor ? `after ${GATE_SHORT_LABELS[waitingFor]}` : entry.outstanding}
-                                </Chip>
+                                {waitingFor ? (
+                                  <AfterGate gate={waitingFor} />
+                                ) : (
+                                  <Chip tone="danger">{entry.outstanding}</Chip>
+                                )}
                               </Link>
                             )}
                           </Td>

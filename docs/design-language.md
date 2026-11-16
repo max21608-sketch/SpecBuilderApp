@@ -234,6 +234,12 @@ Collected from CLAUDE.md so they are in one place. Each has bitten once.
   capped at `max-width: 100%` globally, the body wraps a long word rather than
   widening, a ref is a no-wrap run per word, a dense table's cells are `px-3`,
   and `data-overflow-ok` is the one reviewable exception.
+  On 2026-11-16 the phase table was 15px over at 1920 and 1440 again: its
+  floor is the sum of every column's narrowest cell, and the widest fixed cells
+  were TG0 and TG1's one-line "after TGQ" chip (96px each under a three-letter
+  header) beside the stacked row actions. The chip now prints on two lines
+  (`AfterGate`), which put the floor about 40px under the 1358px box; a new
+  no-wrap cell on that table has to be paid for out of that margin.
 
 ## Deviations from the mock-up, and why
 
