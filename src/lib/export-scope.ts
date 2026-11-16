@@ -23,6 +23,7 @@
 // ============================================================================
 import { withTransaction, type TxnSql } from "@/lib/db-transaction";
 import { exportAnswers, loadRecordAtoms, type RecordAtoms } from "@/lib/record-atoms";
+import { isUuid } from "@/lib/route-guards";
 import type { ExportAnswer, ExportAttribute, ExportRecord, ExportScope } from "@/lib/bws-export";
 
 export type LoadedExportScope = {
@@ -37,7 +38,34 @@ export type LoadedExportScope = {
  * such phase" about one somebody retired last week would send them looking for
  * a typo in a link that is perfectly correct.
  */
-export type ScopeFailure = { error: string; status: 404 | 409 };
+export type ScopeFailure = { error: string; status: 400 | 404 | 409 };
+
+/**
+ * The phase a request names, or why it names none the loader can use.
+ *
+ * Every one of the four outputs reads `runId` through this, so `?runId=abc`,
+ * `?runId=` and `?runId=A&runId=B` are refused in the same words everywhere.
+ * Before 2026-11-16 the first two reached a `::uuid` cast and came back as a
+ * bodyless 500, and the third silently took the first phase — a scope the
+ * person did not ask for, on the one file whose import REPLACES.
+ */
+export function readExportRunId(params: URLSearchParams): { runId: string | null } | ScopeFailure {
+  const given = params.getAll("runId");
+  if (given.length === 0) return { runId: null };
+  if (given.length > 1) {
+    return {
+      error: "This link names more than one phase. Export one phase, or leave the phase out to take the whole project.",
+      status: 400,
+    };
+  }
+  if (!isUuid(given[0])) {
+    return {
+      error: "This link does not name a phase this app knows. Open the export again from the project's phase tab.",
+      status: 400,
+    };
+  }
+  return { runId: given[0] };
+}
 
 /**
  * The scope's rows, in scope order, from the atoms loaded for it.
@@ -190,7 +218,7 @@ async function loadExportScopeIn(
   };
 }
 
-export function isScopeFailure(result: LoadedExportScope | ScopeFailure): result is ScopeFailure {
+export function isScopeFailure<T extends object>(result: T | ScopeFailure): result is ScopeFailure {
   return "error" in result;
 }
 
