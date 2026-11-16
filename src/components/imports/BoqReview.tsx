@@ -36,7 +36,7 @@ import Tip from "@/components/ui/Tip";
 // the functions the confirm itself calls.
 import { sheetsAwaitingColumnCheck, sheetsNeedingColumns } from "@/lib/boq-import";
 import { pdfPageOfLine } from "@/lib/pdf-bill-source";
-import { transcriptionChecks, type LineCheck } from "@/lib/pdf-bill-checks";
+import { isAwaitingTranscription, transcriptionChecks, type LineCheck } from "@/lib/pdf-bill-checks";
 import PdfTranscriptionPanel from "@/components/imports/PdfTranscriptionPanel";
 // Pure: the one rule about what a row is, what stops a fabric line, and what
 // the Confirm button says it will write — the same functions the confirm runs.
@@ -207,7 +207,7 @@ export default function BoqReview({
   // line marked, and code's cross-checks re-run on every render — never stored,
   // so a person changing the columns re-checks against the new mapping.
   const transcription = run.parsed?.pdfTranscription ?? null;
-  const transcribing = transcription?.state === "waiting";
+  const transcribing = isAwaitingTranscription(run.parsed);
   const transcribed = transcription?.state === "done";
   const pageOfLine = (sheet: (typeof sheets)[number], lineNo: number) => pdfPageOfLine(run.parsed?.pdfSource, sheet.sheetName, lineNo);
   const lineChecks = new Map<number, Map<number, LineCheck[]>>();

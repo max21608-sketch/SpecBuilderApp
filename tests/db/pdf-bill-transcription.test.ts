@@ -132,6 +132,7 @@ describeIfDb("a PDF bill the model transcribes", () => {
       await client.query(`delete from spec_records where project_id = $1`, [projectId]);
       await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
       await client.query(`delete from intake_runs where project_id = $1`, [projectId]);
+      await client.query(`delete from intake_batches where project_id = $1`, [projectId]);
       await client.query(`delete from attachments where entity_type = 'project' and entity_id = $1`, [projectId]);
       await client.query(`delete from projects where id = $1`, [projectId]);
     }
@@ -164,6 +165,27 @@ describeIfDb("a PDF bill the model transcribes", () => {
     expect(parsed.sheets).toEqual([]);
     expect(parsed.pdfTranscription).toMatchObject({ state: "waiting", pageCount: 2 });
     expect(modelCalls.count).toBe(0);
+
+    // The lists say it waits for its transcription, not "Ready to review"
+    // (review 2.5): the Documents tab's row and the pack's.
+    const { GET: project } = await import("@/app/api/projects/[id]/route");
+    const overview = (await (await project(new Request("http://localhost/test?only=documents"), params(projectId))).json()) as {
+      documents: { id: string; awaiting_transcription?: boolean }[];
+    };
+    expect(overview.documents.find((doc) => doc.id === runId)?.awaiting_transcription).toBe(true);
+    // Registered with no pack here; the pack screen lists a run by its batch.
+    const batchId = (
+      await client.query(
+        `insert into intake_batches (project_id, label, created_by, updated_by) values ($1, '__QA pack', 'qa', 'qa') returning id`,
+        [projectId],
+      )
+    ).rows[0].id;
+    await client.query(`update intake_runs set batch_id = $2 where id = $1`, [runId, batchId]);
+    const { GET: batches } = await import("@/app/api/projects/[id]/batches/route");
+    const packs = (await (await batches(new Request("http://localhost/test"), params(projectId))).json()) as {
+      batches: { runs: { id: string; awaitingTranscription?: boolean }[] }[];
+    };
+    expect(packs.batches.flatMap((batch) => batch.runs).find((run) => run.id === runId)?.awaitingTranscription).toBe(true);
   });
 
   // Review 2.1: the outcome is printed on the bill's review, and it held the

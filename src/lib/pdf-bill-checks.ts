@@ -60,6 +60,21 @@ export type PdfTranscription = {
   notes?: string[];
 };
 
+/**
+ * A staged bill HELD until its transcription runs: a PDF code could not read,
+ * registered waiting, with no sheets yet. The review screen and the Documents
+ * list both ask this, so a held bill is never called "Ready to review" while
+ * there is nothing on it to review (found in use, 2026-10-15).
+ *
+ * THE SAME RULE IS SQL in /api/projects/[id] and /api/projects/[id]/batches
+ * (`parsed->'pdfTranscription'->>'state' = 'waiting'` on a parsed bill), which
+ * the driver cannot share; tests/lib/intake-status.test.ts holds the copies to
+ * this one.
+ */
+export function isAwaitingTranscription(parsed: { pdfTranscription?: Pick<PdfTranscription, "state"> | null } | null | undefined): boolean {
+  return parsed?.pdfTranscription?.state === "waiting";
+}
+
 /** What the checks need of a staged line. */
 export type CheckedLine = {
   lineNo: number;

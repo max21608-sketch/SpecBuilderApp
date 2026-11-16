@@ -74,6 +74,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
                           ) as s
                           where s->>'needsColumns' = 'true' and coalesce(s->>'ignored', 'false') <> 'true'
                        )),
+                       -- A PDF bill HELD until its transcription runs: nothing
+                       -- on it to review yet. THE SAME EXPRESSION as
+                       -- /api/projects/[id], and isAwaitingTranscription in
+                       -- src/lib/pdf-bill-checks.ts; change all three.
+                       'awaitingTranscription', (r.source_kind = 'boq_xlsx' and r.status = 'parsed'
+                                                 and r.parsed->'pdfTranscription'->>'state' = 'waiting'),
                        'sourcePreserved', (r.attachment_id is not null),
                        -- Whether a model has read this bill's columns yet
                        -- (plan any-bill Step 2): a row can then say, before
