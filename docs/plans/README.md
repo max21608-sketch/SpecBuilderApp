@@ -21,7 +21,7 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
-## 2026-11-16 — The review build: six stages on `review-int`, NOT on staging
+## 2026-11-16 — The review build: six stages on `review-int`, on staging since 2026-11-18
 
 Max, 2026-11-16: "review the app and code base, look for unfinished sections
 and issues with the code, generate a plan to fix any issues you find", then
@@ -85,9 +85,11 @@ and issues with the code, generate a plan to fix any issues you find", then
   known headings, is HELD at Confirm until somebody presses "The columns are
   right". A bare count of seven or more digits in a mock-up quantity is now a
   quantity.
-- **State: committed locally on `review-int`, not pushed, not deployed.**
-  GitHub is read-only for Claude under the organisation's policy, so the push
-  is Max's. No migration. Human acceptance is outstanding on every screen.
+- **State: pushed to `origin/staging` by Max on 2026-11-18, at `70577e9`**
+  (`04fb2fc..70577e9`, with the users' help file, `docs/help/`). Until then it
+  was committed locally only: GitHub is read-only for Claude under the
+  organisation's policy, so every push is Max's. The staging deployment and
+  the CI run have not been read by Claude. Not on pilot. No migration. Human acceptance is outstanding on every screen.
   The CI workflow's move to `actions/*@v5` is unverified until CI runs.
 - **Still open, in `found-in-use.md` under 2026-11-16:** leaving the Specs tab
   with the Edit panel open discards the text; a PDF page with nothing in its

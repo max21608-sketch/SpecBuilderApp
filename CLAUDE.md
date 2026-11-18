@@ -656,9 +656,10 @@ has walked it.
 again for what is unfinished or wrong, with screenshots, and then "keep running
 through each stage until you're finished" (`docs/plans/review-2026-11-16.md`;
 the dated entry in `docs/plans/README.md` lists every item and its commit). Six
-stages are on **`review-int`: committed locally, NOT pushed, NOT on staging** —
-GitHub is read-only for Claude under the organisation's policy, so the push is
-Max's. What it changed that a later change could undo: the export reads one
+stages were built on `review-int` and are **on `origin/staging` at `70577e9`
+since 2026-11-18, pushed by Max** (GitHub is read-only for Claude under the
+organisation's policy, so every push is Max's); the staging deployment and the
+CI run that push started have not been read by Claude. What it changed that a later change could undo: the export reads one
 REPEATABLE READ snapshot and REFUSES a file with a record missing
 (`docs/load-bearing/exports.md`); staged-bill writes carry the document's
 version and go out one at a time (`docs/load-bearing/screens.md`); the bill
@@ -669,7 +670,8 @@ place (`docs/load-bearing/bills.md`); the snapshot writer is one statement
 `npm run dev` in the main checkout is the sandbox. No migration. All four
 checks pass on the local stack with the database tier required (5,120 tests);
 30 screens were walked at 1920 and 1440 before and after. Human acceptance is
-outstanding on every screen it touched, and CI has not run on it.
+outstanding on every screen it touched, and CI's first run on it (the
+workflows moved to `actions/*@v5`) is unread.
 
 **Explicitly excluded, so it is not built speculatively:** feeding preamble
 notes into later model calls; a BWS *import* file carrying job numbers; images
@@ -687,7 +689,7 @@ diary and the README):
   design; the gate model's assumptions (`docs/plans/matrix-assumptions.md`,
   Max standing in for him since 2026-09-17); the level guess rules; the
   question-to-BWS-field mapping; Q4/Q6/Q7/Q8 from the Ronnie Scott's plan.
-- **Max:** pushing `review-int` to `staging` (the review build, 2026-11-16);
+- **Max:** reading the first CI run on the review build (pushed 2026-11-18);
   whether a preamble note's retire belongs in the change trail; deleting the
   65 merged local branches; `origin/production` (delete or record); whether to enforce the full
   CSP after the browser walk; reclaiming pilot's audit-log space; a chased
