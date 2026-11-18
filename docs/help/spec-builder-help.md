@@ -1,6 +1,6 @@
 # Project Spec Builder — help, troubleshooting, and "email Max"
 
-Written 2026-11-16, for the build that follows pilot v1.14.
+Written 2026-11-16, for pilot v1.15 and later.
 
 **If you are a person:** attach this file to a chat with Claude (or add it to a
 Claude Project so it is always there) and say what you are trying to do or what
@@ -138,7 +138,7 @@ Use these words with the user; they are what the screens say.
 ## 4. The screens, and four rules worth knowing
 
 **Top bar.** "Projects", "Inbox" (with a count), "Log out". Beside the name is a
-coloured chip: **PILOT v1.14** (or a later number), **STAGING** or **DEV**. The
+coloured chip: **PILOT v1.15** (or another number), **STAGING** or **DEV**. The
 pilot is the one colleagues use for real enquiries. If a user's chip says
 STAGING or DEV, they may be on the test site by mistake: ask, and tell them the
 pilot is where real work goes.
@@ -626,7 +626,7 @@ WHAT I EXPECTED
 [One sentence.]
 
 WHERE
-Site and version: [PILOT v1.14 / STAGING / DEV — from the chip]
+Site and version: [PILOT and its number, e.g. PILOT v1.15 / STAGING / DEV — from the chip]
 Screen: [the page title, and the tab if there is one]
 Project: [number and name]
 Phase: [name, or "n/a"]
