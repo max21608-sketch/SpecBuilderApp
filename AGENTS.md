@@ -611,10 +611,14 @@ inferred from a sister item or a template); the export is judged flawless by a
 human. No model is fine-tuned and none will be; "flawless" is a human
 acceptance test, not a passing suite.
 
-**Where it stands (2026-11-07).** The pilot (Matthew, Claudia) works real
-enquiries on `spec-builder-pilot`, at v1.14 from `3e96ba6` (promoted
-2026-11-07, the audit build with 0050–0060 applied, re-seeded and
-backfilled); the Ronnie Scott's
+**Where it stands (2026-11-18).** The pilot (Matthew, Claudia) works real
+enquiries on `spec-builder-pilot`. Its branch was fast-forwarded by Max on
+2026-11-18 from `3e96ba6` (v1.14, the audit build with 0050–0060 applied,
+re-seeded and backfilled, promoted 2026-11-07) to **`7b8eb4b`, v1.15, the
+review build**: pilot was backed up first and the migration run applied
+nothing (60 already present). Checklist steps 4–8 (the deployment for that
+SHA, `/api/auth/me`, the chip, the first-session walk) and CI on the SHA were
+Max's and are not recorded here as seen; the Ronnie Scott's
 tender (P16717) went in on pilot on 2026-10-15 with Matthew watching, and he
 and Claudia now review its drawings there themselves. Matthew called intake
 mostly done on 2026-10-12; the next phase is a screen for reviewing specs item
@@ -656,10 +660,11 @@ has walked it.
 again for what is unfinished or wrong, with screenshots, and then "keep running
 through each stage until you're finished" (`docs/plans/review-2026-11-16.md`;
 the dated entry in `docs/plans/README.md` lists every item and its commit). Six
-stages were built on `review-int` and are **on `origin/staging` at `70577e9`
-since 2026-11-18, pushed by Max** (GitHub is read-only for Claude under the
-organisation's policy, so every push is Max's); the staging deployment and the
-CI run that push started have not been read by Claude. What it changed that a later change could undo: the export reads one
+stages were built on `review-int` and are **on `origin/staging` and
+`origin/pilot` at `7b8eb4b` since 2026-11-18, pushed by Max** (GitHub is
+read-only for Claude under the organisation's policy, so every push is
+Max's); neither deployment nor the CI run has been read by Claude. What it
+changed that a later change could undo: the export reads one
 REPEATABLE READ snapshot and REFUSES a file with a record missing
 (`docs/load-bearing/exports.md`); staged-bill writes carry the document's
 version and go out one at a time (`docs/load-bearing/screens.md`); the bill

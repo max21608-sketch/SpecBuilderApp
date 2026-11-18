@@ -89,7 +89,15 @@ and issues with the code, generate a plan to fix any issues you find", then
   (`04fb2fc..70577e9`, with the users' help file, `docs/help/`). Until then it
   was committed locally only: GitHub is read-only for Claude under the
   organisation's policy, so every push is Max's. The staging deployment and
-  the CI run have not been read by Claude. Not on pilot. No migration. Human acceptance is outstanding on every screen.
+  the CI run have not been read by Claude. No migration.
+- **Promoted to pilot the same day, as v1.15 from `7b8eb4b`** (two commits
+  later: the docs correction and the chip's version). Max backed pilot up
+  (`spec-builder-pilot-2026-11-18T15-50-09-243Z.sql`, 96 MB, the
+  `ep-long-recipe…` host read first), ran the migrations ("Applied 0
+  migration(s); 60 already present") and pushed `3e96ba6..7b8eb4b` to
+  `pilot`. Steps 0 and 4–8 of the checklist (CI on the SHA, the deployment,
+  `/api/auth/me`, the chip, the first-session walk) were Max's; Claude saw
+  none of them, and `/api/auth/me` answers 401 unsigned, so it cannot. Human acceptance is outstanding on every screen.
   The CI workflow's move to `actions/*@v5` is unverified until CI runs.
 - **Still open, in `found-in-use.md` under 2026-11-16:** leaving the Specs tab
   with the Edit panel open discards the text; a PDF page with nothing in its
