@@ -96,18 +96,22 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   // contact's accented name neither breaks the header nor is lost (audit A6).
   const label = `${String(draft.project_label)} ${intendedName}`.replace(/\s+/g, " ").trim();
 
-  return new Response(eml, {
-    status: 200,
-    headers: {
-      "content-type": "message/rfc822",
-      "content-disposition": contentDisposition("attachment", `Spec chase - ${label || "draft"}.eml`),
-      // Never cached: it contains client contact details and is regenerated
-      // cheaply. A shared cache holding it would be a quiet data leak.
-      "cache-control": "private, no-store",
-      // So the screen can say exactly who the real email would have gone to.
-      "x-draft-version": String(draft.version),
-      "x-intended-to": isProduction ? "" : intendedTo,
-      "x-intended-cc": isProduction ? "" : intendedCc,
-    },
-  });
+  const headers: Record<string, string> = {
+    "content-type": "message/rfc822",
+    "content-disposition": contentDisposition("attachment", `Spec chase - ${label || "draft"}.eml`),
+    // Never cached: it contains client contact details and is regenerated
+    // cheaply. A shared cache holding it would be a quiet data leak.
+    "cache-control": "private, no-store",
+    "x-draft-version": String(draft.version),
+  };
+  // So the screen can say exactly who the real email would have gone to —
+  // ONLY where the file was readdressed. On production it was not, and the
+  // two headers used to go out there anyway with empty values: present, and
+  // saying nothing (production hardening H6, 2026-11-20).
+  if (!isProduction) {
+    headers["x-intended-to"] = intendedTo;
+    headers["x-intended-cc"] = intendedCc;
+  }
+
+  return new Response(eml, { status: 200, headers });
 }
