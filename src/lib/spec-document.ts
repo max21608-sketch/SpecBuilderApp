@@ -701,8 +701,10 @@ function landingRuns(resolution: Resolution): RunGroup[] {
  * pair in each of two phases read "A and B and C and D are twins: … one item
  * on 4 lines", and a phase with no twins said it too.
  */
-function landOnTwins(runs: RunGroup[]): (RunGroup & { twinsNote: string | null })[] {
-  return runs.flatMap((run) => {
+type LandingRun = RunGroup & { twinsNote: string | null };
+
+function landOnTwins(runs: RunGroup[]): LandingRun[] {
+  return runs.flatMap((run): LandingRun[] => {
     if (run.records.length < 2 || !everyPairTwinned(run.records)) return [{ ...run, twinsNote: null }];
     const twinsNote = `${run.records.map((record) => record.label).join(" and ")} are twins: the bill lists one item on ${run.records.length} lines, so this goes on each. Ignore it on a line whose spec differs.`;
     return run.records.map((record) => ({ runId: run.runId, runName: run.runName, records: [record], twinsNote }));
