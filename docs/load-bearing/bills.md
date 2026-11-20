@@ -303,6 +303,24 @@ already exist.
   "Pair the n suggested" per tab; reconcile reports `accepted` and lists a
   suggested-only record in `missing` with `suggestedFor`. The level-picker
   trap, in a third place.
+- **A revision writes only the columns its sheet MAPS** (2026-11-20, R7,
+  `fieldsTheBillStates` in `boq-reconcile.ts`, read by `carryPairedLine` and
+  by the review's `lineDeltas`). Found on the local stack: a person set
+  `designer = 'NPI'` on two records through the record's Edit panel — the
+  bill has no designer column, so that is the only way to route a chase —
+  then a Rev B in the same layout, still with no designer column, was
+  confirmed as their revision; the pairing column read "Designer: NPI → —"
+  and the confirm wrote NULL on both. A role the sheet's column map does not
+  hold is the bill saying NOTHING, never the bill saying empty: the paired
+  record keeps its own designer, product reference, area (composed from
+  area, sub-area and category, so any of the three states it), BOQ category,
+  unit and quantity (with `qty_raw`), and the review shows no change for it.
+  A MAPPED column whose cell is blank still writes its blank and shows "→ —"
+  — unchanged, and a separate question. A sheet staged before its column map
+  was recorded (no `columns`) writes everything, as before. The name comes
+  from the description column, which every readable sheet maps; the bill's
+  own line-number column, its notes and kept columns are not written by a
+  revision at all.
 - **A retired line can come back** (C14). A retired bill line of the phase
   whose code is on the bill again is offered as a `restoreCandidate`, never
   chosen (two retired on one code: both offered, SX11A); the choice is
