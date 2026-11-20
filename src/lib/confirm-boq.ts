@@ -55,6 +55,7 @@ import { createFinish, mintInternalFinishCode } from "@/lib/finish-edit";
 import {
   billFinishPlanInputs,
   descriptionFilesAFinish,
+  wordsDescribeAFinish,
   planBillFinishWrites,
   planFinishSwatches,
   type BillFinishWrite,
@@ -1348,6 +1349,10 @@ async function writeFabricLine(
     created: input.createdFinishIds,
     actor,
   });
+  // THE PLAN SAID THESE WORDS DESCRIBE A ROW THIS CONFIRM MADE WITH NONE (R10).
+  if (write.describes && finishId) {
+    await describeCreatedRow(txn, { finishId, says: write.describes, library, actor });
+  }
 
   const writeTo: string[] = [];
   for (const entry of writing) {
@@ -1470,6 +1475,33 @@ function realFinishId(
   return row.id;
 }
 
+/**
+ * The library rows THIS confirm created, by the confirm's own library array
+ * (one per confirm) — the only rows `describeCreatedRow` may describe (R10).
+ */
+const CREATED_HERE = new WeakMap<Finish[], Set<string>>();
+
+/**
+ * Words for a row this confirm created with none (R10, `describeCreatedFinish`
+ * in `bill-fabric-filing.ts` decides; this writes). Re-checked in the update
+ * itself: only a row created in this confirm, and only while it is still
+ * empty — a row that existed before the confirm is never described here.
+ */
+async function describeCreatedRow(
+  txn: TxnSql,
+  input: { finishId: string; says: string; library: Finish[]; actor: string },
+): Promise<void> {
+  const { finishId, says, library, actor } = input;
+  if (!CREATED_HERE.get(library)?.has(finishId)) return;
+  const row = library.find((finish) => finish.id === finishId);
+  if (!row || (row.description ?? "").trim() !== "") return;
+  await txn`
+    update project_finishes set description = ${says}, updated_by = ${actor}
+    where id = ${finishId} and coalesce(btrim(description), '') = ''
+  `;
+  row.description = says;
+}
+
 async function createAndRemember(
   txn: TxnSql,
   input: { projectId: string; code: string; origin: FinishCodeOrigin; says: string | null; library: Finish[]; actor: string },
@@ -1480,6 +1512,9 @@ async function createAndRemember(
     fields: { code, codeOrigin: origin, description: says, state: "tbc" },
     actor,
   });
+  const created = CREATED_HERE.get(library) ?? new Set<string>();
+  created.add(finishId);
+  CREATED_HERE.set(library, created);
   library.push({
     id: finishId,
     code,
@@ -1508,7 +1543,14 @@ async function fileFinishCode(
 ): Promise<string | null> {
   const { projectId, code, says, library, actor } = input;
   const resolution = resolveFinishCodeInWalk(code, says, library);
-  if (resolution.status === "matched") return resolution.finish.id;
+  if (resolution.status === "matched") {
+    // The planner's rule (`describeCreatedFinish`): a row this confirm made
+    // with no words takes the first real ones a later statement gives (R10).
+    if (wordsDescribeAFinish(says)) {
+      await describeCreatedRow(txn, { finishId: resolution.finish.id, says: (says ?? "").trim(), library, actor });
+    }
+    return resolution.finish.id;
+  }
   if (resolution.status === "new") {
     return createAndRemember(txn, { projectId, code: resolution.code, origin: "client", says, library, actor });
   }
