@@ -452,4 +452,78 @@ describeIfDb("BOQ revision", () => {
       ["__QAD41", 1, "NPI", "__QA Lobby"],
     ]);
   });
+
+  // Pre-push review E7 (2026-11-20). The area counted as stated when ANY of
+  // area, sub-area or category was mapped, and with only a category mapped
+  // `effectiveArea` falls back to the category's text: Rev A's Area column
+  // gave the record "Guest Room Type A", Rev B maps a Category column and no
+  // Area column, and the confirm wrote area = "Seating" — the area the twin
+  // pairing reads, gone. For a revision's carried line the area is stated
+  // only by an area or sub-area column; a NEW line still takes the
+  // first-import fallback.
+  it("keeps the area when the revised sheet maps a Category column and no Area column", { timeout: 30_000 }, async () => {
+    const revA = {
+      code: { index: 0, heading: "Ref" },
+      itemDescription: { index: 1, heading: "Description" },
+      area: { index: 2, heading: "Area" },
+      qty: { index: 3, heading: "Qty" },
+    };
+    const revB = {
+      code: { index: 0, heading: "Ref" },
+      itemDescription: { index: 1, heading: "Description" },
+      boqCategory: { index: 2, heading: "Category" },
+      qty: { index: 3, heading: "Qty" },
+    };
+    const underA = (index: number, over: Record<string, unknown> = {}) => ({
+      ...line({ index, code: `__QAE${index}` }),
+      designer: null,
+      boqCategory: null,
+      area: "__QA Guest Room Type A",
+      ...over,
+    });
+    const underB = (index: number, over: Record<string, unknown> = {}) => ({
+      ...line({ index, code: `__QAE${index}` }),
+      designer: null,
+      area: null,
+      boqCategory: "__QA Seating",
+      ...over,
+    });
+    const first = await stage([underA(70)], null, { columns: revA });
+    expect((await confirm(first)).status).toBe(200);
+    const read = async () =>
+      (
+        await client.query(
+          `select x.ref_value as code, r.id, r.version, r.run_id, r.area, r.boq_category
+             from spec_records r join spec_record_refs x on x.record_id = r.id
+            where r.project_id = $1 and x.ref_value like '__QAE7%' and r.status = 'active' order by x.ref_value`,
+          [projectId],
+        )
+      ).rows;
+    const [carried] = await read();
+    expect(carried.area).toBe("__QA Guest Room Type A");
+
+    const revision = await stage(
+      [underB(70, { replaces: { recordId: carried.id, recordVersion: carried.version } }), underB(71)],
+      carried.run_id,
+      { columns: revB },
+    );
+
+    // The review's "changed" column reads the same rule: the category is a
+    // change, the area is not.
+    const { GET } = await import("@/app/api/imports/[id]/route");
+    const review = (await (await GET(new Request("http://localhost/test"), params(revision))).json()) as {
+      reconciliation: Record<string, { lines: { lineNo: number; deltas: { field: string }[] }[] }>;
+    };
+    // Line 71 is the carried one (index 70).
+    const carriedLine = review.reconciliation["0"]?.lines.find((entry) => entry.lineNo === 71);
+    expect(carriedLine?.deltas.map((delta) => delta.field)).toEqual(["boqCategory"]);
+
+    expect((await confirm(revision)).status).toBe(200);
+    expect((await read()).map((row) => [row.code, row.area, row.boq_category])).toEqual([
+      // Carried: the category the sheet maps is written; the area it does not map is kept.
+      ["__QAE70", "__QA Guest Room Type A", "__QA Seating"],
+      // New: the first-import three-way fallback, unchanged.
+      ["__QAE71", "__QA Seating", "__QA Seating"],
+    ]);
+  });
 });

@@ -377,9 +377,11 @@ already exist.
   confirmed as their revision; the pairing column read "Designer: NPI → —"
   and the confirm wrote NULL on both. A role the sheet's column map does not
   hold is the bill saying NOTHING, never the bill saying empty: the paired
-  record keeps its own designer, product reference, area (composed from
-  area, sub-area and category, so any of the three states it), BOQ category,
-  unit and quantity (with `qty_raw`), and the review shows no change for it.
+  record keeps its own designer, product reference, area (stated by an area
+  or sub-area column only — a category column alone is the first import's
+  fallback text, and wrote "Seating" over "Guest Room Type A", pre-push
+  review E7), BOQ category, unit and quantity (with `qty_raw`), and the review
+  shows no change for it.
   A MAPPED column whose cell is blank still writes its blank and shows "→ —"
   — unchanged, and a separate question. A sheet staged before its column map
   was recorded (no `columns`) writes everything, as before. The name comes
