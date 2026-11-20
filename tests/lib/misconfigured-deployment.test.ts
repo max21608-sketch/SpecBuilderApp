@@ -18,7 +18,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const KEYS = ["APP_ENV", "DATABASE_ENVIRONMENT"] as const;
+const KEYS = ["APP_ENV", "DATABASE_ENVIRONMENT", "AUTH_SECRET"] as const;
+const GOOD_SECRET = "__qa-misconfigured-deployment-secret-0123456789";
 let saved: Record<string, string | undefined>;
 
 beforeEach(() => {
@@ -35,10 +36,13 @@ afterEach(() => {
 });
 
 /** A fresh module graph per case: `env.ts` caches its answer deliberately. */
-async function load(appEnv: string, databaseEnvironment: string) {
+/** `authSecret: null` unsets it. */
+async function load(appEnv: string, databaseEnvironment: string, authSecret: string | null = GOOD_SECRET) {
   vi.resetModules();
   process.env.APP_ENV = appEnv;
   process.env.DATABASE_ENVIRONMENT = databaseEnvironment;
+  if (authSecret === null) delete process.env.AUTH_SECRET;
+  else process.env.AUTH_SECRET = authSecret;
   return import("@/middleware");
 }
 
@@ -105,10 +109,12 @@ describe("middleware when the pair is right", () => {
 // on the pilot build of 2026-09-19.
 // ============================================================================
 describe("the sign-in POST on a misconfigured deployment", () => {
-  async function signIn(appEnv: string, databaseEnvironment: string) {
+  async function signIn(appEnv: string, databaseEnvironment: string, authSecret: string | null = GOOD_SECRET) {
     vi.resetModules();
     process.env.APP_ENV = appEnv;
     process.env.DATABASE_ENVIRONMENT = databaseEnvironment;
+    if (authSecret === null) delete process.env.AUTH_SECRET;
+    else process.env.AUTH_SECRET = authSecret;
     const { POST } = await import("@/app/api/auth/login/route");
     return POST(
       new Request("http://localhost/api/auth/login", {
@@ -137,5 +143,53 @@ describe("the sign-in POST on a misconfigured deployment", () => {
     // after it, this case would try to connect and fail differently.
     const res = await signIn("staging", "pilot");
     expect(res.status).toBe(503);
+  });
+
+  // Production hardening H1 (2026-11-20): the token was signed outside any
+  // try, AFTER the password check, so a deployment with no AUTH_SECRET took a
+  // right password and answered a bodyless 500. Refused before the password
+  // now — again with no `verifyCredentials` mock, so a guard that ran after
+  // the database would fail differently.
+  it("refuses a deployed build with no AUTH_SECRET in words, before the password", async () => {
+    const res = await signIn("staging", "sandbox", null);
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { ok: boolean; code: string; error: string };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("environment_misconfigured");
+    expect(body.error).toContain("cannot sign anybody in");
+    expect(body.error).toContain("AUTH_SECRET is not set");
+  });
+});
+
+describe("middleware on a deployed build with no usable AUTH_SECRET", () => {
+  it("refuses an API request as JSON, naming the variable", async () => {
+    const { middleware } = await load("pilot", "pilot", null);
+    const res = await middleware(api());
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { code: string; error: string };
+    expect(body.code).toBe("environment_misconfigured");
+    expect(body.error).toContain("AUTH_SECRET");
+  });
+
+  it("refuses a page with the sentence, not a sign-in form that cannot sign in", async () => {
+    const { middleware } = await load("production", "production", "too-short");
+    const res = await middleware(page());
+    expect(res.status).toBe(503);
+    expect(res.headers.get("location")).toBeNull();
+    const body = await res.text();
+    expect(body).toContain("cannot sign anybody in");
+    expect(body).not.toContain("too-short");
+  });
+
+  it("leaves a developer's machine alone, which sets its own", async () => {
+    const { middleware } = await load("development", "sandbox", null);
+    const res = await middleware(api());
+    expect(res.status).toBe(401);
+  });
+
+  it("lets pilot run on a short secret it already has: only production is held to 32", async () => {
+    const { middleware } = await load("pilot", "pilot", "__qa-sixteen-chr");
+    const res = await middleware(api());
+    expect(res.status).toBe(401);
   });
 });

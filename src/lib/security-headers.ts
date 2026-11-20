@@ -18,6 +18,16 @@
 //     a path naming a project, a record or an import.
 //   - a `Permissions-Policy` that turns off what nothing here uses.
 //
+// HSTS ON EVERY BUILT DEPLOYMENT (production hardening H3, 2026-11-20):
+// `Strict-Transport-Security: max-age=63072000` (two years) whenever NODE_ENV
+// is `production`, which is every `next build` and never `next dev`. Without
+// it, the first request somebody types without `https://` is plain HTTP, and
+// a network in between can answer it instead of Vercel. NO `includeSubDomains`
+// and NO `preload`, deliberately: the production domain is undecided, and
+// either one would bind every sibling under it — a preload is close to
+// irreversible. A browser ignores the header over plain HTTP, so a production
+// build served on localhost is not affected.
+//
 // WHAT IS REPORT-ONLY, deliberately: the full policy (`default-src 'self'`
 // and the rest). Next's App Router writes its own inline scripts, the
 // browser-direct upload talks to the Blob API on another origin, pdfjs runs a
@@ -67,8 +77,13 @@ export function fullContentSecurityPolicy(env: Record<string, string | undefined
   ].join("; ");
 }
 
+/** Two years, in seconds. No `includeSubDomains`, no `preload`: see the header. */
+export const HSTS_VALUE = "max-age=63072000";
+
 export function securityHeaders(env: Record<string, string | undefined>): { key: string; value: string }[] {
+  const transport = env.NODE_ENV === "production" ? [{ key: "Strict-Transport-Security", value: HSTS_VALUE }] : [];
   return [
+    ...transport,
     { key: "Content-Security-Policy", value: "frame-ancestors 'none'; base-uri 'self'; object-src 'none'" },
     { key: "Content-Security-Policy-Report-Only", value: fullContentSecurityPolicy(env) },
     { key: "X-Frame-Options", value: "DENY" },

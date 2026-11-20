@@ -161,7 +161,8 @@ area, quantity, category, level, how much has been captured, and its TGQ.
 "Versions". Buttons: "Add a spec by hand", "Chase the N".
 
 **Documents tab and pack page.** Every document, its state, and "Review" or
-"Open". "Add documents" uploads more.
+"Open". "Add documents" uploads more. Emails are listed under "Emails", apart
+from the packs, even when dropped in with one: each is read on its own.
 
 **Review screens.** One for a bill, one for drawings (a document on its own, or
 "Review all N drawings together"), one for a finishes schedule, a preamble, an
@@ -211,7 +212,7 @@ Projects → "Add a project" → BWS number (e.g. `P17231`), name, client → "A
 project". "Project P… already exists." means it is already there: search the
 list, including the "Archived" and "All" tabs.
 
-Then open it and press "Edit" on the Project card to set the client, the shared
+The app then opens the new project, on "Upload the pack". Press "Edit" on the Project card to set the client, the shared
 inbox, the drawing units and the three dates (order date, **complete
 specifications agreed by**, delivery date). Until "complete specifications
 agreed by" has a date the app shows "No programme recorded" and cannot flag
@@ -321,7 +322,8 @@ code with other words; decide which is right.
 
 ### 5.8 Fill in what we know, then chase
 Project → **"Fill in ourselves"**. Internal; nothing is sent. Open an item (the
-arrow at the left of its row) and type the answer, or press "TBC" if it
+arrow at the left of its row) and type the answer, then press Enter or click
+away — either saves it — or press "TBC" if it
 has been asked and is not decided yet. "By question"
 answers one question across many items.
 
@@ -329,7 +331,12 @@ Project → **"Chase N"**.
 
 1. **Contacts first.** Each record carries a designer code from the bill. Add a
    contact with that same "Designer code" and that person's questions route to
-   them. "Nobody can be asked yet." means no contact has a matching code.
+   them. "Nobody can be asked yet." means no contact has a matching code. Where
+   it adds "N items have no designer", the bill gave them none: on the phase
+   table tick them, press **"Set designer…"**, type the code (the contacts'
+   codes are offered) and press "Set on N items". It sets each item as its
+   Edit would, and its configurations with no designer of their own; any it
+   could not change are listed by number, with why.
 2. Tick what to ask and press **"Draft the email · N questions"**.
 3. **"Open in Outlook (.eml)"** downloads the draft. Open it, check it, and
    send it from your own Outlook. The app sends nothing.
@@ -427,6 +434,7 @@ copy it exactly. "Ref" below means an 8-character reference code (like
 | "Too many sign-in attempts. Wait N seconds and try again." | Ten wrong tries | Wait a minute. Do not keep trying |
 | "Signing in could not reach the database… Reference …" | The site cannot reach its database. Not their password | Try again in 5 minutes. Still failing → email Max, urgent, with the reference. Nobody will be able to sign in |
 | "Signing in failed on the server's side — this is not your password… Reference …" | A server fault | Try once more in a minute, then email Max with the reference |
+| "This deployment is not configured correctly, so it cannot sign anybody in…" | The site's sign-in secret is missing (or, on production, too short). Not their password, and nothing they can fix | Email Max, urgent, with the whole sentence. Nobody will be able to sign in until it is set |
 | "Your session has expired." / "Sign in again" | 24 hours passed, or they signed out elsewhere | "Sign in again". What was typed and not saved is still on the screen behind it — copy anything long before signing in |
 | "This is a view-only account" / "…so it cannot change anything here." | Their account can look but not edit | Email Max to ask for edit access |
 | "There is no page at this address" | An old or mistyped link | "Back to projects" and find it from there |

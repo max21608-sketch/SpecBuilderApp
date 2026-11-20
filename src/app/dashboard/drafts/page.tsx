@@ -116,6 +116,8 @@ type Blocked = {
   recordLabel: string;
   itemDescription: string;
   designer: string | null;
+  /** The record's phase. Absent from a payload that predates it. */
+  runId?: string;
   questionCount: number;
   /** What kind of block, for code to read; `reason` is only for a person. See `BlockedRecord`. */
   kind: "nobody_to_ask" | "no_tier";
@@ -618,6 +620,8 @@ function DraftsView() {
   /** Records nobody can be asked about, as opposed to records with no level. */
   const nobody = inventory.blocked.filter((row) => isContactBlocker(row));
   const nobodyQuestions = nobody.reduce((sum, row) => sum + row.questionCount, 0);
+  /** The items no contact could ever carry: the record names no designer at all. */
+  const noDesigner = nobody.filter((row) => row.designer === null || row.designer.trim() === "");
   /** Every question no designer's group holds: nobody to ask, or no level. Listed on Everyone too. */
   const blockedQuestions = inventory.blocked.reduce((sum, row) => sum + row.questionCount, 0);
 
@@ -1017,6 +1021,7 @@ function DraftsView() {
             adding={addingContactOpen}
             onAddingChange={setAddingContact}
             onChanged={() => void load()}
+            onDraftChase={chooseContact}
           />
         </Card>
 
@@ -1033,6 +1038,22 @@ function DraftsView() {
               {nobodyQuestions.toLocaleString()} question{nobodyQuestions === 1 ? "" : "s"} on {nobody.length} item
               {nobody.length === 1 ? "" : "s"} have no contact to go to — they are listed below. Add a contact with
               the designer code the bill uses, under Contacts, and they move into this table.
+              {/* THE OTHER HALF (U2, 2026-11-20): an item with NO designer has no
+                  code for any contact to carry. The next step is a button on
+                  the phase table, said in a few words with the way there. */}
+              {noDesigner.length > 0 && (
+                <span className="mt-1.5 block font-medium">
+                  {noDesigner.length.toLocaleString()} item{noDesigner.length === 1 ? " has" : "s have"} no designer:
+                  tick {noDesigner.length === 1 ? "it" : "them"} on the phase table and press &ldquo;Set designer&hellip;&rdquo;.{" "}
+                  <Link
+                    prefetch={false}
+                    href={`/dashboard/projects/${project.id}${noDesigner[0]?.runId ? `?tab=${encodeURIComponent(noDesigner[0].runId)}` : ""}`}
+                    className="text-blue-700 no-underline hover:underline"
+                  >
+                    Open the phase table
+                  </Link>
+                </span>
+              )}
             </Note>
           )}
           {!(tableQuestions.length === 0 && nobody.length > 0) && <ChaseQuestionTable

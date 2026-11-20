@@ -16,7 +16,10 @@
 // deployment reading pilot would let an hourly push rewrite his work.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const KEYS = ["APP_ENV", "DATABASE_ENVIRONMENT"] as const;
+const KEYS = ["APP_ENV", "DATABASE_ENVIRONMENT", "AUTH_SECRET"] as const;
+
+/** A secret long enough for a deployed build; never a real one. */
+const GOOD_SECRET = "__qa-env-test-secret-0123456789abcdef0123456789";
 
 let saved: Record<string, string | undefined>;
 
@@ -33,9 +36,17 @@ afterEach(() => {
   vi.resetModules();
 });
 
-// A fresh module instance per call, so the cache inside it is empty.
-async function load(appEnv: string | undefined, databaseEnvironment: string | undefined) {
+// A fresh module instance per call, so the cache inside it is empty. A good
+// AUTH_SECRET is set unless a case says otherwise, so the pair is the only
+// thing a pair case is about; `null` unsets it.
+async function load(
+  appEnv: string | undefined,
+  databaseEnvironment: string | undefined,
+  authSecret: string | null = GOOD_SECRET,
+) {
   vi.resetModules();
+  if (authSecret === null) delete process.env.AUTH_SECRET;
+  else process.env.AUTH_SECRET = authSecret;
   if (appEnv === undefined) delete process.env.APP_ENV;
   else process.env.APP_ENV = appEnv;
   if (databaseEnvironment === undefined) delete process.env.DATABASE_ENVIRONMENT;
@@ -204,5 +215,77 @@ describe("environmentProblem", () => {
   it("reports an UNSET pair too, which is the same accident one step earlier", async () => {
     const env = await load(undefined, undefined);
     expect(env.environmentProblemMessage()).toMatch(/APP_ENV is not set to a recognized value/);
+  });
+});
+
+// ============================================================================
+// AUTH_SECRET ON A DEPLOYED BUILD (production hardening H1, 2026-11-20)
+//
+// The sign-in route signed its token outside any try, and `auth.ts` throws
+// when the secret is missing: a deployment with no AUTH_SECRET checked the
+// password and then answered a bodyless 500. Every deployed build is now
+// refused in words before anybody types a password, and a developer's machine
+// is never asked.
+// ============================================================================
+describe("environmentProblem and AUTH_SECRET", () => {
+  const DEPLOYED = [
+    ["staging", "sandbox"],
+    ["pilot", "pilot"],
+    ["production", "production"],
+  ] as const;
+
+  it("refuses a deployed build with no AUTH_SECRET, naming the variable", async () => {
+    for (const [appEnv, dbEnv] of DEPLOYED) {
+      const env = await load(appEnv, dbEnv, null);
+      expect(env.environmentProblem(), appEnv).toMatch(/AUTH_SECRET is not set/);
+      expect(env.environmentProblemMessage(), appEnv).toContain(env.SESSION_SECRET_MISCONFIGURED);
+    }
+  });
+
+  it("refuses an AUTH_SECRET under 32 characters on PRODUCTION, and never prints it", async () => {
+    const short = "__qa-short-secret-31-characters"; // 31
+    expect(short).toHaveLength(31);
+    const env = await load("production", "production", short);
+    expect(env.environmentProblem()).toMatch(/shorter than 32 characters/);
+    expect(env.environmentProblemMessage() ?? "").not.toContain(short);
+  });
+
+  // Nobody can read the secrets staging and pilot already run on, and a length
+  // rule that turned pilot into a 503 on the next deploy would be worse than
+  // the defect (2026-11-20). They are asked only that one is SET.
+  it("does not hold staging or pilot to the length, only to having one", async () => {
+    for (const [appEnv, dbEnv] of [
+      ["staging", "sandbox"],
+      ["pilot", "pilot"],
+    ] as const) {
+      const env = await load(appEnv, dbEnv, "short");
+      expect(env.environmentProblem(), appEnv).toBeNull();
+      expect(env.environmentProblemMessage(), appEnv).toBeNull();
+    }
+  });
+
+  it("accepts exactly 32 characters on production", async () => {
+    const env = await load("production", "production", "x".repeat(32));
+    expect(env.environmentProblem()).toBeNull();
+    expect(env.environmentProblemMessage()).toBeNull();
+  });
+
+  it("withholds the detail on production and still says what to do", async () => {
+    const env = await load("production", "production", null);
+    expect(env.environmentProblemMessage()).toBe(env.SESSION_SECRET_MISCONFIGURED);
+    expect(env.SESSION_SECRET_MISCONFIGURED).toContain("AUTH_SECRET");
+  });
+
+  it("does not ask a developer's machine, which sets its own", async () => {
+    for (const secret of [null, "short"]) {
+      const env = await load("development", "sandbox", secret);
+      expect(env.environmentProblem(), String(secret)).toBeNull();
+    }
+  });
+
+  it("reports the pair first when both are wrong, because that is the deeper fault", async () => {
+    const env = await load("pilot", "sandbox", null);
+    expect(env.environmentProblem()).toMatch(/Refusing to start/);
+    expect(env.environmentProblemMessage()).toContain("APP_ENV and DATABASE_ENVIRONMENT");
   });
 });

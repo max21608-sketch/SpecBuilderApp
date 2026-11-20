@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import Button, { buttonClass } from "@/components/ui/Button";
@@ -103,6 +104,7 @@ function Programme({ day }: { day: string | null }) {
 const STATE_TABS = ["active", "completed", "archived", "all"] as const;
 
 function ProjectsView() {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [number, setNumber] = useState("");
@@ -141,22 +143,28 @@ function ProjectsView() {
     event.preventDefault();
     setSaving(true);
     setError(null);
+    let res: Awaited<ReturnType<typeof apiFetch<{ project: { id: string } }>>>;
     try {
-      const res = await apiFetch("/api/projects", {
+      res = await apiFetch<{ project: { id: string } }>("/api/projects", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ bwsProjectNumber: number, name, client }),
       });
-      if (!res.ok) { setError(res.error); return; }
-      setNumber(""); setName(""); setClient("");
-      // Close on success. The new project is in the list below, which is what
-      // somebody wants to see next; leaving three empty inputs open in front of
-      // it says the add did not happen.
-      setAdding(false);
-      await load();
-    } finally {
+    } catch (cause) {
       setSaving(false);
+      throw cause;
     }
+    if (!res.ok) {
+      setError(res.error);
+      setSaving(false);
+      return;
+    }
+    // TO THE NEW PROJECT (2026-11-20, U3). The list used to stay, with the form
+    // open and the new row at the top, when the next thing anybody does with a
+    // new project is upload its pack — which is where its page opens. `saving`
+    // stays on while the page changes, so the button cannot be pressed twice
+    // into a 409.
+    router.push(`/dashboard/projects/${res.data.project.id}`);
   }
 
   // Client-side, over the three things somebody actually types: the BWS

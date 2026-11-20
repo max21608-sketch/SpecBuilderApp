@@ -536,6 +536,8 @@ export type BlockedRecord = {
   recordLabel: string;
   itemDescription: string;
   designer: string | null;
+  /** The phase the record is on, so a screen can send somebody to its table (2026-11-20, U2). */
+  runId: string;
   questionCount: number;
   /**
    * WHAT KIND OF BLOCK, for code to read. `nobody_to_ask` is the designer
@@ -617,6 +619,7 @@ export function groupByContact(
       recordLabel: question.recordLabel,
       itemDescription: question.itemDescription,
       designer: question.designer,
+      runId: question.runId,
       questionCount: 1,
       kind,
       reason,

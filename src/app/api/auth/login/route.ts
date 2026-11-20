@@ -116,8 +116,18 @@ export async function POST(req: Request): Promise<Response> {
   }
   loginThrottle.succeed(keys);
 
-  const token = await makeSessionToken(user);
-  await setSessionCookie(token);
+  // INSIDE A TRY, like the password check (production hardening H1,
+  // 2026-11-20). Signing the token throws when AUTH_SECRET is missing, and it
+  // used to run bare here: the right password answered a bodyless 500. A
+  // deployed build now refuses that above, through `environmentProblemMessage`;
+  // this catches whatever is left — a developer's short secret, a cookie store
+  // that throws — and says it in the same words as any other server failure.
+  try {
+    const token = await makeSessionToken(user);
+    await setSessionCookie(token);
+  } catch (cause) {
+    return serverFailure(cause);
+  }
   // The token version is the session's own bookkeeping, not the screen's.
   return json({ ok: true, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
 }

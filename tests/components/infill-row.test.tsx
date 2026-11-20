@@ -101,6 +101,25 @@ describe("InfillRow", () => {
     expect(await screen.findByText("Recorded.")).toBeInTheDocument();
   });
 
+  // U4, 2026-11-20: Enter did nothing, so typing, Enter and a reload lost the
+  // answer. Enter now saves exactly as the blur does — and only once, because
+  // the blur IS what Enter does.
+  it("records a typed value on Enter, once, and the blur after it saves nothing more", async () => {
+    const user = userEvent.setup();
+    const { saveAnswer } = renderRow();
+    const box = screen.getByPlaceholderText("Value");
+    await user.type(box, "Meridian Drift Amber{Enter}");
+    expect(saveAnswer).toHaveBeenCalledTimes(1);
+    expect(saveAnswer).toHaveBeenCalledWith(
+      expect.objectContaining({ requirementId: "req-1" }),
+      { value: "Meridian Drift Amber", state: "confirmed", reason: null },
+    );
+    // Enter took the focus, so moving on afterwards is not a second blur.
+    expect(box).not.toHaveFocus();
+    await user.tab();
+    expect(saveAnswer).toHaveBeenCalledTimes(1);
+  });
+
   it("offers a palette with a way out, and writes the option that was chosen", async () => {
     const user = userEvent.setup();
     const { saveAnswer } = renderRow({}, { palette: palette() });

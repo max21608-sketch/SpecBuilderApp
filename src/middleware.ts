@@ -30,14 +30,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 import { environmentProblemMessage } from "@/lib/env";
+import { CROSS_SITE_REFUSED, isCrossSiteWrite } from "@/lib/cross-site";
 import { isWriterRole } from "@/lib/roles";
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   // BEFORE THE SESSION CHECK, because a deployment that cannot serve anybody
-  // should not first decide who they are. This is the only thing in this
-  // function that runs ahead of authorisation, and it can only ever refuse.
+  // should not first decide who they are. This and the cross-site check below
+  // are the only things in this function that run ahead of authorisation, and
+  // both can only ever refuse.
   const misconfigured = environmentProblemMessage();
   if (misconfigured) {
     return req.nextUrl.pathname.startsWith("/api/")
@@ -46,6 +48,22 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
           status: 503,
           headers: { "content-type": "text/plain; charset=utf-8" },
         });
+  }
+
+  // A WRITE FROM ANOTHER SITE (production hardening H2, 2026-11-20). The
+  // cookie is SameSite=Lax, which a sibling app on the same domain defeats;
+  // `src/lib/cross-site.ts` says what is refused and why a request with no
+  // Origin (a machine) is not. Before the session check, so a forged request
+  // is refused without its cookie being read at all.
+  if (
+    isCrossSiteWrite({
+      method: req.method,
+      pathname: req.nextUrl.pathname,
+      headers: req.headers,
+      fallbackHost: req.nextUrl.host,
+    })
+  ) {
+    return NextResponse.json({ ok: false, code: "cross_site_refused", error: CROSS_SITE_REFUSED }, { status: 403 });
   }
 
   // THE TOKEN, NOT THE ROW: this runs on the edge and cannot reach the
@@ -105,6 +123,12 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 //                       the request's own body (src/lib/queue-callback.ts).
 //                       Adding them here would break every background job.
 //   api/cron/*        - same, but authenticated with CRON_SECRET.
+//   api/health        - the health check (production hardening H4,
+//                       2026-11-20): `select 1` and the commit SHA, nothing
+//                       else, so a monitor and a person confirming a
+//                       promotion can ask without a session. EXACTLY this
+//                       path; `src/app/api/health/route.ts` says what it may
+//                       and may not say.
 //   api/graph/notifications
 //                     - Microsoft Graph's change notifications. Graph cannot
 //                       carry a session cookie. EXACTLY this path, not a
@@ -130,6 +154,6 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 // Anything added to this list is a deliberate decision to expose a route.
 export const config = {
   matcher: [
-    "/((?!_next/static/|_next/image$|favicon\\.ico$|login$|api/auth/login$|api/queues/|api/cron/|api/graph/notifications$).*)",
+    "/((?!_next/static/|_next/image$|favicon\\.ico$|login$|api/auth/login$|api/health$|api/queues/|api/cron/|api/graph/notifications$).*)",
   ],
 };

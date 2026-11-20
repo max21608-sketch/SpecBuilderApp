@@ -15,7 +15,8 @@ npm install
 cp .env.example .env.local   # then fill it in
 npm run db:migrate
 npm run db:seed        # no seeds until M1
-npm run create-user -- you@benwhistler.com "Your Name" admin '<password>'
+read -rs NEW_USER_PASSWORD && export NEW_USER_PASSWORD   # 12+ characters, not echoed
+npm run create-user -- you@benwhistler.com "Your Name" admin
 npm run dev
 ```
 

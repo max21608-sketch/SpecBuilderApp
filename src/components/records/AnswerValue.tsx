@@ -33,6 +33,20 @@ import {
 
 const OTHER = "__other__";
 
+/**
+ * ENTER SAVES, BY BLURRING (2026-11-20, U4). These boxes save when they lose
+ * focus, and Enter did nothing: somebody typed an answer, pressed Enter,
+ * reloaded, and it was gone. Enter now takes the focus away, so the save is
+ * the blur's own, once — Enter followed by a blur cannot save twice, because
+ * the blur that follows has already happened. Never during an IME composition,
+ * where Enter chooses a character rather than finishing the answer.
+ */
+export function blurOnEnter(event: React.KeyboardEvent<HTMLInputElement>): void {
+  if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+  event.preventDefault();
+  event.currentTarget.blur();
+}
+
 export default function AnswerValue({
   palette,
   value,
@@ -60,6 +74,7 @@ export default function AnswerValue({
           defaultValue={value ?? ""}
           placeholder="Value"
           disabled={disabled}
+          onKeyDown={blurOnEnter}
           onBlur={(event) => {
             const next = event.target.value.trim();
             if (next === (value ?? "")) return;

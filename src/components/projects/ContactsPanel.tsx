@@ -76,6 +76,11 @@ const ROLE_LABELS: Record<ContactRole, string> = {
   internal: "Internal",
 };
 
+/** The chase screen, opened on one contact's tab (`drafts/page.tsx` reads `contactId`). */
+function chaseHref(projectId: string, contactId: string): string {
+  return `/dashboard/drafts?projectId=${encodeURIComponent(projectId)}&contactId=${encodeURIComponent(contactId)}`;
+}
+
 export default function ContactsPanel({
   projectId,
   contacts,
@@ -85,6 +90,7 @@ export default function ContactsPanel({
   adding,
   onAddingChange,
   onChanged,
+  onDraftChase,
 }: {
   projectId: string;
   contacts: Contact[];
@@ -98,6 +104,12 @@ export default function ContactsPanel({
   adding?: boolean;
   onAddingChange?: (open: boolean) => void;
   onChanged: () => void;
+  /**
+   * Given where the panel sits ON the chase screen: "Draft a chase" then
+   * selects that contact's tab in place, because a link to the page you are on
+   * changes nothing (the screen reads `contactId` once, when it opens).
+   */
+  onDraftChase?: (contactId: string) => void;
 }) {
   const [internalAdding, setInternalAdding] = useState(contacts.length === 0);
   const open = adding ?? internalAdding;
@@ -316,7 +328,7 @@ export default function ContactsPanel({
                   ) : row.toQuote > 0 ? (
                     <>
                       <Link
-                        href={`/dashboard/drafts?projectId=${projectId}`}
+                        href={chaseHref(projectId, contact.id)}
                         className="font-semibold text-red-700 no-underline hover:underline"
                       >
                         {row.toQuote.toLocaleString()}
@@ -332,12 +344,18 @@ export default function ContactsPanel({
                 </Td>
                 <Td>
                   <div className="flex justify-end">
-                    <Link
-                      href={`/dashboard/drafts?projectId=${projectId}`}
-                      className={buttonClass("secondary", "xs", "no-underline")}
-                    >
-                      Draft a chase
-                    </Link>
+                    {/* TO THIS CONTACT (2026-11-20). The link carried only the
+                        project, so the chase screen opened on whoever it opened
+                        on, and from the chase screen itself it went nowhere. */}
+                    {onDraftChase ? (
+                      <Button variant="secondary" size="xs" onClick={() => onDraftChase(contact.id)}>
+                        Draft a chase
+                      </Button>
+                    ) : (
+                      <Link href={chaseHref(projectId, contact.id)} className={buttonClass("secondary", "xs", "no-underline")}>
+                        Draft a chase
+                      </Link>
+                    )}
                   </div>
                 </Td>
               </Tr>

@@ -17,6 +17,13 @@ Open `/api/auth/me` first. It tells you which environment and which database
 you are actually looking at. Most confused incidents are someone testing the
 wrong deployment.
 
+Without signing in, `/api/health` answers `{"ok":true,"commit":"<sha>"}` when
+the deployment can reach its database and `{"ok":false}` (503) when it cannot,
+and nothing else (2026-11-20). An uncaught server error leaves one log line
+starting `[request-error]`, with the route, the method and a reference — never
+the error's text, which the route's own `reportFailure` line carries where
+there is one.
+
 ## Triage
 
 | Symptom | Likely cause | Go to |
@@ -62,6 +69,10 @@ recovery plan.
 - `AUTH_SECRET` changed → every existing session cookie is now invalid. Users
   sign in again; nothing is lost. If it changed by accident, restoring the old
   value restores the sessions.
+- The sign-in page says "cannot sign anybody in" → `AUTH_SECRET` is missing
+  from the deployment (staging, pilot or production), or on production shorter
+  than 32 characters. Every request is refused until it is set (`npm run
+  hash-password` prints one) and the deployment is rebuilt (2026-11-20).
 - Database unreachable → §4. Login reads the `users` table.
 - One person only → check `users.active` and their role.
 

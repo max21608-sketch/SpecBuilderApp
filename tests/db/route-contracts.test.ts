@@ -131,6 +131,9 @@ const MIDDLEWARE_EXEMPT = new Set([
   "cron/graph-renew",
   "cron/sweep-reads",
   "graph/notifications",
+  // The health check (production hardening H4, 2026-11-20): `select 1` and the
+  // commit, nothing else, for a monitor and a promotion check.
+  "health",
 ]);
 
 /**
@@ -367,6 +370,15 @@ describeIfDb("route contracts", () => {
       const path = pathFor(entry, validParams(entry));
       expect(matcherRuns(path), path).toBe(!MIDDLEWARE_EXEMPT.has(entry.name));
     }
+  });
+
+  it("health: with no session, answers 200 in JSON with ok and the commit, and nothing else", async () => {
+    const response = await call(route("health"), "GET", {});
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await expectJson(response, "health");
+    expect(Object.keys(body).sort()).toEqual(["commit", "ok"]);
+    expect(body.ok).toBe(true);
   });
 
   it("auth/login: a body that is not JSON, or that names nobody, is a 400 in JSON", async () => {

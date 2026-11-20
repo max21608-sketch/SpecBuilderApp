@@ -129,6 +129,8 @@ function serve(over: { project?: Record<string, unknown>; documents?: unknown[] 
         doc({ id: "doc-6", filename: "e.pdf", status: "parsed" }),
         doc({ id: "doc-7", filename: "f.pdf", status: "parsed", created_at: "2026-09-14T10:00:00.000Z" }),
         doc({ id: "doc-8", filename: "old.pdf", batch_id: null, batch_label: null, batch_created_at: null, document_kind: "preamble", status: "confirmed", source_preserved: false }),
+        // An email dropped in with the pack: no batch, by design (U5).
+        doc({ id: "doc-9", filename: "Re fabric.eml", batch_id: null, batch_label: null, batch_created_at: null, document_kind: "email", status: "confirmed", specs_applied: 2, created_at: "2026-09-14T09:05:00.000Z" }),
       ],
       runs: [RUN],
       notes: [
@@ -191,6 +193,22 @@ describe("the overview", () => {
     expect(screen.queryByText("f.pdf")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "2 more in this pack" }));
     expect(screen.getByText("f.pdf")).toBeInTheDocument();
+  });
+
+  // U5, 2026-11-20: an email uploaded in the same drop as a pack was listed
+  // under "Uploaded before deliveries were grouped", which was untrue of it.
+  it("lists an email apart from the packs under its own heading, never as pre-pack", async () => {
+    serve();
+    await screen.findByText("First pack");
+    expect(screen.getByText("Emails · 1")).toBeInTheDocument();
+    expect(screen.getByText(/Kept apart from the packs: each email is read and reviewed on its own/)).toBeInTheDocument();
+    // The pre-pack group keeps its sentence, and holds only what predates packs.
+    const before = screen.getByText(/Uploaded before deliveries were grouped/);
+    const loose = before.closest("div")!.parentElement!;
+    expect(within(loose).getByText("old.pdf")).toBeInTheDocument();
+    expect(within(loose).queryByText("Re fabric.eml")).toBeNull();
+    const email = screen.getByText("Re fabric.eml");
+    expect(email.closest("tr")!.textContent).toContain("Email");
   });
 
   it("retries a failed specification document through /extract", async () => {

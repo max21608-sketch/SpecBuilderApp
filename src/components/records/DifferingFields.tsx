@@ -13,7 +13,7 @@
 // a blank stays `missing` until a person types one.
 import { useMemo } from "react";
 import { fieldDisplayName } from "@/lib/spec-field-label";
-import AnswerValue from "@/components/records/AnswerValue";
+import AnswerValue, { blurOnEnter } from "@/components/records/AnswerValue";
 import Chip from "@/components/ui/Chip";
 import { ANSWER_STATE_LABELS, answerStateTone, type AnswerState } from "@/lib/spec-vocab";
 import { DIFFERING_FIELD_JSON_IDS } from "@/lib/configuration-carry";
@@ -113,6 +113,7 @@ export default function DifferingFields<A extends DifferingAnswer>({
               disabled={!answer.answer_id || savingId === answer.answer_id || !answer.value}
               placeholder="Where on the item"
               aria-label={`Where on the item — ${fieldDisplayName(answer.field_name, answer.json_id) || answer.prompt}`}
+              onKeyDown={blurOnEnter}
               onBlur={(event) => {
                 const next = event.target.value.trim();
                 if (next === (answer.qualifier ?? "")) return;

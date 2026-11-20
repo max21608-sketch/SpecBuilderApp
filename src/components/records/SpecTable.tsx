@@ -71,6 +71,25 @@ import {
   type RecordUrgency,
 } from "@/lib/project-programme";
 
+/** What a "Set designer…" press did: the server's sentence, and each item it did not change. */
+type DesignerOutcome = {
+  message: string;
+  refused: { recordId: string; label: string | null; code: string; error: string }[];
+};
+
+/** The codes worth offering: the project's contacts' first, then the phase's own, once each. */
+function designerChoices(contactCodes: string[], phaseCodes: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const code of [...contactCodes, ...phaseCodes]) {
+    const key = code.trim().toUpperCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(code.trim());
+  }
+  return out;
+}
+
 /**
  * `12`, or `12.3` for a configuration of line 12 (0039) — the number the
  * search box matches as well as the one the cell prints, so typing "12.3"
@@ -488,6 +507,21 @@ export default function SpecTable({
   const [mockupBusy, setMockupBusy] = useState(false);
   /** What the last press did, in the server's words. Kept until the next press or a dismissal. */
   const [mockupMessage, setMockupMessage] = useState<string | null>(null);
+  /**
+   * "SET DESIGNER…" (2026-11-20, U2). A bill with no designer column leaves
+   * every item unchaseable, and the Edit panel fixed one item at a time. The
+   * server writes each ticked item through that panel's own path
+   * (`src/lib/designer-batch.ts`); this holds the typed code, the codes worth
+   * offering, and what the press did.
+   */
+  const [designerOpen, setDesignerOpen] = useState(false);
+  const [designerDraft, setDesignerDraft] = useState("");
+  const [designerBusy, setDesignerBusy] = useState(false);
+  /** The project's contacts' designer codes, read when the box first opens. */
+  const [contactCodes, setContactCodes] = useState<string[] | null>(null);
+  const [designerOutcome, setDesignerOutcome] = useState<DesignerOutcome | null>(null);
+  /** A refusal of the whole press, said in the box it came from rather than over the table. */
+  const [designerError, setDesignerError] = useState<string | null>(null);
 
   // The callback lives in a ref so a caller passing a lambda — which is every
   // caller — does not make `load` a new function on every render and re-fetch
@@ -561,6 +595,61 @@ export default function SpecTable({
     } finally {
       // Always, so a non-JSON error cannot leave the button dead.
       setMockupBusy(false);
+    }
+  }
+
+  /** Opens the designer box, and reads who could be named in it the first time. */
+  async function openDesigner() {
+    setDesignerOpen(true);
+    if (contactCodes !== null) return;
+    const res = await apiFetch<{ contacts: { designer_code: string | null }[] }>(
+      `/api/projects/${encodeURIComponent(projectId)}/contacts`,
+    );
+    // No contacts to offer is not a failure: the phase's own codes are still
+    // offered, and any code can be typed.
+    setContactCodes(
+      res.ok
+        ? res.data.contacts.map((contact) => (contact.designer_code ?? "").trim()).filter((code) => code !== "")
+        : [],
+    );
+  }
+
+  /**
+   * Sets the typed designer on every ticked item, with the version each row
+   * was loaded at. Reload first, report after, as for the mock-up: a refusal
+   * of one item is in the outcome beside what was set, never instead of it.
+   */
+  async function applyDesigner() {
+    const code = designerDraft.trim();
+    if (!code || selected.size === 0) return;
+    const byId = new Map((records ?? []).map((record) => [record.id, record]));
+    const targets = [...selected]
+      .map((id) => byId.get(id))
+      .filter((record): record is SpecRecord => Boolean(record))
+      .map((record) => ({ id: record.id, version: record.version }));
+    setDesignerBusy(true);
+    setDesignerError(null);
+    try {
+      const res = await apiFetch<DesignerOutcome>(`/api/projects/${encodeURIComponent(projectId)}/designer`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ designer: code, records: targets }),
+      });
+      await load();
+      if (res.ok) {
+        setDesignerOutcome({ message: res.data.message, refused: res.data.refused ?? [] });
+        setSelected(new Set());
+        setDesignerOpen(false);
+        setDesignerDraft("");
+      } else {
+        // In the box, with the ticks and the typed code kept: the next step is
+        // to correct one of them, not to start again.
+        setDesignerOutcome(null);
+        setDesignerError(res.error);
+      }
+    } finally {
+      // Always, so a response that is not JSON cannot leave the button dead.
+      setDesignerBusy(false);
     }
   }
 
@@ -1046,11 +1135,85 @@ export default function SpecTable({
                 Adds each to the project&rsquo;s mock-up phase as well, without taking it off this one. Its
                 identity only — no quantity, no specs.
               </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={designerBusy}
+                aria-expanded={designerOpen}
+                onClick={() => (designerOpen ? setDesignerOpen(false) : void openDesigner())}
+              >
+                Set designer…
+              </Button>
               <span className="flex-1" />
               <Button variant="quiet" size="xs" onClick={() => setSelected(new Set())}>
                 Clear
               </Button>
+              {designerOpen && (
+                <form
+                  className="flex w-full flex-wrap items-center gap-2 border-t border-neutral-200 pt-2.5"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void applyDesigner();
+                  }}
+                >
+                  <label className="text-xs font-medium text-neutral-700" htmlFor={`designer-code-${runId}`}>
+                    Designer code
+                  </label>
+                  <input
+                    id={`designer-code-${runId}`}
+                    list={`designer-codes-${runId}`}
+                    value={designerDraft}
+                    maxLength={200}
+                    autoFocus
+                    placeholder="e.g. LCS"
+                    onChange={(event) => {
+                      setDesignerDraft(event.target.value);
+                      setDesignerError(null);
+                    }}
+                    className="w-40 rounded border border-neutral-300 px-2 py-1 text-sm"
+                  />
+                  <datalist id={`designer-codes-${runId}`}>
+                    {designerChoices(contactCodes ?? [], designers).map((code) => (
+                      <option key={code} value={code} />
+                    ))}
+                  </datalist>
+                  <Button type="submit" variant="primary" size="sm" disabled={designerBusy || designerDraft.trim() === ""}>
+                    {designerBusy ? "Setting…" : `Set on ${selected.size} item${selected.size === 1 ? "" : "s"}`}
+                  </Button>
+                  <Button variant="quiet" size="xs" onClick={() => setDesignerOpen(false)}>
+                    Cancel
+                  </Button>
+                  <span className="text-xs text-neutral-500">
+                    Each item as its Edit would, and its configurations with no designer of their own.
+                  </span>
+                  {designerError && (
+                    <p role="alert" className="w-full text-xs font-medium text-red-700">
+                      {designerError}
+                    </p>
+                  )}
+                </form>
+              )}
             </div>
+          )}
+          {designerOutcome && (
+            <Note
+              tone={designerOutcome.refused.length > 0 ? "warn" : "info"}
+              className="mt-3"
+              actions={
+                <Button variant="quiet" size="xs" onClick={() => setDesignerOutcome(null)}>
+                  Dismiss
+                </Button>
+              }
+            >
+              {designerOutcome.message}
+              {designerOutcome.refused.length > 0 && (
+                <ul className="mt-1 list-disc pl-5">
+                  {designerOutcome.refused.map((refusal) => (
+                    <li key={refusal.recordId}>{refusal.error}</li>
+                  ))}
+                </ul>
+              )}
+            </Note>
           )}
           {mockupMessage && (
             <Note
