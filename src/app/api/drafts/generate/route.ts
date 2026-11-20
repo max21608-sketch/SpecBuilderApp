@@ -285,7 +285,9 @@ export async function POST(request: Request): Promise<Response> {
         const intro = defaultIntro(projectLabel, tierCounts(groups), {
           internal: String(contact.role) === "internal",
         });
-        const closing = defaultClosing();
+        // Signed by the person generating it — the draft's creator, who sends
+        // it from their own Outlook. Their edits to it are never recomposed.
+        const closing = defaultClosing(user.name);
         const { subject, body } = buildChaseEmail({
           projectLabel,
           contactName: String(contact.name),

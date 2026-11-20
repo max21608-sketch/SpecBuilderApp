@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildChaseEmail,
   buildChaseSubject,
+  defaultClosing,
   defaultIntro,
   escapeHtml,
   londonGreeting,
@@ -378,6 +379,40 @@ describe("defaultIntro", () => {
   it("says nothing is holding up the quote when nothing is", () => {
     const intro = defaultIntro("P17231", { toQuote: 0, later: 3 });
     expect(intro).toContain("Nothing below is holding up the quote");
+  });
+});
+
+// The draft ended "Many thanks," and no name, and it goes out from the
+// creator's own Outlook (2026-11-20, G3). Only the DEFAULT is signed: a closing
+// a person edited is theirs, stored as typed (`/api/drafts/[id]/edit`, whose
+// db-tier test pins that), and nothing recomposes it.
+describe("defaultClosing", () => {
+  it("signs the default closing with the creator's name", () => {
+    expect(defaultClosing("Claudia Invented")).toBe("Many thanks,\nClaudia Invented");
+  });
+
+  it("puts the name on the line under the thanks in the email", () => {
+    const { body } = buildChaseEmail({ ...base, closing: defaultClosing("Claudia Invented") });
+    expect(body).toContain(">Many thanks,<br>Claudia Invented</p>");
+  });
+
+  it("gives the unsigned closing for an empty or missing name, never a blank line", () => {
+    expect(defaultClosing("")).toBe("Many thanks,");
+    expect(defaultClosing("   ")).toBe("Many thanks,");
+    expect(defaultClosing(null)).toBe("Many thanks,");
+    expect(defaultClosing()).toBe("Many thanks,");
+  });
+
+  it("trims the name rather than carrying its spaces into the email", () => {
+    expect(defaultClosing("  Claudia Invented ")).toBe("Many thanks,\nClaudia Invented");
+  });
+
+  it("leaves a closing the person wrote exactly as written", () => {
+    // The template renders what it is given; the default is only ever a
+    // starting value, so an edited closing never gains a name.
+    const { body } = buildChaseEmail({ ...base, closing: "Best,\nJo" });
+    expect(body).toContain(">Best,<br>Jo</p>");
+    expect(body).not.toContain("Many thanks");
   });
 });
 
