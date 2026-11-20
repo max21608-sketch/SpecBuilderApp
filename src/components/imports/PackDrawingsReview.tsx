@@ -174,7 +174,15 @@ export default function PackDrawingsReview({
   // re-render when it does.
   const images = useRef<Map<string, CroppedImage | null>>(new Map());
   // What the last confirm said about a bill's picture it kept (2026-10-05).
-  const pictureNote = useRef<string | null>(null);
+  // AND A PRESS THAT FOUND ITS CARD ALREADY CONFIRMED (2026-11-20): neither is
+  // a failure, and both are said once, as a notice, after the reload.
+  const confirmNote = useRef<string | null>(null);
+  // THE PRESSES IN FLIGHT, by card or configuration group (2026-11-20). Held in
+  // a ref and taken BEFORE the first await: the press used to wait for the save
+  // chain with the button still live, and `busy` is state, so a second click in
+  // that window — or before the re-render — sent a second confirm, which the
+  // first one's version bump refused as "targets changed".
+  const pressing = useRef(new Set<string>());
   const rememberImage = useCallback((itemId: string, image: CroppedImage | null) => {
     images.current.set(itemId, image);
   }, []);
@@ -568,26 +576,37 @@ export default function PackDrawingsReview({
     });
     // A BILL'S PICTURE KEPT OVER THE CROP is not a failure and not silent:
     // the confirm says so in its own words, and the screen passes them on.
-    if (res.ok && typeof res.data.pictureNote === "string") pictureNote.current = res.data.pictureNote;
+    if (res.ok && typeof res.data.pictureNote === "string") confirmNote.current = res.data.pictureNote;
+    // ALREADY CONFIRMED IS NOT A FAILURE (2026-11-20). The press reached a
+    // card whose specs are all applied — the press before this one landed
+    // first — so the reload shows it confirmed and the notice says so,
+    // rather than a red "targets changed".
+    if (!res.ok && res.data?.code === "already_confirmed") {
+      confirmNote.current = res.error;
+      return null;
+    }
     return res.ok ? null : res.error;
   }
 
-  /** The confirm's picture sentence since the last press, taken once. */
-  function takePictureNote(): string | null {
-    const note = pictureNote.current;
-    pictureNote.current = null;
+  /** The confirm's notice since the last press (a kept picture, or already confirmed), taken once. */
+  function takeConfirmNote(): string | null {
+    const note = confirmNote.current;
+    confirmNote.current = null;
     return note;
   }
 
   async function review(item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") {
-    await saveChain.current;
+    if (pressing.current.has(item.id)) return;
+    pressing.current.add(item.id);
     setBusy(item.id);
     setError(null);
     try {
-      pictureNote.current = null;
+      await saveChain.current;
+      confirmNote.current = null;
       const failure = await confirmItem(item, observations, action);
-      await reloadThen(failure, failure ? null : takePictureNote());
+      await reloadThen(failure, failure ? null : takeConfirmNote());
     } finally {
+      pressing.current.delete(item.id);
       setBusy(null);
     }
   }
@@ -604,12 +623,14 @@ export default function PackDrawingsReview({
     key: string,
     entries: { label: string; item: DrawingItem; observations: DrawingObservation[] }[],
   ) {
-    await saveChain.current;
+    if (pressing.current.has(key)) return;
+    pressing.current.add(key);
     setBusy(key);
     setError(null);
     try {
+      await saveChain.current;
       const done: string[] = [];
-      pictureNote.current = null;
+      confirmNote.current = null;
       for (const [index, entry] of entries.entries()) {
         const failure = await confirmItem(entry.item, entry.observations, "confirm");
         if (failure) {
@@ -626,8 +647,9 @@ export default function PackDrawingsReview({
         }
         done.push(entry.label);
       }
-      await reloadThen(null, takePictureNote());
+      await reloadThen(null, takeConfirmNote());
     } finally {
+      pressing.current.delete(key);
       setBusy(null);
     }
   }
