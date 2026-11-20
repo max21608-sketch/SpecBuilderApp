@@ -101,7 +101,59 @@ const FinishEntryPatch = z
   })
   .strict();
 
+/**
+ * EVERY SUGGESTED KIND, ACCEPTED BY ONE PRESS (prod-ready F3, 2026-11-20): the
+ * same per-entry write, for each entry at the version the screen showed, in
+ * one transaction — all of them or none. The screen sends the suggestions it
+ * showed; the server checks each is a kind, and the entry's own version.
+ */
+const FinishEntryKindsPatch = z
+  .object({
+    kinds: z
+      .array(
+        z
+          .object({
+            entryId: z.string().min(1),
+            expectedVersion: z.number().int().nonnegative(),
+            kind: z.string(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(600),
+  })
+  .strict();
+
 export async function patchFinishScheduleEntry(id: string, raw: unknown, actor: string): Promise<Response> {
+  if (raw && typeof raw === "object" && "kinds" in raw) {
+    const bulk = FinishEntryKindsPatch.safeParse(raw);
+    if (!bulk.success) {
+      return json({ ok: false, error: bulk.error.issues[0]?.message ?? "That change is not valid." }, 400);
+    }
+    if (bulk.data.kinds.some((row) => !isFinishKind(row.kind))) {
+      return json({ ok: false, error: "That is not a kind of finish." }, 400);
+    }
+    if (new Set(bulk.data.kinds.map((row) => row.entryId)).size !== bulk.data.kinds.length) {
+      return json({ ok: false, error: "A finish is named twice." }, 400);
+    }
+    try {
+      const filed = await withTransaction(async (txn) => {
+        for (const row of bulk.data.kinds) {
+          await setFinishScheduleEntryKind(txn, {
+            runId: id,
+            entryId: row.entryId,
+            expectedVersion: row.expectedVersion,
+            kind: row.kind as Parameters<typeof setFinishScheduleEntryKind>[1]["kind"],
+            actor,
+          });
+        }
+        return bulk.data.kinds.length;
+      });
+      return json({ ok: true, filed });
+    } catch (cause) {
+      return transactionErrorResponse(cause);
+    }
+  }
   const parsed = FinishEntryPatch.safeParse(raw);
   if (!parsed.success) {
     return json({ ok: false, error: parsed.error.issues[0]?.message ?? "That change is not valid." }, 400);

@@ -319,8 +319,12 @@ library's words, or "Edit" on the code's row in the library to take the
 drawing's.
 
 A finishes schedule document has its own review screen: tick the finishes to
-add, confirm. "already held and DIFFERENT" means the library already has that
-code with other words; decide which is right.
+add, press **"Accept all N suggested kinds"** if the kinds shown with "?" are
+right, then **"Add N to the library"** (top right, or under the list). Only an
+accepted kind is filed. "already held and DIFFERENT" means the library already
+has that code with other words; decide which is right. A preamble's review
+works the same way: "Add N notes to the project", top right or under the list;
+when nothing is left, it says so and offers "Back to the pack".
 
 ### 5.7 Levels and categories
 - **Levels.** A phase tab shows "N items have a suggested level" with "Accept

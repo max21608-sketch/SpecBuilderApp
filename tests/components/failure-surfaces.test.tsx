@@ -247,15 +247,16 @@ describe("the preamble review, when a confirm is refused", () => {
       />,
     );
 
-    const add = await screen.findByRole("button", { name: /Add 1 note to the project/ });
-    await userEvent.click(add);
+    // Two buttons, one action: top right and under the list (F1, 2026-11-20).
+    const [add] = await screen.findAllByRole("button", { name: /Add 1 note to the project/ });
+    await userEvent.click(add!);
 
     // The reload HAS to happen — a refused request means the screen is out of
     // date — so the assertion is that the message is there once it has.
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
     await waitFor(() => expect(calls.filter((c) => c.method === "GET").length).toBeGreaterThan(1));
     expect(screen.getByText(/This note changed while the page was open/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Add 1 note to the project/ })).toBeEnabled();
+    for (const button of screen.getAllByRole("button", { name: /Add 1 note to the project/ })) expect(button).toBeEnabled();
   });
 
   it("VARIANCE: an HTML error page reads as a sentence rather than a parse failure", async () => {
@@ -271,11 +272,11 @@ describe("the preamble review, when a confirm is refused", () => {
         project={{ id: "p1", number: "P17231", name: "Maybourne" }}
       />,
     );
-    await userEvent.click(await screen.findByRole("button", { name: /Add 1 note to the project/ }));
+    await userEvent.click((await screen.findAllByRole("button", { name: /Add 1 note to the project/ }))[0]!);
     await waitFor(() =>
       expect(screen.getByText(/The server took too long to respond/)).toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: /Add 1 note to the project/ })).toBeEnabled();
+    for (const button of screen.getAllByRole("button", { name: /Add 1 note to the project/ })) expect(button).toBeEnabled();
   });
 });
 

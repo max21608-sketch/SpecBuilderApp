@@ -100,6 +100,21 @@ ONE 14-page document (`260824 - OMS and FF&E Tracker.pdf`, not named as a
 schedule, which is why nobody in the room recognised it). Building the code
 field and a schedule stage on the pack screen is still Max's decision.
 
+**A schedule's suggested kinds are accepted in one press, and only an accepted
+kind is filed** (prod-ready F3, 2026-11-20). Every row offered "Fabric ?",
+"Add 11 to the library" filed none, and the library then asked "14 of 14
+finishes have no kind" again. The confirm was right to write only `entry.kind`
+(a person's click); what was missing was the press. "Accept all N suggested
+kinds" sends every writable row's suggestion (`kindWritable`: a new code, or a
+held one with no kind) at the version shown, as ONE `PATCH {kinds}`, filed by
+the per-entry writer in one transaction — a stale row refuses the lot. The
+confirm then carries each into its library row; a suggestion nobody accepted
+stays unfiled. The same screen and the preamble's now put their primary action
+in the header's top-right slot as well as under the list (F1/F2), one reading
+(`scheduleConfirm`) for both buttons; the schedule's "Also read its furniture
+… one charged read" moved under the list; and with nothing left to review
+both say so and offer "Back to the pack" instead of "Add 0".
+
 ### A palette BWS owns is READ from BWS, and never invented
 
 `db/migrations/0030_spec_palettes.sql`, `db/migrations/0035_palette_option_code.sql`,
