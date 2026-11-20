@@ -21,6 +21,47 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-11-20 — Production readiness: the app walked as a new client, four fix branches on `prod-ready`
+
+Max, 2026-11-20: "get this app production ready in a few days … a very
+detailed plan, having tested, having gone through the app … take screenshots
+… you need to replace me." The plan, the decisions only Max can make and the
+day-by-day route to a launch are `production-readiness-2026-11-20.md`; the
+running findings log is `~/dev/briefs/prod-ready/findings.md` (outside the
+repo, with the screenshots and walk scripts).
+
+- **How.** The local stack only (sandbox and pilot are read-only for Claude).
+  An INVENTED pack in a layout the app had never seen, uploaded and taken
+  through every screen to the outputs; then a revised bill, a 300-line bill,
+  a bill with unknown headings, a view-only account, error pages, the first
+  run on an empty database, and timings on a production build. Two read-only
+  reviews (production code paths; every open item in these plans). Opus coders
+  in worktrees on four branches, merged into `prod-ready`; the rehearsal
+  re-run, scripted pass/fail, on the merged production build.
+- **What a new client's bill did before** (all fixed): section headings and
+  finish lines became records; no unlabelled or x-less size was placed; a
+  metal frame was filed as timber; one finish was written into two BWS fields;
+  the library got no words for the codes the bill created; a revised bill
+  duplicated every phase by default and wiped a designer a person set.
+- **Elsewhere** (fixed): an email whose item had one unplaceable statement could
+  never be confirmed; a bill without price columns was filed as an FF&E
+  schedule and read at a charge; email twin lines; the Inbox scrolled sideways;
+  a duplicate email lost its sentence; the finishes and preamble reviews hid
+  their confirm; Set designer for a bill with no designer column; production
+  hardening (AUTH_SECRET, cross-site writes, HSTS, `/api/health`, an error log
+  line, create-user, the production chase email); next 15.5.29 and
+  postal-mime 4.2.1 (production advisories 15 → 10, no critical).
+- **State.** `prod-ready` is `committed locally`: nothing pushed (GitHub is
+  read-only for Claude), no deployment, no migration. The four checks pass on
+  it with the database tier required. Human acceptance is outstanding on every
+  screen it touched.
+- **Decisions it leaves Max** (plan §5): who sees which client (no per-project
+  access exists); whether the BWS file is imported at launch; company-owned
+  accounts and a spend limit; the backup destination and a restore drill;
+  retention; the production branch and domain; data residency; decimal
+  quantities; pilot data; mail; the CSP; and D12, which document's words
+  describe a finish.
+
 ## 2026-11-16 — The review build: six stages on `review-int`, on staging since 2026-11-18
 
 Max, 2026-11-16: "review the app and code base, look for unfinished sections

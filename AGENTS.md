@@ -678,6 +678,29 @@ checks pass on the local stack with the database tier required (5,120 tests);
 outstanding on every screen it touched, and CI's first run on it (the
 workflows moved to `actions/*@v5`) is unread.
 
+**Production readiness (2026-11-20).** Max asked for the app made
+production-ready "in a few days", tested as a person would, with screenshots
+and a detailed plan (`docs/plans/production-readiness-2026-11-20.md`; the
+dated entry in `docs/plans/README.md`). The app was walked on the local stack
+as a NEW CLIENT with an invented pack, a revised bill, a 300-line bill and
+unknown headings; four fix branches were built by Opus coders and merged into
+**`prod-ready`, `committed locally` only — not pushed, not deployed, no
+migration.** What it changed that a later change could undo: a bill row with
+only a heading's text, or a finish code with no quantity under an item, is a
+SUGGESTION a person accepts, never a decision (`docs/load-bearing/bills.md`);
+an unlabelled or x-less size line is placed only where every figure carries
+its own slot letter; a client code beats a PART word (`frame`, `legs`) but not
+a material word; one code in a description and on a finish line is ONE finish;
+a revision writes only the columns its sheet MAPS; a sheet that looks like an
+existing phase waits for "revision or new phase" before Confirm; an email's
+confirm and its screen share ONE confirmable predicate; a file whose name and
+model reading disagree is held, unread; `AUTH_SECRET` must be 32+ characters
+in production; a cross-site write is refused in the middleware; `/api/health`
+is public and names the commit; next 15.5.29 and postal-mime 4.2.1. The four
+checks pass on `prod-ready` with the database tier required (5,333 tests).
+Production itself does not exist; the decisions that come first are Max's
+(plan §5). Human acceptance is outstanding on every screen it touched.
+
 **Explicitly excluded, so it is not built speculatively:** feeding preamble
 notes into later model calls; a BWS *import* file carrying job numbers; images
 and scanned documents other than a bill; splitting an oversize drawing set; M6
@@ -694,7 +717,7 @@ diary and the README):
   design; the gate model's assumptions (`docs/plans/matrix-assumptions.md`,
   Max standing in for him since 2026-09-17); the level guess rules; the
   question-to-BWS-field mapping; Q4/Q6/Q7/Q8 from the Ronnie Scott's plan.
-- **Max:** reading the first CI run on the review build (pushed 2026-11-18);
+- **Max:** the production-readiness decisions D1–D12 (`docs/plans/production-readiness-2026-11-20.md` §5 — who sees which client, BWS import at launch, company accounts and a spend limit, backups, retention, the production branch and domain, residency, decimal quantities, pilot data, mail, CSP, which document describes a finish); pushing `prod-ready`; reading the first CI run on the review build (pushed 2026-11-18);
   whether a preamble note's retire belongs in the change trail; deleting the
   65 merged local branches; `origin/production` (delete or record); whether to enforce the full
   CSP after the browser walk; reclaiming pilot's audit-log space; a chased
