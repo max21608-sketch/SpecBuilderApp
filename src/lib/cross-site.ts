@@ -27,6 +27,15 @@
 // to another origin without a CORS preflight this app never answers, which is
 // why comparing against them is sound.
 //
+// SIGN-IN ASKS IT TOO (pre-push review E5, 2026-11-20). `/api/auth/login` is
+// outside the middleware's matcher — it must be, or the way in needs a
+// session — so this rule never saw it, and the handler's `req.json()` reads
+// a body whatever its content type. A page on another site could post a
+// JSON-shaped form and sign the visitor into an account the ATTACKER holds
+// (login CSRF), and everything they then uploaded would be the attacker's to
+// read. So the login handler calls `isCrossSiteWrite` itself, before the
+// password, and answers the same code in its own words.
+//
 // Edge-safe: no Node built-ins, because the middleware imports it.
 // ============================================================================
 
@@ -36,6 +45,11 @@ const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 export const CROSS_SITE_REFUSED =
   "This change came from a page on another website, so it was refused and nothing was saved. " +
   "Open Project Spec Builder at its own address and make the change there.";
+
+/** The same refusal on the sign-in form, where nothing was being changed. */
+export const CROSS_SITE_SIGN_IN_REFUSED =
+  "This sign-in came from a page on another website, so it was refused. " +
+  "Open Project Spec Builder at its own address and sign in there.";
 
 /** The host the request was addressed to: the proxy's word first, then the request's own. */
 function requestHost(headers: Headers, fallbackHost: string): string {
