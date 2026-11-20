@@ -75,7 +75,7 @@ vi.mock("@/lib/extraction-queue", async (importOriginal) => {
 });
 
 const inflight = vi.hoisted(() => ({
-  mime: Buffer.alloc(0),
+  mime: Buffer.alloc(0) as Buffer,
   internetMessageId: "",
   graphListing: [] as Record<string, unknown>[],
 }));
