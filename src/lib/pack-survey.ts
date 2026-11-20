@@ -26,7 +26,28 @@
 // NEVER A BOUNDARY INSIDE A DRAWING SET. An item is drawn across several pages
 // and one page carries several items; reading pages apart and gluing them back
 // is what the v4 item read retired (`docs/load-bearing/drawings.md`). The
-// prompt says so, and nothing in CODE splits or merges a part.
+// prompt says so — and the model does it anyway: on the merged Panther pack
+// (2026-11-20) Haiku 5.5 gave 24 parts, one per ITEM, where the pack is three
+// documents, and a sentence spelling the rule out changed nothing (23).
+//
+// SO A BOUNDARY THAT DOES NOT CHANGE THE READER IS NOT A BOUNDARY, and CODE
+// removes it (`mergeByReader`): adjacent, contiguous page parts that land on
+// the same reader through `KIND_FROM_GENRE` — a part whose only doubt is
+// settled by `fileDocument`'s weighed-against rule counting as its genre —
+// become one. Panther: 24 parts → 3. It is code's decision, not the prompt's,
+// because the eval must measure what the APP would use: a map of 24 drawing
+// parts would be routed as 24 reads of one set, which is exactly the
+// per-page read v4 retired. What is NEVER merged, and why:
+//   - a SHEET. A bill's tabs are PHASES (CLAUDE.md, "A BOQ tab is a PHASE"):
+//     `MUR` and `MAIN RUN` are both bills, side by side, and must stay apart.
+//   - across a HELD part, or into one. A part a person must look at is a
+//     question, and folding it into a neighbour answers it unseen.
+//   - a part with NOTHING TO READ (a cover, an index, a blank page), and
+//     across one: two drawing parts either side of a blank page stay two.
+//     Simple, and the gap is visible; a person merges them in Stage 1.
+//   - an email's text or a whole-file part, which have no pages to join.
+// Gaps and overlaps are never merged either: contiguous means the next part
+// starts on the page after the last one ends.
 //
 // THE MODEL'S PAGE RANGES ARE UNTRUSTED, and code makes every exact decision
 // after the answer: a range outside the file's counted pages, a range that
@@ -52,7 +73,7 @@ import { z } from "zod";
 import type { DocumentSource } from "@/lib/intake-source";
 import { readAnswer } from "@/lib/model-request";
 import { normaliseRef } from "@/lib/record-refs";
-import { DOCUMENT_GENRES, type DocumentGenre } from "@/lib/document-kinds";
+import { DOCUMENT_GENRES, type DocumentGenre, type KindDecision } from "@/lib/document-kinds";
 import { MAX_MODEL_PDF_PAGES } from "@/lib/upload-limits";
 import {
   CLASSIFY_MODEL,
@@ -60,6 +81,7 @@ import {
   classifyDeadlineFor,
   classifyFailureOf,
   cutText,
+  fileDocument,
   type ClassifyResult,
 } from "@/lib/document-classify";
 import type { PartPlace, SurveyFile, SurveyPart } from "@/lib/pack-survey-types";
@@ -156,6 +178,12 @@ export const SURVEY_TOOL = {
             },
             itemCodes: codeList("item code — the code a bill line or a drawn item is known by —"),
             finishCodes: codeList("finish code — the code of a material, fabric or finish —"),
+            nothingToRead: {
+              type: "boolean",
+              description:
+                "True for a cover, title page, index, blank page or a workbook's cover sheet: a part that specifies nothing " +
+                "and that no one would read for a specification. False for everything else.",
+            },
           },
           required: [
             "firstPage",
@@ -169,6 +197,7 @@ export const SURVEY_TOOL = {
             "weighedAgainst",
             "itemCodes",
             "finishCodes",
+            "nothingToRead",
           ],
         },
       },
@@ -193,7 +222,8 @@ In a PDF, count the pages 1 to N in the file's own order, not by the sheet numbe
 a spreadsheet a part is a sheet, named exactly as the file names it; give rows only where one sheet
 holds two kinds. An email's text is one part.
 
-For each part, list every item code and every finish code it names, exactly as printed.
+For each part, list every item code and every finish code it names, exactly as printed. A cover, title
+page, index or blank page, or a workbook's cover sheet, is its own part with nothing to read.
 
 One caution, because its cost is real: a spreadsheet that could be a bill of quantities or a schedule
 is the costly mistake, because a wrong bill is a project's worth of wrong records. Where you doubt it,
@@ -230,6 +260,7 @@ const RawPart = z.object({
   // entry and not the list.
   itemCodes: z.array(z.unknown()).catch([]),
   finishCodes: z.array(z.unknown()).catch([]),
+  nothingToRead: z.boolean().catch(false),
 });
 type RawPart = z.infer<typeof RawPart>;
 
@@ -283,12 +314,13 @@ export function formatRanges(numbers: number[]): string {
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
-type FileShape = {
+/** What code needs to know about a file to judge an answer about it. Exported for a re-score. */
+export type SurveyFileShape = {
   type: DocumentSource["type"];
   pageCount: number | null;
   /** The workbook's sheet names in its own order, or null where they are not known. */
   sheetNames: string[] | null;
-  /** Rows per sheet where the rows are in hand. */
+  /** Rows per sheet where the rows are in hand; null where they are not (a re-score). */
   sheetRows: Map<string, number> | null;
 };
 
@@ -314,7 +346,7 @@ function resolveSheet(named: string, sheetNames: string[]): string | null {
  * "this file is one kind", and is the whole file — the honest reading, not a
  * stretch. Beside other parts, a part with no place is nowhere.
  */
-function placePart(part: RawPart, file: FileShape, onlyPart: boolean): Placed {
+function placePart(part: RawPart, file: SurveyFileShape, onlyPart: boolean): Placed {
   if (file.type === "email") return { ok: true, place: { kind: "body" } };
 
   if (file.type === "pdf") {
@@ -430,13 +462,116 @@ function sheetCoverageNotes(parts: SurveyPart[], sheetNames: string[] | null): s
   return notes;
 }
 
+// ---- one reader, one part --------------------------------------------------
+
 /**
- * The model's answer as a `SurveyFile`, every exact decision code's. Pure and
- * exported: the eval re-scores a saved answer through this, with no call.
+ * Which reader a part goes to, or null where none does: a part with nothing
+ * to read, and a HELD part. A part unsure only between two genres read the
+ * same way is not held — `fileDocument`'s weighed-against rule, the file
+ * check's, so the survey and the file check cannot disagree about it.
+ */
+export function partReader(part: Pick<SurveyPart, "genre" | "certain" | "weighedAgainst" | "nothingToRead">): KindDecision | null {
+  if (part.nothingToRead) return null;
+  return fileDocument(part).decision;
+}
+
+/** Does a person have to say what this part is? Never for a part with nothing to read. */
+export function partIsHeld(part: Pick<SurveyPart, "genre" | "certain" | "weighedAgainst" | "nothingToRead">): boolean {
+  return !part.nothingToRead && fileDocument(part).decision === null;
+}
+
+const sameReader = (a: KindDecision, b: KindDecision) => a.importType === b.importType && a.documentKind === b.documentKind;
+
+/** May `next` join the run that `prev` ends? Pages only, contiguous, one reader both sides. */
+function joins(prev: SurveyPart, next: SurveyPart): boolean {
+  if (prev.place.kind !== "pages" || next.place.kind !== "pages") return false;
+  if (next.place.from !== prev.place.to + 1) return false;
+  const a = partReader(prev);
+  const b = partReader(next);
+  return a !== null && b !== null && sameReader(a, b);
+}
+
+/** A union of code lists in first-printed order, each code once by the `normaliseRef` fold. */
+function unionCodes(lists: string[][]): { codes: string[]; overflow: number } {
+  const seen = new Set<string>();
+  const codes: string[] = [];
+  for (const list of lists) {
+    for (const code of list) {
+      const key = normaliseRef(code) || code;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      codes.push(code);
+    }
+  }
+  const overflow = Math.max(0, codes.length - MAX_CODES_PER_PART);
+  return { codes: codes.slice(0, MAX_CODES_PER_PART), overflow };
+}
+
+/**
+ * Adjacent page parts that one reader reads become one part (see the header
+ * for the trap and for what is never merged). `parts` is in reading order.
+ * The merged part's genre is the one covering the most of its pages, the
+ * earliest on a tie; it is certain because every member was certain or
+ * settled — a held member never joins a run.
+ */
+function mergeByReader(parts: SurveyPart[]): { parts: SurveyPart[]; notes: string[] } {
+  const runs: SurveyPart[][] = [];
+  for (const part of parts) {
+    const run = runs.at(-1);
+    const prev = run?.at(-1);
+    if (run && prev && joins(prev, part)) run.push(part);
+    else runs.push([part]);
+  }
+  const notes: string[] = [];
+  const merged = runs.map((run): SurveyPart => {
+    if (run.length === 1) return run[0]!;
+    const pagesOf = (part: SurveyPart) => (part.place.kind === "pages" ? part.place.to - part.place.from + 1 : 0);
+    const byGenre = new Map<DocumentGenre, number>();
+    for (const part of run) byGenre.set(part.genre, (byGenre.get(part.genre) ?? 0) + pagesOf(part));
+    let genre = run[0]!.genre;
+    for (const [candidate, pages] of byGenre) if (pages > (byGenre.get(genre) ?? 0)) genre = candidate;
+
+    const first = run[0]!.place as Extract<PartPlace, { kind: "pages" }>;
+    const last = run.at(-1)!.place as Extract<PartPlace, { kind: "pages" }>;
+    const place: PartPlace = { kind: "pages", from: first.from, to: last.to };
+    const items = unionCodes(run.map((part) => part.itemCodes));
+    const finishes = unionCodes(run.map((part) => part.finishCodes));
+    const where = describePlace(place);
+    notes.push(`${where}: one ${genre.replace(/_/g, " ")} part, merged from ${run.length} parts the survey gave side by side for the same reader.`);
+    for (const [list, what] of [
+      [items, "item"],
+      [finishes, "finish"],
+    ] as const) {
+      if (list.overflow > 0) notes.push(`${where}: ${MAX_CODES_PER_PART + list.overflow} ${what} codes; the first ${MAX_CODES_PER_PART} are kept.`);
+    }
+    const certain = run.every((part) => partReader(part) !== null);
+    return {
+      place,
+      genre,
+      certain,
+      weighedAgainst: null,
+      evidence: cutText(MAX_EVIDENCE).parse(
+        run
+          .map((part) => part.evidence)
+          .filter(Boolean)
+          .join(" / "),
+      ),
+      itemCodes: items.codes,
+      finishCodes: finishes.codes,
+      nothingToRead: false,
+    };
+  });
+  return { parts: merged, notes };
+}
+
+/**
+ * The model's answer as a `SurveyFile`, every exact decision code's — the
+ * drops, the order, the merge, the notes. Pure and exported: a saved answer
+ * re-scored through this gets exactly what a live call gets today.
  */
 export function surveyFromAnswer(
   answer: z.infer<typeof SurveyOutput>,
-  file: { filename: string } & FileShape,
+  file: { filename: string } & SurveyFileShape,
 ): SurveyFile {
   const notes: string[] = [];
   const given = answer.parts;
@@ -482,6 +617,7 @@ export function surveyFromAnswer(
       evidence: raw.evidence,
       itemCodes: items.codes,
       finishCodes: finishes.codes,
+      nothingToRead: raw.nothingToRead,
     });
   });
 
@@ -498,6 +634,9 @@ export function surveyFromAnswer(
     }
     return 0;
   });
+  const merge = mergeByReader(parts);
+  parts.splice(0, parts.length, ...merge.parts);
+  notes.push(...merge.notes);
 
   if (parts.length === 0) {
     // NOBODY KNOWS YET, A PERSON DECIDES. Never a guessed kind, never a
@@ -507,7 +646,16 @@ export function surveyFromAnswer(
         ? "The survey named no part of this file, so it is one part for a person to decide."
         : "No part the survey named could be placed in this file, so it is one part for a person to decide.",
     );
-    parts.push({ place: { kind: "whole" }, genre: "unclear", certain: false, weighedAgainst: null, evidence: "", itemCodes: [], finishCodes: [] });
+    parts.push({
+      place: { kind: "whole" },
+      genre: "unclear",
+      certain: false,
+      weighedAgainst: null,
+      evidence: "",
+      itemCodes: [],
+      finishCodes: [],
+      nothingToRead: false,
+    });
   } else if (file.type === "pdf") {
     notes.push(...pageCoverageNotes(parts, file.pageCount));
   } else if (file.type === "spreadsheet") {
@@ -537,7 +685,8 @@ function sheetNamesInText(text: string): string[] | null {
   return names.length > 0 ? names : null;
 }
 
-function shapeOf(source: DocumentSource, options: { pageCount: number | null; sheetNames?: string[] }): FileShape {
+/** What code judges an answer against, read off the source as the call sees it. */
+export function surveyShape(source: DocumentSource, options: { pageCount: number | null; sheetNames?: string[] }): SurveyFileShape {
   if (source.type !== "spreadsheet") {
     return { type: source.type, pageCount: source.type === "pdf" ? options.pageCount : null, sheetNames: null, sheetRows: null };
   }
@@ -555,11 +704,29 @@ export type SurveyResult =
       model: string;
       /** The response's own `usage`, whole; `tokenUsage` (`anthropic.ts`) reads a price off it. */
       usage: unknown;
+      /** The whole response, as the model gave it: what the eval saves, and `surveyFromResponse` re-reads. */
+      response: unknown;
     }
   | (Extract<ClassifyResult, { ok: false }> & {
       /** Present where the model answered and the answer was not usable: it was paid for. */
       usage?: unknown;
+      response?: unknown;
     });
+
+/**
+ * A saved response read again with TODAY'S code, no call — the path a live
+ * call takes after its answer, so a re-score and a live run cannot differ.
+ */
+export function surveyFromResponse(
+  response: { content?: readonly unknown[] | null },
+  file: { filename: string } & SurveyFileShape,
+): { ok: true; survey: SurveyFile } | { ok: false; error: string } {
+  const answer = readAnswer(response, SURVEY_TOOL_NAME);
+  if (!answer.ok) return { ok: false, error: "The model did not say what is in the file." };
+  const parsed = SurveyOutput.safeParse(answer.value);
+  if (!parsed.success) return { ok: false, error: "The model's answer did not match the expected shape." };
+  return { ok: true, survey: surveyFromAnswer(parsed.data, file) };
+}
 
 let cached: Anthropic | null = null;
 function client(): Anthropic {
@@ -584,7 +751,7 @@ export async function surveyFile(
   options: { filename: string; pageCount: number | null; sheetNames?: string[]; signal?: AbortSignal },
 ): Promise<SurveyResult> {
   const model = SURVEY_MODEL;
-  const shape = shapeOf(source, options);
+  const shape = surveyShape(source, options);
   const prompt = surveyPrompt(shape.type === "pdf" ? shape.pageCount : null);
   const content =
     source.type === "pdf"
@@ -653,18 +820,12 @@ export async function surveyFile(
       charged: true,
       model,
       usage,
+      response: message,
     };
   }
-  const answer = readAnswer(message, SURVEY_TOOL_NAME);
-  if (!answer.ok) {
-    return { ok: false, code: "failed", error: "The model did not say what is in the file.", charged: true, model, usage };
-  }
-  const parsed = SurveyOutput.safeParse(answer.value);
-  if (!parsed.success) {
-    return { ok: false, code: "failed", error: "The model's answer did not match the expected shape.", charged: true, model, usage };
-  }
-
-  return { ok: true, survey: surveyFromAnswer(parsed.data, { filename: options.filename, ...shape }), model, usage };
+  const read = surveyFromResponse(message, { filename: options.filename, ...shape });
+  if (!read.ok) return { ok: false, code: "failed", error: read.error, charged: true, model, usage, response: message };
+  return { ok: true, survey: read.survey, model, usage, response: message };
 }
 
 // ---- the pack pass, in code ------------------------------------------------
@@ -690,6 +851,10 @@ export function groupPack(files: SurveyFile[]): { items: PackItem[]; lacks: stri
   const seen = new Map<string, Set<string>>();
   for (const file of files) {
     file.parts.forEach((part, index) => {
+      // A cover or an index NAMES items and describes none: nothing reads it,
+      // so it links nothing. Its index still counts, so `part` stays the
+      // position in the file's own list.
+      if (part.nothingToRead) return;
       for (const code of part.itemCodes) {
         const key = normaliseRef(code);
         if (!key) continue;
@@ -708,7 +873,7 @@ export function groupPack(files: SurveyFile[]): { items: PackItem[]; lacks: stri
   }
 
   const lacks: string[] = [];
-  const allParts = files.flatMap((file) => file.parts);
+  const allParts = files.flatMap((file) => file.parts).filter((part) => !part.nothingToRead);
   const billParts = allParts.filter((part) => part.genre === "bill_of_quantities");
   if (billParts.length === 0) lacks.push("No part reads as a bill of quantities.");
 

@@ -45,6 +45,14 @@ export type SurveyPart = {
   itemCodes: string[];
   /** Finish codes the part names, as printed ("GR TIM 04", "FAB-01"). */
   finishCodes: string[];
+  /**
+   * True for a part no reader would take anything from: a cover, a title page,
+   * an index, a blank page, a workbook's cover sheet. Such a part is NEVER held
+   * for a person whatever its genre or certainty says (`partIsHeld`), is never
+   * merged into a neighbour, and names no item for the pack pass. Optional so
+   * an answer saved before it existed still reads: absent is false.
+   */
+  nothingToRead?: boolean;
 };
 
 /** The survey's answer for one file. */

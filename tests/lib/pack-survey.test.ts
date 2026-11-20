@@ -89,6 +89,7 @@ function part(fields: Record<string, unknown> = {}): Record<string, unknown> {
     weighedAgainst: null,
     itemCodes: [],
     finishCodes: [],
+    nothingToRead: false,
     ...fields,
   };
 }
@@ -272,7 +273,16 @@ describe("code's exact decisions on a PDF", () => {
     answers({ parts: [], note: null });
     const file = await surveyed(PDF, { pageCount: 3 });
     expect(file.parts).toEqual([
-      { place: { kind: "whole" }, genre: "unclear", certain: false, weighedAgainst: null, evidence: "", itemCodes: [], finishCodes: [] },
+      {
+        place: { kind: "whole" },
+        genre: "unclear",
+        certain: false,
+        weighedAgainst: null,
+        evidence: "",
+        itemCodes: [],
+        finishCodes: [],
+        nothingToRead: false,
+      },
     ]);
     expect(file.note).toBe("The survey named no part of this file, so it is one part for a person to decide.");
   });
@@ -287,7 +297,11 @@ describe("code's exact decisions on a PDF", () => {
 
   it("keeps the first 200 parts of a longer answer, and says so", async () => {
     const { MAX_PARTS } = await import("@/lib/pack-survey");
-    answers({ parts: Array.from({ length: MAX_PARTS + 5 }, (_, i) => part({ firstPage: i + 1, lastPage: i + 1 })), note: null });
+    // Alternating readers, so the merge leaves the count to be seen.
+    answers({
+      parts: Array.from({ length: MAX_PARTS + 5 }, (_, i) => part({ firstPage: i + 1, lastPage: i + 1, genre: i % 2 ? "preamble" : "shop_drawings" })),
+      note: null,
+    });
     const file = await surveyed(PDF, { pageCount: 600 });
     expect(file.parts).toHaveLength(MAX_PARTS);
     expect(file.note).toContain(`The survey gave ${MAX_PARTS + 5} parts; the first ${MAX_PARTS} are kept.`);
@@ -475,6 +489,193 @@ describe("the call failed", () => {
   });
 });
 
+// ---- the merge: a boundary that does not change the reader is not one -------
+
+describe("the merge", () => {
+  it("makes a set split per item into one part per reader (the Panther shape: many parts -> 3)", async () => {
+    answers({
+      parts: [
+        part({ firstPage: 1, lastPage: 1, evidence: "chair", itemCodes: ["HH-CH-02"], finishCodes: ["WD-01"] }),
+        part({ firstPage: 2, lastPage: 2, evidence: "sofa", itemCodes: ["HH CH 02", "HH-SF-01"], finishCodes: ["wd-01", "FAB-01"] }),
+        part({ firstPage: 3, lastPage: 3, evidence: "table", itemCodes: ["HH-SF-01", "HH-TB-03"] }),
+        part({ firstPage: 4, lastPage: 6, genre: "preamble", evidence: "general conditions" }),
+        part({ firstPage: 7, lastPage: 9, genre: "preamble", evidence: "seating section" }),
+        part({ firstPage: 10, lastPage: 11, genre: "specification_sheets", itemCodes: ["HH-LP-04"] }),
+        // Unsure only against a genre read the same way: settled, so it joins.
+        part({ firstPage: 12, lastPage: 12, certain: false, weighedAgainst: "specification_sheets", itemCodes: ["HH-LP-04"] }),
+      ],
+      note: null,
+    });
+    const file = await surveyed(PDF, { pageCount: 12 });
+    expect(file.parts.map((p) => [p.place, p.genre, p.certain, p.weighedAgainst])).toEqual([
+      [{ kind: "pages", from: 1, to: 3 }, "shop_drawings", true, null],
+      [{ kind: "pages", from: 4, to: 9 }, "preamble", true, null],
+      // Two pages of specification sheets beat one of drawings for the name.
+      [{ kind: "pages", from: 10, to: 12 }, "specification_sheets", true, null],
+    ]);
+    // Codes: the union, first printed, once by the fold.
+    expect(file.parts[0]!.itemCodes).toEqual(["HH-CH-02", "HH-SF-01", "HH-TB-03"]);
+    expect(file.parts[0]!.finishCodes).toEqual(["WD-01", "FAB-01"]);
+    expect(file.parts[2]!.itemCodes).toEqual(["HH-LP-04"]);
+    expect(file.parts[0]!.evidence).toBe("chair / sofa / table");
+    expect(file.note).toContain("pages 1–3: one shop drawings part, merged from 3 parts the survey gave side by side for the same reader.");
+    expect(file.note).toContain("pages 4–9: one preamble part, merged from 2 parts");
+    expect(file.note).toContain("pages 10–12: one specification sheets part, merged from 2 parts");
+  });
+
+  it("cuts the joined evidence rather than blanking it, and caps the union of codes", async () => {
+    const { MAX_CODES_PER_PART } = await import("@/lib/pack-survey");
+    answers({
+      parts: [
+        part({ firstPage: 1, lastPage: 1, evidence: "A".repeat(200), itemCodes: Array.from({ length: 300 }, (_, i) => `HH-A-${i}`) }),
+        part({ firstPage: 2, lastPage: 2, evidence: "B".repeat(200), itemCodes: Array.from({ length: 300 }, (_, i) => `HH-B-${i}`) }),
+      ],
+      note: null,
+    });
+    const file = await surveyed(PDF, { pageCount: 2 });
+    expect(file.parts).toHaveLength(1);
+    expect(file.parts[0]!.evidence).toHaveLength(300);
+    expect(file.parts[0]!.evidence.startsWith("A".repeat(200) + " / B")).toBe(true);
+    expect(file.parts[0]!.evidence.endsWith("…")).toBe(true);
+    expect(file.parts[0]!.itemCodes).toHaveLength(MAX_CODES_PER_PART);
+    expect(file.note).toContain(`pages 1–2: 600 item codes; the first ${MAX_CODES_PER_PART} are kept.`);
+  });
+
+  it("never merges across a gap or an overlap", async () => {
+    answers({ parts: [part({ firstPage: 1, lastPage: 2 }), part({ firstPage: 4, lastPage: 5 }), part({ firstPage: 5, lastPage: 6 })], note: null });
+    const file = await surveyed(PDF, { pageCount: 6 });
+    expect(file.parts).toHaveLength(3);
+    expect(file.note).not.toContain("merged");
+  });
+
+  it("never merges two readers, so drawings either side of a preamble stay apart", async () => {
+    answers({
+      parts: [part({ firstPage: 1, lastPage: 2 }), part({ firstPage: 3, lastPage: 3, genre: "preamble" }), part({ firstPage: 4, lastPage: 5 })],
+      note: null,
+    });
+    expect((await surveyed(PDF, { pageCount: 5 })).parts).toHaveLength(3);
+  });
+
+  it("never merges into or across a HELD part: that is a question for a person", async () => {
+    answers({
+      parts: [part({ firstPage: 1, lastPage: 2 }), part({ firstPage: 3, lastPage: 3, genre: "unclear", certain: false }), part({ firstPage: 4, lastPage: 5 })],
+      note: null,
+    });
+    expect((await surveyed(PDF, { pageCount: 5 })).parts).toHaveLength(3);
+
+    // Unsure between a bill and a schedule is NOT settled (two readers), so
+    // it does not join the certain bill beside it, and keeps its doubt.
+    answers({
+      parts: [
+        part({ firstPage: 1, lastPage: 2, genre: "bill_of_quantities" }),
+        part({ firstPage: 3, lastPage: 4, genre: "bill_of_quantities", certain: false, weighedAgainst: "ffe_schedule" }),
+      ],
+      note: null,
+    });
+    const bills = await surveyed(PDF, { pageCount: 4 });
+    expect(bills.parts.map((p) => [p.certain, p.weighedAgainst])).toEqual([
+      [true, null],
+      [false, "ffe_schedule"],
+    ]);
+
+    // Unsure and naming no other genre: held, even beside its own kind.
+    answers({ parts: [part({ firstPage: 1, lastPage: 2 }), part({ firstPage: 3, lastPage: 4, certain: false })], note: null });
+    expect((await surveyed(PDF, { pageCount: 4 })).parts).toHaveLength(2);
+  });
+
+  it("never merges a part with nothing to read, nor the parts either side of one", async () => {
+    answers({ parts: [part({ firstPage: 1, lastPage: 1, nothingToRead: true }), part({ firstPage: 2, lastPage: 5 })], note: null });
+    const cover = await surveyed(PDF, { pageCount: 5 });
+    expect(cover.parts.map((p) => [p.place, p.nothingToRead])).toEqual([
+      [{ kind: "pages", from: 1, to: 1 }, true],
+      [{ kind: "pages", from: 2, to: 5 }, false],
+    ]);
+
+    // Kept simple: a blank page between two drawing parts leaves them two.
+    answers({
+      parts: [part({ firstPage: 1, lastPage: 2 }), part({ firstPage: 3, lastPage: 3, genre: "unclear", nothingToRead: true }), part({ firstPage: 4, lastPage: 5 })],
+      note: null,
+    });
+    expect((await surveyed(PDF, { pageCount: 5 })).parts).toHaveLength(3);
+  });
+
+  it("NEVER merges sheets: a bill's tabs are phases", async () => {
+    const book = workbook([
+      { sheet: "MAIN", rows: 10 },
+      { sheet: "VE", rows: 10 },
+      { sheet: "Finishes", rows: 20 },
+    ]);
+    answers({
+      parts: [
+        part({ sheet: "MAIN", genre: "bill_of_quantities", itemCodes: ["HH-CH-02"] }),
+        part({ sheet: "VE", genre: "bill_of_quantities", itemCodes: ["HH-CH-02"] }),
+        part({ sheet: "Finishes", firstRow: 1, lastRow: 10, genre: "finishes_schedule" }),
+        part({ sheet: "Finishes", firstRow: 11, lastRow: 20, genre: "finishes_schedule" }),
+      ],
+      note: null,
+    });
+    const file = await surveyed(book, { filename: "invented.xlsx" });
+    expect(file.parts).toHaveLength(4);
+    expect(file.note).not.toContain("merged");
+  });
+
+  it("never merges an email's text", async () => {
+    const email: DocumentSource = { type: "email", text: "Subject: invented\n\nBody." };
+    answers({ parts: [part({ genre: "email" }), part({ genre: "email" })], note: null });
+    expect((await surveyed(email, { filename: "invented.eml" })).parts).toHaveLength(2);
+  });
+});
+
+describe("nothing to read", () => {
+  it("is asked for in one plain sentence, and in the tool", async () => {
+    const { surveyPrompt, SURVEY_TOOL } = await import("@/lib/pack-survey");
+    expect(surveyPrompt(null)).toMatch(/A cover, title\s+page, index or blank page, or a workbook's cover sheet, is its own part with nothing to read\./);
+    const items = SURVEY_TOOL.input_schema.properties.parts.items;
+    expect(items.properties.nothingToRead.type).toBe("boolean");
+    expect(items.required).toContain("nothingToRead");
+  });
+
+  it("reads anything but true as false", async () => {
+    const missing = part({ firstPage: 1, lastPage: 1 });
+    delete missing.nothingToRead;
+    answers({ parts: [missing, part({ firstPage: 2, lastPage: 2, genre: "preamble", nothingToRead: "yes" })], note: null });
+    const file = await surveyed(PDF, { pageCount: 2 });
+    expect(file.parts.map((p) => p.nothingToRead)).toEqual([false, false]);
+  });
+
+  it("is never held for a person, whatever its genre says", async () => {
+    const { partIsHeld, partReader } = await import("@/lib/pack-survey");
+    const base = { weighedAgainst: null, nothingToRead: false } as const;
+    expect(partIsHeld({ ...base, genre: "unclear", certain: false, nothingToRead: true })).toBe(false);
+    expect(partReader({ ...base, genre: "shop_drawings", certain: true, nothingToRead: true })).toBeNull();
+    expect(partIsHeld({ ...base, genre: "unclear", certain: false })).toBe(true);
+    expect(partIsHeld({ ...base, genre: "bill_of_quantities", certain: false, weighedAgainst: "ffe_schedule" })).toBe(true);
+    // Settled by the file check's rule: not held, and read as drawings.
+    expect(partIsHeld({ ...base, genre: "shop_drawings", certain: false, weighedAgainst: "specification_sheets" })).toBe(false);
+    expect(partReader({ ...base, genre: "specification_sheets", certain: true })).toEqual({ importType: "spec_document", documentKind: "shop_drawings" });
+  });
+});
+
+describe("a saved response, read again", () => {
+  it("returns the whole response with a live answer, and re-reads it to the same survey with no call", async () => {
+    answers({ parts: [part({ firstPage: 1, lastPage: 1 }), part({ firstPage: 2, lastPage: 3 })], note: null });
+    const live = await survey(PDF, { pageCount: 3 });
+    if (!live.ok) throw new Error("expected ok");
+    expect(live.response).toMatchObject({ stop_reason: "tool_use", usage: USAGE });
+    const { surveyFromResponse, surveyShape } = await import("@/lib/pack-survey");
+    const again = surveyFromResponse(live.response as { content: unknown[] }, { filename: "invented.pdf", ...surveyShape(PDF, { pageCount: 3 }) });
+    expect(again).toEqual({ ok: true, survey: live.survey });
+    expect(live.survey.parts).toHaveLength(1);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("says why a response carries no usable answer", async () => {
+    const { surveyFromResponse } = await import("@/lib/pack-survey");
+    const shape = { filename: "x.pdf", type: "pdf" as const, pageCount: 1, sheetNames: null, sheetRows: null };
+    expect(surveyFromResponse({ content: [{ type: "text", text: "no" }] }, shape)).toEqual({ ok: false, error: "The model did not say what is in the file." });
+  });
+});
+
 // ---- the pack pass ---------------------------------------------------------
 
 function surveyPart(fields: Partial<SurveyPart>): SurveyPart {
@@ -551,6 +752,18 @@ describe("groupPack", () => {
       fileOf("schedule.xlsx", [surveyPart({ genre: "ffe_schedule", itemCodes: ["HH-XX-99"] })]),
     ]);
     expect(lacks).toEqual(["2 item codes on drawings or specification sheets are on no bill: HH-SF-01, HH-LP-04."]);
+  });
+
+  it("links nothing through a part with nothing to read, and does not count a bill's cover as a bill", async () => {
+    const { groupPack } = await import("@/lib/pack-survey");
+    const { items, lacks } = groupPack([
+      fileOf("pack.pdf", [
+        surveyPart({ place: { kind: "pages", from: 1, to: 1 }, genre: "bill_of_quantities", nothingToRead: true, itemCodes: ["HH-CH-02", "HH-SF-01"] }),
+        surveyPart({ place: { kind: "pages", from: 2, to: 9 }, itemCodes: ["HH-CH-02"] }),
+      ]),
+    ]);
+    expect(items).toEqual([{ code: "HH-CH-02", parts: [{ file: "pack.pdf", part: 1 }] }]);
+    expect(lacks).toEqual(["No part reads as a bill of quantities."]);
   });
 
   it("says nothing about missing codes when the bill listed none", async () => {
