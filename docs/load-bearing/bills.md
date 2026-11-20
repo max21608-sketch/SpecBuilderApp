@@ -108,7 +108,9 @@ pack screen says nothing is paired. Recorded and NOT fixed: a subtotal or
 section row that carries a description becomes a spec record with the
 subtotal's figure as its quantity — since 2026-09-23 a `section` or
 `subtotal` row KIND exists and defaults to Ignore, but only the model or a
-person sets one (see *A bill is never refused*). The header synonym list is
+person sets one (see *A bill is never refused*); since 2026-11-20 a row with
+nothing but a heading's text is offered "Section heading?", still a person's
+click. The header synonym list is
 SEED DATA since 2026-09-23 (`boq_column_aliases`, 0040).
 
 Rows above the header carry the revision, the date and the terms the run is
@@ -373,6 +375,26 @@ columns are plainly there was a dead end because of the words above them. Max:
   the sheet carries a `columnsDoubt` naming the layout, held as above. Where
   the synonyms cannot read the sheet at all (the Aman "Spec Code"), a layout
   applies exactly as before.
+- **A heading row is ASKED about, never set** (2026-11-20, an invented
+  specifier's bill, `src/lib/row-kind-guess.ts`). A bill read by its known
+  headings — no model, no person — stages every row as an Item, so `GUEST
+  ROOM TYPE A`, `BAR`, `RESTAURANT` in the code column became records. The
+  review now offers "Section heading?" (a `SuggestButton` with its evidence,
+  and "Accept all N suggested section headings" per tab) where a row has text
+  in EXACTLY ONE of code and description, no quantity (a `TBC` is a
+  quantity cell with words in it, so it is not), no unit and no other cell
+  the sheet reads. Accepting is the Kind control's own write
+  (`kindChoicePatch`, at the document's version), and that control is the
+  way back. Computed on read, never stored, and only for a line NOBODY has
+  given a kind: the bracket rule, a seeded layout's row rule, a model's
+  reading and a person's choice are never asked about again, and a bracketed
+  code is the bracket rule's. Not where the non-furniture question already
+  fires (a subtotal's words), and not on a finish-shaped row. The trap is
+  setting it at parse time: a coded item with nothing else on its row would
+  vanish from the phase, the file and the quote. Measured with `boq:gap`
+  (which now prints `suggested kinds` where a sheet has any): the real
+  Annabel's NY bill is asked about 8 rows, every one a row its golden leaves
+  out; no other real bill is asked anything.
 - **A header printed again above a section is passed over and counted**
   (2026-11-16, audit C9). It used to stage as a record named "Description".
   A row is a reprint where at least two of the columns being read carry text

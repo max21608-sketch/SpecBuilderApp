@@ -486,7 +486,10 @@ confirmed meanwhile. A failed attempt may still have been charged; Max can see.
 Other things users report on a bill, and what they are:
 
 - *"It made a record called Description"* or headings became items → set the
-  row's kind to "Section heading" or untick "Include", before confirming.
+  row's kind to "Section heading" or untick "Include", before confirming. A
+  row with nothing but a heading's text shows a dashed **"Section heading?"**
+  with the reason beside it; press it, or "Accept all N suggested section
+  headings" on the tab. The row's Kind changes it back.
 - *"The codes are in the wrong column / every item has the same name"* → the
   columns are mapped wrongly. Columns panel.
 - *"A line says 'check against the PDF'"* → the app could not be sure it read

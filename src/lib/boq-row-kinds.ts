@@ -143,13 +143,26 @@ type BracketLine = KindLine & { itemDescription?: string | null; finishCode?: st
  */
 function bracketLineLooksLikeFinish(line: BracketLine, fabricCode: string | null): boolean {
   if (line.finishCode?.trim()) return true;
-  if (fabricCode) {
-    if (billFinishCodeKind(fabricCode) || projectCodeKind(fabricCode)) return true;
-    const lead = /^([A-Za-z]{2,4})[-\s]?\d/.exec(fabricCode.trim())?.[1]?.toLowerCase();
-    if (lead && CODE_PREFIXES.some((entry) => entry.prefix === lead)) return true;
-  }
+  if (codeIsAFinishCode(fabricCode)) return true;
   const words = (line.itemDescription ?? "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   return words.some((word) => FINISH_LINE_WORDS.has(word));
+}
+
+/**
+ * WHETHER A CODE IS A FINISH CODE by the code readers the app already has —
+ * the bill's `F-<KIND>-<n>` shape (`billFinishCodeKind`), a three-part
+ * project code's middle group (`projectCodeKind`: `GR-FAB-13`), or a leading
+ * run of two to four letters that IS one of `CODE_PREFIXES` exactly, then a
+ * figure (`FAB-01`, `MTL 02`, `WD01`). Exact on the letters, never a prefix
+ * of them: `COMMODE-01` and `WDR-01` are not finish codes. The bracket rule's
+ * test since audit C8, and the finish-line suggestion's (`row-kind-guess.ts`).
+ */
+export function codeIsAFinishCode(code: string | null | undefined): boolean {
+  const raw = (code ?? "").trim();
+  if (raw === "") return false;
+  if (billFinishCodeKind(raw) || projectCodeKind(raw)) return true;
+  const lead = /^([A-Za-z]{2,4})[-\s]?\d/.exec(raw)?.[1]?.toLowerCase();
+  return Boolean(lead && CODE_PREFIXES.some((entry) => entry.prefix === lead));
 }
 
 /** The bracket says the line is not decided ("TO BE CONFIRMED"), rather than naming a line. */

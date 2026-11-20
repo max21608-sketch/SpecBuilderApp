@@ -12,7 +12,7 @@
 // No database, no model: `apiFetch` and `next/navigation` are stubbed. The bill
 // is INVENTED (an invented specifier's layout and words).
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { parseBoqSheets, type StagedBoqSheet } from "@/lib/boq-import";
 import { COMPONENT_TIMEOUT_MS } from "./tier-timeout";
 
@@ -122,5 +122,27 @@ describe("a bill's kind suggestions", () => {
     mount();
     expect(await screen.findByText("Example sofa")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Guest Rooms/ })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("asks about the heading, with its evidence, and nothing else", async () => {
+    mount();
+    const offers = await screen.findAllByRole("button", { name: /^(Section heading|Finish for .+)$/ });
+    expect(offers.map((offer) => offer.textContent)).toEqual(["Section heading?"]);
+    expect(screen.getByText("text in the code column only — no quantity, unit or anything else on the row")).toBeInTheDocument();
+  });
+
+  it("accepts one as the Kind control would, at the document's version", async () => {
+    const sheet = mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Section heading" }));
+    await waitFor(() => expect(routes.patches).toHaveLength(1));
+    const heading = sheet.lines.find((line) => line.lineNo === 2)!;
+    expect(routes.patches[0]).toEqual({ sheetIndex: 1, index: heading.index, rowKind: "section", version: 3 });
+  });
+
+  it("accepts every heading on the tab in one press", async () => {
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: /Accept all 1 suggested section heading$/ }));
+    await waitFor(() => expect(routes.patches).toHaveLength(1));
+    expect(routes.patches[0]).toMatchObject({ sheetIndex: 1, rowKind: "section" });
   });
 });
