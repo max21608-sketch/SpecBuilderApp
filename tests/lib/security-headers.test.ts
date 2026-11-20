@@ -5,7 +5,7 @@
 // `securityHeaders` in fails here rather than on a deployment.
 import { describe, expect, it } from "vitest";
 import nextConfig from "../../next.config";
-import { fullContentSecurityPolicy } from "@/lib/security-headers";
+import { fullContentSecurityPolicy, securityHeaders } from "@/lib/security-headers";
 
 async function headersFor(source: string) {
   const rules = (await nextConfig.headers?.()) ?? [];
@@ -41,5 +41,41 @@ describe("fullContentSecurityPolicy", () => {
   it("allows eval only in development", () => {
     expect(fullContentSecurityPolicy({ NODE_ENV: "development" })).toContain("'unsafe-eval'");
     expect(fullContentSecurityPolicy({ NODE_ENV: "production" })).not.toContain("'unsafe-eval'");
+  });
+});
+
+// Production hardening H3 (2026-11-20). Every built deployment is HTTPS-only
+// for two years, and the header binds THIS host alone: the production domain
+// is undecided, and `includeSubDomains` or `preload` would bind every sibling.
+describe("Strict-Transport-Security", () => {
+  const hsts = (env: Record<string, string | undefined>) =>
+    securityHeaders(env).find((header) => header.key.toLowerCase() === "strict-transport-security")?.value;
+
+  it("is sent on every built deployment, for two years, this host only", () => {
+    expect(hsts({ NODE_ENV: "production" })).toBe("max-age=63072000");
+    for (const appEnv of ["staging", "pilot", "production"]) {
+      const value = hsts({ NODE_ENV: "production", APP_ENV: appEnv }) ?? "";
+      expect(value, appEnv).toBe("max-age=63072000");
+      expect(value, appEnv).not.toMatch(/includeSubDomains|preload/i);
+    }
+  });
+
+  it("is never sent by `next dev`, or when NODE_ENV says nothing", () => {
+    expect(hsts({ NODE_ENV: "development" })).toBeUndefined();
+    expect(hsts({ NODE_ENV: "test" })).toBeUndefined();
+    expect(hsts({})).toBeUndefined();
+  });
+
+  it("is wired through next.config for a production build", async () => {
+    const saved = process.env.NODE_ENV;
+    const env = process.env as Record<string, string | undefined>;
+    env.NODE_ENV = "production";
+    try {
+      const headers = await headersFor("/:path*");
+      expect(headers.get("strict-transport-security")).toBe("max-age=63072000");
+    } finally {
+      if (saved === undefined) delete env.NODE_ENV;
+      else env.NODE_ENV = saved;
+    }
   });
 });

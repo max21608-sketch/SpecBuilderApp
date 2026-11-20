@@ -91,7 +91,10 @@ said whether an account existed; driver error text reached pilot's browsers.
 - **Security headers.** Enforced: `Content-Security-Policy: frame-ancestors
   'none'; base-uri 'self'; object-src 'none'`, `X-Frame-Options: DENY`,
   `nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, a minimal
-  `Permissions-Policy`. The FULL policy ships Report-Only until a browser
+  `Permissions-Policy`, and on every built deployment (`NODE_ENV=production`,
+  never `next dev`) `Strict-Transport-Security: max-age=63072000` with NO
+  `includeSubDomains` or `preload` while the production domain is undecided
+  (2026-11-20). The FULL policy ships Report-Only until a browser
   walk shows no violations (the bill upload's direct PUT to the blob origin,
   the pdfjs worker and crops, record pictures are the places to look); the
   recommended enforced form is in `security-headers.ts`'s header. Dropping
