@@ -15,9 +15,12 @@ import { setDesignerOnRecords } from "@/lib/designer-batch";
 import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
-// 500 items in one transaction, a savepoint each: seconds, not minutes, but
-// more than the platform's default allows on a cold database.
-export const maxDuration = 60;
+// NO maxDuration, deliberately (pre-push review E2): the route inherits the
+// Vercel project's default, which was raised to 800 s with the extraction
+// worker (CLAUDE.md, "Stack"). A press of up to 500 items is one transaction
+// at some fifteen round trips an item; a limit set here could only be LOWER
+// than the default, and a press cut by the platform writes nothing and tells
+// the person nothing but a gateway error.
 
 const Body = z
   .object({
