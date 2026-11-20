@@ -654,6 +654,12 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 export function boqConfirmLabel(input: {
   counts: { records: number; fabricSpecs: number; phases: number };
   revising: boolean;
+  /**
+   * How many live tabs REVISE a phase (RV5, 2026-11-20): a three-tab
+   * revision read "updates this phase" while it updated three. Absent reads
+   * as one, the label every single-tab revision has always had.
+   */
+  revisedPhases?: number;
   unmapped: number;
   busy: boolean;
 }): string {
@@ -662,7 +668,13 @@ export function boqConfirmLabel(input: {
   const { records, fabricSpecs, phases } = input.counts;
   const fabrics =
     fabricSpecs > 0 ? ` and ${plural(fabricSpecs, "fabric or finish spec", "fabric and finish specs")}` : "";
-  if (input.revising) return `Confirm · updates this phase from ${plural(records, "line", "lines")}${fabrics}`;
+  if (input.revising) {
+    const revised = input.revisedPhases ?? 1;
+    const created = Math.max(0, phases - revised);
+    if (revised <= 1 && created === 0) return `Confirm · updates this phase from ${plural(records, "line", "lines")}${fabrics}`;
+    const what = `updates ${plural(revised, "phase", "phases")}${created > 0 ? ` and creates ${plural(created, "phase", "phases")}` : ""}`;
+    return `Confirm · ${what} from ${plural(records, "line", "lines")}${fabrics}`;
+  }
   return `Confirm · creates ${plural(records, "record", "records")}${fabrics} on ${plural(phases, "phase", "phases")}`;
 }
 

@@ -424,7 +424,16 @@ export default function BoqReview({
             }
             title={confirmBlocker ?? undefined}
           >
-            {boqConfirmLabel({ counts, revising, unmapped: unmapped.length, busy })}
+            {boqConfirmLabel({
+              counts,
+              revising,
+              // RV5: every live tab that revises a phase and writes a line.
+              revisedPhases: activeSheets.filter(
+                (sheet) => sheet.replacesRunId && sheet.lines.some((line) => !line.ignored && line.rowKind !== "finish_for"),
+              ).length,
+              unmapped: unmapped.length,
+              busy,
+            })}
           </Button>
           </>
           )
