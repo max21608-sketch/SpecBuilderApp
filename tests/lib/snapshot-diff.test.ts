@@ -171,6 +171,66 @@ describe("diffSnapshots", () => {
   });
 });
 
+// The Versions tab printed a picture change as its storage path,
+// `projects/<uuid>/item-images/<…>.png` (2026-11-20, G1). A person reads where
+// the picture came from; the path stays what tells two pictures apart.
+describe("diffSnapshots — the picture", () => {
+  const PROJECT = "projects/0b5c3f9e-1111-4222-8333-944445555666/";
+  const crop = { attachmentId: "att-crop", storagePath: `${PROJECT}item-images/item-7-1731000000000.png` };
+  const bill = { attachmentId: "att-bill", storagePath: `${PROJECT}bill-images/run-1/row-3.png` };
+
+  it("prints a picture arriving in words, never its path", () => {
+    const after = base();
+    after.itemImage = crop;
+    const diff = diffSnapshots(base(), after);
+    expect(diff.core).toEqual([
+      { field: "itemImage", label: "Picture", was: null, now: "a picture cropped off the drawings" },
+    ]);
+    expect(JSON.stringify(diff)).not.toContain("projects/");
+  });
+
+  it("names where each picture came from when one replaces another", () => {
+    const before = base();
+    before.itemImage = bill;
+    const after = base();
+    after.itemImage = crop;
+    expect(diffSnapshots(before, after).core).toEqual([
+      { field: "itemImage", label: "Picture", was: "a picture from the bill", now: "a picture cropped off the drawings" },
+    ]);
+  });
+
+  it("still says the picture changed when the two read alike", () => {
+    const before = base();
+    before.itemImage = crop;
+    const after = base();
+    after.itemImage = { attachmentId: "att-crop-2", storagePath: `${PROJECT}item-images/item-7-1731000099999.png` };
+    expect(diffSnapshots(before, after).core).toEqual([
+      {
+        field: "itemImage",
+        label: "Picture",
+        was: "a picture cropped off the drawings",
+        now: "another picture cropped off the drawings",
+      },
+    ]);
+  });
+
+  it("reads a picture stored anywhere else as just a picture, and its removal as cleared", () => {
+    const before = base();
+    before.itemImage = { attachmentId: "att-demo", storagePath: `${PROJECT}demo/chair.png` };
+    expect(diffSnapshots(before, base()).core).toEqual([
+      { field: "itemImage", label: "Picture", was: "a picture", now: null },
+    ]);
+  });
+
+  it("is no change at all while the same picture stays", () => {
+    const before = base();
+    before.itemImage = crop;
+    const after = base();
+    after.itemImage = { ...crop };
+    expect(diffSnapshots(before, after).core).toEqual([]);
+  });
+});
+
 describe("parseAtoms", () => {
   it("round-trips a snapshot through JSON", () => {
     const parsed = parseAtoms(JSON.parse(JSON.stringify(base())));

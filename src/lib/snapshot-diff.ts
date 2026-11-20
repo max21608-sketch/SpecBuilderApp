@@ -41,6 +41,7 @@ import { attributeDisplayLabel } from "@/lib/attribute-label";
 import { composeRowCells, BWS_EXPORT_COLUMNS } from "@/lib/bws-export";
 import { composeFinishCell } from "@/lib/finishes";
 import { describeStandard, standardInForce } from "@/lib/bw-standard";
+import { itemImageSource } from "@/lib/item-image";
 import { exportAnswers, scopeForAtoms, RECORD_ATOMS_SCHEMA_VERSION, type RecordAtoms } from "@/lib/record-atoms";
 
 // ---- validating a stored snapshot -----------------------------------------
@@ -265,7 +266,13 @@ function compare(field: string, label: string, was: unknown, now: unknown): Fiel
  * one of them: they head the rows of a record's version diff, and `runName`
  * was headed "Run" for four days after the rename.
  */
-export const CORE_FIELDS: { field: keyof RecordAtoms | string; label: string; read: (atoms: RecordAtoms) => unknown }[] = [
+export const CORE_FIELDS: {
+  field: keyof RecordAtoms | string;
+  label: string;
+  read: (atoms: RecordAtoms) => unknown;
+  /** What the row PRINTS where that is not what is compared. See `itemImage`. */
+  show?: (atoms: RecordAtoms) => string | null;
+}[] = [
   { field: "itemDescription", label: "Item", read: (a) => a.record.itemDescription },
   { field: "qty", label: "Quantity", read: (a) => a.record.qty },
   { field: "area", label: "Area", read: (a) => a.record.area },
@@ -293,8 +300,35 @@ export const CORE_FIELDS: { field: keyof RecordAtoms | string; label: string; re
   // halves of this rule get confused with each other.
   { field: "runName", label: "Phase", read: (a) => a.runName },
   { field: "splitReason", label: "Split reason", read: (a) => a.splitReason },
-  { field: "itemImage", label: "Picture", read: (a) => a.itemImage?.storagePath ?? null },
+  // COMPARED BY ITS STORAGE PATH, PRINTED IN WORDS. The path is what tells one
+  // picture from another (an attachment is superseded, never edited), so it
+  // stays what is compared -- but it is `projects/<uuid>/item-images/....png`,
+  // and that is what a person read on the Versions tab (2026-11-20, G1).
+  // `show` is what the row prints instead; `pictureWords` never prints a path.
+  {
+    field: "itemImage",
+    label: "Picture",
+    read: (a) => a.itemImage?.storagePath ?? null,
+    show: (a) => pictureWords(a.itemImage),
+  },
 ];
+
+/**
+ * A stored picture as a person reads it: where it came from, never where it is
+ * kept.
+ *
+ * The source is read off the path the way the record screen's caption reads it
+ * (`itemImageSource`), so a version and the picture's own caption agree. The
+ * atom holds no filename, so the bill's row and the drawing's page cannot be
+ * named here, and nothing is guessed in their place.
+ */
+export function pictureWords(image: RecordAtoms["itemImage"]): string | null {
+  if (!image) return null;
+  const source = itemImageSource({ storagePath: image.storagePath, filename: null });
+  if (source.kind === "bill") return "a picture from the bill";
+  if (source.kind === "drawing") return "a picture cropped off the drawings";
+  return "a picture";
+}
 
 function attributeFields(attribute: RecordAtoms["attributes"][number]): { field: string; label: string; value: unknown }[] {
   return [
@@ -432,9 +466,15 @@ export function diffCells(before: RecordAtoms, after: RecordAtoms): FieldChange[
 }
 
 export function diffSnapshots(before: RecordAtoms, after: RecordAtoms): SnapshotDiff {
-  const core = CORE_FIELDS.map((f) => compare(String(f.field), f.label, f.read(before), f.read(after))).filter(
-    (f): f is FieldChange => f !== null,
-  );
+  const core = CORE_FIELDS.map((f) => {
+    const change = compare(String(f.field), f.label, f.read(before), f.read(after));
+    if (!change || !f.show) return change;
+    const was = f.show(before);
+    const now = f.show(after);
+    // Two pictures that read alike are still two pictures: the row has to say
+    // the picture CHANGED, not print the same words twice.
+    return { ...change, was, now: was !== null && now === was ? now.replace(/^a picture/, "another picture") : now };
+  }).filter((f): f is FieldChange => f !== null);
 
   const refs = diffKeyed(
     before.refs,

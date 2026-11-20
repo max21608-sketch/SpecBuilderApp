@@ -684,8 +684,9 @@ and a detailed plan (`docs/plans/production-readiness-2026-11-20.md`; the
 dated entry in `docs/plans/README.md`). The app was walked on the local stack
 as a NEW CLIENT with an invented pack, a revised bill, a 300-line bill and
 unknown headings; four fix branches were built by Opus coders and merged into
-**`prod-ready`, `committed locally` only — not pushed, not deployed, no
-migration.** What it changed that a later change could undo: a bill row with
+**`prod-ready`, pushed by Max to `origin/staging` at `72a69fe` on
+2026-11-20 — the staging deployment and CI on that SHA are not read by Claude;
+not on pilot; no migration.** What it changed that a later change could undo: a bill row with
 only a heading's text, or a finish code with no quantity under an item, is a
 SUGGESTION a person accepts, never a decision (`docs/load-bearing/bills.md`);
 an unlabelled or x-less size line is placed only where every figure carries
@@ -696,19 +697,47 @@ existing phase waits for "revision or new phase" before Confirm; an email's
 confirm and its screen share ONE confirmable predicate; a file whose name and
 model reading disagree is held, unread; `AUTH_SECRET` must be 32+ characters
 in production; a cross-site write is refused in the middleware; `/api/health`
-is public and names the commit; next 15.5.29 and postal-mime 4.2.1. The four
-checks pass on `prod-ready` with the database tier required (5,333 tests).
-Production itself does not exist; the decisions that come first are Max's
-(plan §5). Human acceptance is outstanding on every screen it touched.
+is public and names the commit; next 15.5.29 and postal-mime 4.2.1. Max then
+chose "Review first": three independent reviewers read the branch and twelve
+defects (plus one from the 300-line walk) were fixed with tests (plan §4.2) —
+among them, "Set designer…" takes the project and then every record BY ID
+before its first line; `/api/health` answers 503 with the problem's code when
+the environment is wrong; sign-in refuses a cross-site post; an unlabelled
+size line with a part word after its figures stays a note; a revision's area
+is stated only by an area or sub-area column; an email joins no pack. Two
+usability walks (one by a reviewer who had never seen the app) produced
+`docs/plans/after-intake-2026-11-20.md` — SUGGESTIONS for the fill-in, the
+chase, the CAM hand-off and changing what is known, none built beyond four
+polish items (no developer voice on user screens, a grey dot for an
+uncategorised item, the chase signed by its creator, Upload the pack in one
+press). The four checks pass on `prod-ready` at `cef9a40` with the database
+tier required (5,386 tests); CI's db-tier job was rehearsed on a fresh
+database. Production itself does not exist; the decisions that come first are
+Max's (plan §5). Human acceptance is outstanding on every screen it touched.
+Another session's `open-intake-2026-11-20.md` (branch `intake-2026-11-20`,
+built on `prod-ready`) amends the "Explicitly excluded" list below now that
+`prod-ready` has landed on `origin/staging`; from `72a69fe` on, this file
+belongs to that session.
 
-**Explicitly excluded, so it is not built speculatively:** feeding preamble
-notes into later model calls; a BWS *import* file carrying job numbers; images
-and scanned documents other than a bill; splitting an oversize drawing set; M6
+**Explicitly excluded, so it is not built speculatively:** a BWS *import*
+file carrying job numbers; images and scanned documents other than a bill; M6
 VE rounds; any write to BWS; automatic email sending; SharePoint writes
 (SharePoint READS from BWS's P-number folder are an INVESTIGATION Matthew asked
 for on 2026-10-12, not a build: `docs/plans/catchup-2026-10-12.md` P5 and P6);
 BWS Messenger and Teams ingestion; the post-order/production flow; the TOE
 calculator (Matthew's next-phase picture, not this one).
+
+**Lifted from that list on 2026-11-20 (Max).** Two items left the list:
+*splitting an oversize drawing set* and *feeding preamble notes into later
+model calls*. The open-intake plan (`docs/plans/open-intake-2026-11-20.md`)
+reads PART of a file (its Stage 2) and sends readings into a later model call
+(its Stage 3). Max approved the plan whole: *"that's exactly what I want to do
+… let's go ahead"*. He confirmed the amendment to the production-readiness
+session the same evening: *"listen to the other session. It's correct. Let's
+change that."* Both are built only as that plan's stages describe. Every
+reading is still STAGED, and only a person's confirm writes. Scanned documents
+other than a bill, and images, stay excluded: "any format" there means any MIX
+of PDF with text, spreadsheet and email.
 
 **Decisions awaiting somebody** (the person is named; the detail is in the
 diary and the README):
@@ -717,7 +746,7 @@ diary and the README):
   design; the gate model's assumptions (`docs/plans/matrix-assumptions.md`,
   Max standing in for him since 2026-09-17); the level guess rules; the
   question-to-BWS-field mapping; Q4/Q6/Q7/Q8 from the Ronnie Scott's plan.
-- **Max:** the production-readiness decisions D1–D12 (`docs/plans/production-readiness-2026-11-20.md` §5 — who sees which client, BWS import at launch, company accounts and a spend limit, backups, retention, the production branch and domain, residency, decimal quantities, pilot data, mail, CSP, which document describes a finish); pushing `prod-ready`; reading the first CI run on the review build (pushed 2026-11-18);
+- **Max:** the production-readiness decisions D1–D12 (`docs/plans/production-readiness-2026-11-20.md` §5 — who sees which client, BWS import at launch, company accounts and a spend limit, backups, retention, the production branch and domain, residency, decimal quantities, pilot data, mail, CSP, which document describes a finish); reading CI and the staging deployment on `72a69fe` (the production-readiness build, pushed 2026-11-20) before pilot; reading the first CI run on the review build (pushed 2026-11-18);
   whether a preamble note's retire belongs in the change trail; deleting the
   65 merged local branches; `origin/production` (delete or record); whether to enforce the full
   CSP after the browser walk; reclaiming pilot's audit-log space; a chased

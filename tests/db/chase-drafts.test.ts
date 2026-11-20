@@ -243,6 +243,10 @@ describeIfDb("chase drafts", () => {
 
     // The Cc snapshot is the project inbox, taken at generation.
     expect(drafts[0].cc_email).toBe(INBOX);
+    // Signed by the person who generated it, off their own user row
+    // (2026-11-20, G3) — it used to end "Many thanks," and no name.
+    expect(drafts[0].closing_text).toBe("Many thanks,\nQA User");
+    expect(String(drafts[0].body)).toContain("Many thanks,<br>QA User</p>");
     // Non-production, so the subject is marked.
     expect(String(drafts[0].subject)).toContain("[STAGING]");
   });
@@ -445,6 +449,11 @@ describeIfDb("chase drafts", () => {
 
     const after = (await currentDrafts()).find((d) => d.id === fresh.id);
     expect(after.intro_text).toBe("__QA revised opening");
+    // A closing the person wrote is THEIRS: stored as typed, never given the
+    // name the default carries (2026-11-20, G3).
+    expect(after.closing_text).toBe("__QA regards");
+    expect(String(after.body)).toContain("__QA regards");
+    expect(String(after.body)).not.toContain("QA User");
     expect(after.manually_edited_by).toBe("__qa@example.test");
     expect(String(after.body)).toContain("__QA revised opening");
 

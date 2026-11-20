@@ -306,7 +306,7 @@ export function composeQuoteSheet(
       "Net price each and Net price: this app holds no pricing at all — no rate, no labour, no material cost.",
       "UUID: BWS's own.",
       "Image url: item pictures are private and BWS cannot fetch them.",
-      "A product code is left blank where the item's category maps to more than one of Matthew's nine — our merged seating sheets do — because picking one of three would price it against the wrong template.",
+      "A product code is left blank where the item's category maps to more than one of the nine seating categories — our merged seating sheets do — because picking one of three would price it against the wrong template.",
       "The companion billing lines — interliner, stone, mattresses, delivery — cannot be generated: the interliner quantity is the fabric metreage, which this app deliberately does not hold.",
     ],
   };

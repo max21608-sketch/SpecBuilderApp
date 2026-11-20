@@ -101,11 +101,18 @@ const KIND_LABELS: Record<string, string> = {
 /** How many files a pack shows before the rest fold behind a link. */
 const PACK_FILES_SHOWN = 5;
 
-/** The documents list and what the card's two copies share; see the header. */
-export function useProjectDocuments() {
+/**
+ * The documents list and what the card's two copies share; see the header.
+ *
+ * `uploading` is THE switch for the upload panel, whoever opens it: "Add
+ * documents" toggles it, and `openUploader` starts it open for an arrival that
+ * asked for the uploader (`?upload=1`, the "Upload the pack" step) — the page
+ * reads the URL, this hook never does.
+ */
+export function useProjectDocuments({ openUploader = false }: { openUploader?: boolean } = {}) {
   const [documents, setDocuments] = useState<DocumentRun[] | null>(null);
   const [failedDocuments, setFailedDocuments] = useState(0);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploading] = useState(openUploader);
   const [expandedPacks, setExpandedPacks] = useState<Set<string>>(new Set());
   const [retryingDocument, setRetryingDocument] = useState<string | null>(null);
 

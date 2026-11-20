@@ -521,7 +521,7 @@ export default function RecordChecklist({
           label={TIER_LABELS.later}
           tone="warn"
           value={readiness.alsoOutstanding ?? readiness.outstanding}
-          meaning={`${laterSplit.unlooked} unlooked · ${laterSplit.tbc} TBC`}
+          meaning={`${laterSplit.unlooked} not answered · ${laterSplit.tbc} TBC`}
           onPress={() => setFocus(focus === "later" ? null : "later")}
           active={focus === "later"}
         />

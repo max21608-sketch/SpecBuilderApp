@@ -250,9 +250,12 @@ describe("the gate panel", () => {
     expect(screen.queryByText("TG1")).not.toBeInTheDocument();
   });
 
-  it("keeps the matrix collapsed, and carries the standing-in-for-Matthew warning", async () => {
+  it("keeps the matrix collapsed, and says the gate rules are provisional", async () => {
     renderPanel();
-    expect(screen.getByText(/These answers are Max standing in for Matthew/)).toBeInTheDocument();
+    expect(screen.getByText(/These gate rules are provisional/)).toBeInTheDocument();
+    // In the screen's words (2026-11-20, G1): no person's name, no docs/ path.
+    expect(screen.getByText(/TG2 is not modelled yet/)).toBeInTheDocument();
+    expect(screen.queryAllByText(/Matthew|\bMax\b|docs\//)).toHaveLength(0);
     expect(screen.queryByText("How it arrives")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Why these questions/ }));
     expect(screen.getByText("How it arrives")).toBeInTheDocument();

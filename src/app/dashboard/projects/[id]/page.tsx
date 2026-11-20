@@ -28,7 +28,7 @@
 // ============================================================================
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import ContactsPanel, { type Contact, type ContactsOutstanding } from "@/components/projects/ContactsPanel";
@@ -54,7 +54,7 @@ import {
 import { EMPTY_SUMMARY, type ProjectSummary } from "@/lib/project-summary-shape";
 import StatTile from "@/components/ui/StatTile";
 import NextStepAction from "@/components/ui/NextStepAction";
-import { nextStep } from "@/lib/next-step";
+import { OPEN_UPLOADER_PARAM, nextStep } from "@/lib/next-step";
 import Tip from "@/components/ui/Tip";
 import Pill from "@/components/ui/Pill";
 import Chip from "@/components/ui/Chip";
@@ -114,8 +114,33 @@ function ProjectOverview() {
     return FOCUSES.find((value) => value === rawFocus) ?? null;
   })();
   const [project, setProject] = useState<Project | null>(null);
-  const docs = useProjectDocuments();
-  const { documents, setDocuments, setFailedDocuments, failedDocuments, packs } = docs;
+  /**
+   * `?upload=1` — "Upload the pack" lands on the Documents tab with the
+   * uploader OPEN (2026-11-20, G4). It sets the same `uploading` switch "Add
+   * documents" does, rather than a second way of showing the panel: as the
+   * hook's starting value on arrival, and in the effect below when the step
+   * is pressed on this already-mounted page.
+   *
+   * THEN IT IS TAKEN OFF THE URL. It is an instruction, not where the page is:
+   * left on, a reload or a link pasted to a colleague would reopen a panel
+   * somebody closed, the tab strip would carry it to every other tab, and a
+   * second press of "Upload the pack" after Close would change nothing in the
+   * URL and so open nothing. `useUrlTab`'s never-write-on-read rule protects a
+   * deep link that has not resolved yet; this one has been acted on.
+   */
+  const uploadRequested = searchParams.get(OPEN_UPLOADER_PARAM) === "1";
+  const docs = useProjectDocuments({ openUploader: uploadRequested });
+  const { documents, setDocuments, setFailedDocuments, failedDocuments, packs, setUploading } = docs;
+  const router = useRouter();
+  const pathname = usePathname();
+  useEffect(() => {
+    if (!uploadRequested) return;
+    setUploading(true);
+    const query = new URLSearchParams(searchParams.toString());
+    query.delete(OPEN_UPLOADER_PARAM);
+    const rest = query.toString();
+    router.replace(rest ? `${pathname}?${rest}` : pathname, { scroll: false });
+  }, [uploadRequested, searchParams, pathname, router, setUploading]);
   const [runs, setRuns] = useState<SpecRun[]>([]);
   const [notes, setNotes] = useState<ProjectNote[]>([]);
   /**
@@ -699,7 +724,7 @@ function ProjectOverview() {
                   label="Also outstanding"
                   tone="warn"
                   value={summary.alsoOutstandingItems}
-                  meaning={`of ${summary.itemsWithQuestions.toLocaleString()} items · ${summary.missing.toLocaleString()} unlooked, ${summary.tbc.toLocaleString()} TBC`}
+                  meaning={`of ${summary.itemsWithQuestions.toLocaleString()} items · ${summary.missing.toLocaleString()} not answered, ${summary.tbc.toLocaleString()} TBC`}
                   href={firstRunHref}
                 />
                 <StatTile
@@ -795,15 +820,20 @@ function ProjectOverview() {
                     arithmetically the same number as "outstanding". Printing it
                     in red as though it were a measurement is the
                     confidently-wrong figure this app exists to avoid, so where
-                    it is a placeholder it is labelled one. */}
+                    it is a placeholder it is labelled one.
+
+                    In the screen's words, not ours (2026-11-20, G1): no
+                    person's name and no "his matrix" — a reader who has never
+                    met the people behind the gate model still has to read it. */}
                 {summary.tgqFromFallback > 0 && (
                   <Note tone="warn" className="mx-4 mt-3">
                     <b className="font-semibold">
-                      {summary.tgqFromFallback} of these {summary.tgqFromMatrix + summary.tgqFromFallback} items are
-                      in a category Matthew has not written a gate model for
-                    </b>
-                    , so their TGQ is still the placeholder — every outstanding question on them counts as blocking.
-                    The other {summary.tgqFromMatrix} use his matrix. The figure will only ever come down.
+                      {summary.tgqFromFallback} of these {summary.tgqFromMatrix + summary.tgqFromFallback} items use a
+                      provisional checklist
+                    </b>{" "}
+                    — their category has no gate model yet — so every outstanding question on them counts as blocking.
+                    The other {summary.tgqFromMatrix} use their category&rsquo;s gate model. The figure can only come
+                    down as gate models are written.
                   </Note>
                 )}
                 <Table>
@@ -829,8 +859,8 @@ function ProjectOverview() {
                         <>
                           Items with something still blocking a quotation, of the{" "}
                           {summary.itemsWithQuestions.toLocaleString()} that have a category —{" "}
-                          {summary.toQuote.toLocaleString()} to answer between them (questions, and on
-                          Matthew&rsquo;s matrix also dimension slots and record columns)
+                          {summary.toQuote.toLocaleString()} to answer between them (questions, and under a
+                          gate model also dimension slots and record columns)
                           {summary.projectWide > 0 && (
                             <>
                               , and{" "}

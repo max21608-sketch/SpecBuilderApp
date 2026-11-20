@@ -17,11 +17,13 @@ vi.setConfig({ testTimeout: COMPONENT_TIMEOUT_MS });
 
 const PROJECT = "project-7";
 const url = vi.hoisted(() => ({ search: "" }));
+// One router for the file, so a test can read what the page wrote to the URL.
+const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn() }));
 vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "project-7" }),
   useSearchParams: () => new URLSearchParams(url.search),
   usePathname: () => "/dashboard/projects/project-7",
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useRouter: () => router,
 }));
 
 type Call = { url: string; method: string; body: unknown };
@@ -164,6 +166,8 @@ const sent = (method: string, fragment: string) =>
 beforeEach(() => {
   calls.length = 0;
   url.search = "";
+  router.replace.mockClear();
+  router.push.mockClear();
 });
 
 describe("the overview", () => {
@@ -171,7 +175,8 @@ describe("the overview", () => {
     serve();
     await screen.findByRole("heading", { level: 1, name: /T90001/ });
     expect(screen.getByText("Documents disagree")).toBeInTheDocument();
-    expect(screen.getByText(/3 of these 12 items are/)).toBeInTheDocument();
+    expect(screen.getByText(/3 of these 12 items use a provisional checklist/)).toBeInTheDocument();
+    expect(screen.getByText(/20 not answered, 4 TBC/)).toBeInTheDocument();
     expect(screen.getByText("and 1 more")).toBeInTheDocument();
     expect(screen.getByText("Still being read")).toBeInTheDocument();
     expect(screen.getAllByText(/specs due/).length).toBeGreaterThan(0);
@@ -280,6 +285,28 @@ describe("the tabs that are also cards", () => {
     const card = (await screen.findAllByText("Source documents"))[0]!;
     expect(card).toBeInTheDocument();
     expect(screen.getAllByText("bill.xlsx").length).toBeGreaterThan(0);
+  });
+
+  // "Upload the pack" took two presses: it switched to this tab and the person
+  // then had to find "Add documents" (2026-11-20, G4). It now carries
+  // `?upload=1`, and the tab arrives with the uploader open.
+  it("arrives with the uploader open when the link asked for it, and takes the request off the URL", async () => {
+    url.search = "tab=documents&upload=1";
+    serve({ documents: [] });
+    expect((await screen.findAllByRole("button", { name: "Choose files" })).length).toBeGreaterThan(0);
+    // The same switch "Add documents" works, so it closes the same way.
+    expect(screen.getAllByRole("button", { name: "Close" }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Add documents" })).toBeNull();
+    // Acted on, then removed — the tab stays, the instruction does not.
+    expect(router.replace).toHaveBeenCalledWith("/dashboard/projects/project-7?tab=documents", { scroll: false });
+  });
+
+  it("arrives with the uploader closed without the request", async () => {
+    url.search = "tab=documents";
+    serve({ documents: [] });
+    expect((await screen.findAllByRole("button", { name: "Add documents" })).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Choose files" })).toBeNull();
+    expect(router.replace).not.toHaveBeenCalledWith(expect.stringContaining("upload"), expect.anything());
   });
 
   it("renders the history card on its own tab", async () => {

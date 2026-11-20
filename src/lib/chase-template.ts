@@ -451,6 +451,17 @@ export function defaultIntro(
   );
 }
 
-export function defaultClosing(): string {
-  return `Many thanks,`;
+/**
+ * The closing offered on a freshly generated draft, signed by the person
+ * generating it (2026-11-20, G3): it ended "Many thanks," and no name, and the
+ * draft goes out from that person's own Outlook.
+ *
+ * Only the DEFAULT carries the name. The generate route passes the signed-in
+ * creator's `users.name`; a closing somebody edited is stored as they wrote it
+ * (`/api/drafts/[id]/edit`) and nothing ever recomposes it. An empty name gives
+ * the unsigned closing rather than a stray blank line.
+ */
+export function defaultClosing(senderName?: string | null): string {
+  const name = senderName?.trim() ?? "";
+  return name ? `Many thanks,\n${name}` : `Many thanks,`;
 }

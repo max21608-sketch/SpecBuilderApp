@@ -10,8 +10,11 @@ database tier required); THE REHEARSAL RE-RUN ON ITS PRODUCTION BUILD; NOTHING
 PUSHED.** Claude cannot push (GitHub is read-only for Claude under the
 organisation's policy) and cannot create production (Neon, Vercel and the
 Blob store are consoles only Max holds). Everything below that says "Max" is
-a step only Max can take. Every branch below is `committed locally` in the
-six terms of `house/deployment.md` — nothing has left this machine.
+a step only Max can take. Every branch below was `committed locally` in the
+six terms of `house/deployment.md` while this plan was written. **Since
+2026-11-20 evening `prod-ready` is `pushed` to `origin/staging` at `72a69fe`,
+by Max**; the staging deployment and CI on that SHA are not read by Claude,
+and nothing is on pilot.
 
 ---
 
@@ -208,11 +211,93 @@ Found by the re-run and dealt with the same afternoon:
   library the bill's words first. The conflict rule predates today (WD-02 did
   it this morning); R10 makes it more frequent. **Decision D12.**
 
-**How they reach production.** Merge the three into one integration branch
-(`prod-int`), run the four checks with the database tier required and the
-overflow audit, walk the same rehearsal again on the production build with
-screenshots at 1920 and 1440, then Max pushes `prod-int` to `staging`. From
-there the existing route: CI green on the SHA (both jobs), staging deployment
+### 4.2 The pre-push review (later on 2026-11-20)
+
+Max chose "Review first" over pushing. Three reviewers who had not built any
+of it read the 65 commits, one slice each: security and operations; the bill
+reader and the confirm; email, documents and the screens. Each was given the
+code and the load-bearing rules, not the builders' conclusions.
+
+**Twelve defects survived their reading, plus one the 300-line walk found
+(F6).** Fixed on `prod-fix-e` and `prod-fix-f`, each with a test that fails
+without it, and merged into `prod-ready`:
+
+| | What was wrong | Fix |
+|---|---|---|
+| E1 | "Set designer…" locked records in TICK order, one line at a time, and lost the whole batch on any lock wait. It deadlocked against a phase retire. | The project row first, then every ticked record and its configurations by id, before the first line |
+| E2 | The designer route set a 60 s limit, below the project's 800 s default | removed |
+| E3 | `/api/health` answered ok while every other page answered 503 for a missing or short `AUTH_SECRET` | 503 with the problem's code, never a value |
+| E4 | The attachment-download check compared Graph's attachment list with the parser's, so mail delivered by Graph (latent; ingestion is off) would always be refused | the parser's list is stored for Graph arrivals too |
+| E5 | Sign-in sat outside the cross-site refusal (login CSRF) | the same rule in the login handler |
+| E6 | An unlabelled size line with a part word after it, such as `Dia 900 x H 25 top`, placed the part's size as the item's | it stays a note. Every real bill reads byte-identical before and after |
+| E7 | A revision whose sheet mapped only a Category column wrote the category over the record's area | area is stated only by an area or sub-area column |
+| F1 | Uploading one new email on its own made an empty pack and landed on "That pack is not on this project" | an email joins no pack, and lands on its own review |
+| F2 | An email read before two lines were twinned asked the reviewer to pick one line | it says "linked as twins since this was read — Re-match (free)" |
+| F3 | The twins sentence named four lines across two phases as "one item" | one sentence per phase's twin group |
+| F4 | A file held for name/model disagreement lost the cost sentence for a PDF bill the model must transcribe, and was miscounted as a call to make | both corrected |
+| F5 | "Confirm all" on the email review could send twice while an edit saved | one press, one confirm (the drawings' guard) |
+| F6 | A held file's box already read "Bill of quantities", but only the small chip counted as a choice | the box reads "— say which —" until a person chooses |
+
+**Then four small polish items** (`prod-fix-g`). Two usability walks that
+afternoon found them, one of them by a reviewer who had never seen the app;
+see `after-intake-2026-11-20.md`. Each is a defect by anyone's measure:
+
+- **G1:** no names, file paths or "repo's judgement" on user screens or in the
+  costing file, and "unlooked" → "not answered";
+- **G2:** a grey dot, not green, for an item with no category;
+- **G3:** a chase draft is signed with its creator's name;
+- **G4:** "Upload the pack" opens the uploader in one press.
+
+**Verified:**
+- **Four checks:** pass on the final `prod-ready` (`cef9a40`), with the
+  database tier required: 5,386 tests.
+- **Overflow audit:** no box wider than itself on 31 pages at 1920 and 1440
+  (`tools/overflow-audit.mjs`, dev server).
+- **CI's `db-tier` job:** rehearsed exactly as CI runs it (`env -i`, a fresh
+  empty database, `run-migrations` and `run-seed` from nothing,
+  `tools/localstack/ci.mjs`) with 5,372 tests passing, before the polish
+  items G1–G4 landed. This was on Postgres 18; CI runs 17.
+- **CI's `check` job:** rehearsed in a bare environment; tests and the build
+  pass.
+- **Browser:** every fix above that a person can see was re-checked on the
+  production build with a pass/fail script
+  (`~/dev/localstack/pw/uxm-09-recheck.mjs`), and all pass.
+
+**Not fixed, and why:**
+- The single-record edits still take a share lock on the project row after
+  their record. That is older than today and crosses every writer that locks
+  the project for update, which now includes the designer batch. It is
+  recorded here, not changed in a push week.
+- A drawing's extra words on a code the bill already named are not kept
+  (`after-intake` §9d). That is a deliberate rule, and changing it is Max's
+  decision.
+
+**Swept in by accident (17:15).** The intake session had given Max a
+command for when this session was done:
+`git -C ~/dev/worktrees/prod-ready merge intake-2026-11-20`. A run of it at
+about 17:07 stopped before committing and left the merge in progress
+(`MERGE_HEAD`). No session wrote in this worktree; the intake session
+confirmed it ran only read-only git there. A doc commit here (`a47710f`)
+then concluded the merge, so `prod-ready` also carries two commits from the
+intake branch:
+- `e0cb0f8`, "the file check is Haiku 5.5" (Max's decision of the same day,
+  in the classify route and the upload panel);
+- `45bf924`, its plan `open-intake-2026-11-20.md`.
+
+The result is exactly a clean merge of the two sides; nothing on either side
+was lost. The four checks were re-run on the combined tip `8677936` and pass
+(5,388 tests, database tier required). On its own branch, `e0cb0f8` also
+passed the four checks (5,374 tests), and live Haiku 5.5 calls filed every
+test file correctly, including the real Panther Apx 1a set (intake session,
+2026-11-20). The intake session wants it to ship. It was not part of the
+pre-push review, and whether it ships in this push is Max's call. To take it out,
+revert the merge's second-parent changes in a new commit; never rewrite
+`prod-ready`, because the intake branch is built on it.
+
+**How it reaches production.** Everything above is merged on `prod-ready`
+(it took the place of the `prod-int` this section first planned), and it
+fast-forwards `origin/staging`. Max pushed it to `staging` on 2026-11-20
+(`ebbd762..72a69fe`). From there the existing route: CI green on the SHA (both jobs), staging deployment
 verified, pilot promoted through `docs/environments.md` *Promoting to pilot*,
 Matthew and Claudia use it on pilot, and production is created from a SHA that
 pilot has run.

@@ -46,6 +46,7 @@ import Tip from "@/components/ui/Tip";
 import StatTile from "@/components/ui/StatTile";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
+import { TONE } from "@/components/ui/tone";
 import SuggestButton from "@/components/ui/SuggestButton";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { unallocatedQty } from "@/lib/record-variants";
@@ -248,6 +249,18 @@ const DOTS: Record<RecordUrgency, string> = {
   action_required: "bg-red-500",
   overdue: "bg-red-600 ring-2 ring-red-300",
 };
+
+/**
+ * AN ITEM WITH NO CATEGORY IS NOT COMPLETE (2026-11-20, G2).
+ *
+ * It has no checklist, so nothing on it counts as outstanding and
+ * `recordUrgency` calls it `complete` -- and the dot was the same green as an
+ * item somebody had finished, on the least-specified row of the page. Green
+ * is SETTLED everywhere (`tone.ts`), so it is grey here, `plain`: there is no
+ * judgement to make until a category gives it questions. The "No category"
+ * tile and the row's own "Set category" carry the next step.
+ */
+export const NO_CATEGORY_DOT_TITLE = "No category — nothing to measure it against yet";
 
 /**
  * How much of this record's checklist is answered, as one bar.
@@ -1287,8 +1300,8 @@ export default function SpecTable({
                   <Th num>
                     TGQ
                     <Tip>
-                      Questions blocking a quotation. Matthew&rsquo;s matrix where he has written one for this
-                      category, the older per-level model where he has not.
+                      Questions blocking a quotation — counted by the category&rsquo;s gate model where it has one, and by
+                      the provisional per-level checklist where it has not.
                     </Tip>
                     {/* THE SAME QUESTIONS, THE OTHER WAY UP. "Show me all the
                         jobs with dimensions missing" is a real question this
@@ -1321,7 +1334,12 @@ export default function SpecTable({
                     specsAgreedBy: programme?.specsAgreedBy ?? null,
                     today,
                   });
-                  const dot = urgency === "action_required" && !anyMissing ? "bg-amber-500" : DOTS[urgency];
+                  const uncategorised = !record.category_name;
+                  const dot = uncategorised
+                    ? TONE.plain.dot
+                    : urgency === "action_required" && !anyMissing
+                      ? "bg-amber-500"
+                      : DOTS[urgency];
                   const isConfiguration = Boolean(record.variant_label);
                   const isHeading = n(record.variant_count) > 0;
                   const retired = record.status === "retired";
@@ -1359,7 +1377,7 @@ export default function SpecTable({
                       )}
                       <Td className={`whitespace-nowrap text-neutral-500 tabular-nums ${isConfiguration ? "pl-6" : ""}`}>
                         <span
-                          title={URGENCY_LABELS[urgency]}
+                          title={uncategorised ? NO_CATEGORY_DOT_TITLE : URGENCY_LABELS[urgency]}
                           className={`mr-2 inline-block h-2 w-2 rounded-full align-middle ${dot}`}
                         />
                         <Link

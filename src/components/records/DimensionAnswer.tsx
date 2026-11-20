@@ -261,14 +261,14 @@ export default function DimensionAnswer({
             // "nothing outstanding" — and here it would read as an item that
             // needs no dimensions at all.
             <p className="mt-1 text-[11px] text-neutral-500">
-              Matthew&rsquo;s matrix does not cover this category — the cabinetry half is still to come — so nothing
-              says which of these this item needs. All five can be recorded and none is required.
+              No gate model covers this category yet — the cabinetry categories are still to come — so nothing says
+              which of these this item needs. All five can be recorded and none is required.
             </p>
           ) : required.length === 0 ? (
             // COVERED, AND ASKING FOR NONE. A real answer, and a different one
             // from "nobody has written the rules yet" above it.
             <p className="mt-1 text-[11px] text-neutral-500">
-              Matthew&rsquo;s matrix covers this category and names none of these, so none is required.
+              This category&rsquo;s gate model names none of these, so none is required.
             </p>
           ) : (
             onRecordCount < required.length && (
