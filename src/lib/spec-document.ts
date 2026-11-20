@@ -46,7 +46,7 @@ import {
 // untouched by the move that broke the spec-dimensions import cycle.
 export { TBC_TOKENS, containsPhrase };
 import type { RawProposal } from "@/lib/extraction-schema";
-import { expandZoneList, findRecordsByRef, normaliseRef, type RecordEntry } from "@/lib/record-refs";
+import { everyPairTwinned, expandZoneList, findRecordsByRef, normaliseRef, type RecordEntry } from "@/lib/record-refs";
 // Re-exported so every existing caller is untouched by the move that broke the
 // drawing-document import cycle.
 export { findRecordsByRef, normaliseRef, expandZoneList };
@@ -677,6 +677,45 @@ function landingRuns(resolution: Resolution): RunGroup[] {
   return runs;
 }
 
+/**
+ * ONE CODE ON SEVERAL LINES OF A PHASE THAT ARE LINKED TWINS IS ONE ITEM
+ * (0060; prod-ready E1, 2026-11-20). `HH-CH-02` on two lines the reviewer
+ * linked as twins: the drawings card offered both, and this review called the
+ * code ambiguous and the row said "Item not found" — the drawings landed on
+ * both twins and the email on neither. Where EVERY line the code reaches on a
+ * phase is a twin of every other, by the drawings' own predicate
+ * (`everyPairTwinned`), the phase lands on each line: one proposal per record,
+ * sharing the observation's ordinal, each ignorable on its own. A set the
+ * links do not wholly cover is still the person's question.
+ */
+function landOnTwins(runs: RunGroup[]): { runs: RunGroup[]; note: string | null } {
+  const settled: RecordEntry[] = [];
+  const out = runs.flatMap((run) => {
+    if (run.records.length < 2 || !everyPairTwinned(run.records)) return [run];
+    settled.push(...run.records);
+    return run.records.map((record) => ({ runId: run.runId, runName: run.runName, records: [record] }));
+  });
+  if (settled.length === 0) return { runs, note: null };
+  return {
+    runs: out,
+    note: `${settled.map((record) => record.label).join(" and ")} are twins: the bill lists one item on ${settled.length} lines, so this goes on each. Ignore it on a line whose spec differs.`,
+  };
+}
+
+/**
+ * "HH-CH-02 is on 2 lines of Guest Rooms — choose which": a row whose code is
+ * on several lines of one phase that no twin link settles (SX11A), said in
+ * words rather than "Item not found" about an item the bill lists twice. Null
+ * for anything else, including a bill row whose printed ref names another item
+ * (that row says so itself).
+ */
+export function linesToChooseFrom(proposal: Proposal): string | null {
+  if (proposal.recordId || proposal.rowMatch || proposal.recordCandidates.length < 2) return null;
+  const code = proposal.raw.refRaw?.trim() || "This code";
+  const where = proposal.runName ? ` of ${proposal.runName}` : "";
+  return `${code} is on ${proposal.recordCandidates.length} lines${where} — choose which`;
+}
+
 /** The zone members that match no line, said on the row in words — never a blocker on its own. */
 function unmatchedZonesNote(resolution: Resolution): string | null {
   if (resolution.by !== "zones") return null;
@@ -777,7 +816,7 @@ export function resolveProposals(
     // GR-FUR-04 and PL-FUR-04 as two proposals sharing this observation's
     // ordinal, and MUR-FUR04, which the bill has no line for, is named on the
     // row in words (`landingRuns`, `unmatchedZonesNote`).
-    const runs = landingRuns(resolution);
+    const { runs, note: twinsNote } = landOnTwins(landingRuns(resolution));
     const zonesNote = unmatchedZonesNote(resolution);
     if (runs.length === 0) {
       const unplaced = buildProposal(observation, index, null, [], registers, newId, null);
@@ -798,7 +837,7 @@ export function resolveProposals(
       // unanswerable question.
       const record = run.records.length === 1 ? run.records[0] ?? null : null;
       const placedBy = (proposal: Proposal, readingNote: string | null = null): Proposal => {
-        const said = [readingNote, zonesNote].filter((text): text is string => Boolean(text)).join(" ");
+        const said = [readingNote, zonesNote, twinsNote].filter((text): text is string => Boolean(text)).join(" ");
         return {
           ...proposal,
           ...(rowMatch ? { rowMatch } : {}),
@@ -1696,10 +1735,13 @@ export function proposalBlockers(proposal: Proposal, all: Proposal[]): Blocker[]
     // "choose which record and question" sends a reviewer looking for a record
     // that is already chosen, and the question — the thing they actually have
     // to pick — reads as one of two equal problems.
+    const lines = linesToChooseFrom(proposal);
     blockers.push(
       proposal.recordId
         ? { code: "unassigned", message: "Choose which question this answers." }
-        : { code: "unassigned", message: "Choose which record and question this belongs to." },
+        : lines
+          ? { code: "unassigned", message: `${lines} line this is for.` }
+          : { code: "unassigned", message: "Choose which record and question this belongs to." },
     );
     return blockers;
   }
@@ -1770,6 +1812,19 @@ export function classifyProposal(proposal: Proposal): ProposalSection {
     return "unassigned";
   }
   return "unclassified";
+}
+
+/**
+ * WHAT A CONFIRM COMMITS: a pending row that is PLACED — on a record, and on
+ * a question where it needs one. The review screen's "To review" set and the
+ * confirm route's whole-card check are both this, so the screen cannot send
+ * one card and the server expect another (prod-ready E0, 2026-11-20: the
+ * server counted every pending row on the record, placed or not, and refused
+ * every confirm on a record that also held an unplaced statement). An
+ * unplaced row on the record stays pending for a later decision.
+ */
+export function isConfirmable(proposal: Proposal): boolean {
+  return classifyProposal(proposal) === "pending";
 }
 
 /** The per-record cards the review screen commits one at a time. */

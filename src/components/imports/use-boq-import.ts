@@ -28,6 +28,7 @@ import type { BillPictureOverride, BoqRowImages } from "@/lib/bill-row-image";
 import type { PictureChoice } from "@/components/imports/BillPicturePanel";
 import type { FabricLinePlan } from "@/lib/bill-fabric-filing";
 import type { LinePairing } from "@/lib/boq-reconcile";
+import type { PhaseSuggestion } from "@/lib/phase-revision-suggest";
 import type { BoqKeptCell } from "@/lib/boq-roles";
 import type { ColumnsPanelSheet } from "@/components/imports/BoqColumnsPanel";
 import type { NonFurnitureGuess } from "@/lib/non-furniture-guess";
@@ -92,6 +93,8 @@ export type Sheet = Omit<ColumnsPanelSheet, "lines"> & {
   sheetName: string; proposedRunName: string; headerRow: number; skippedRows: number;
   ignored: boolean; ignoredReason: string | null;
   replacesRunId?: string | null;
+  /** A person said this sheet is a new phase (RV0); absent is "not decided". */
+  newPhaseChosen?: boolean;
   metadata: { revision: string | null; date: string | null; notes: string[] };
   lines: Line[];
 };
@@ -174,6 +177,8 @@ export function useBoqImport(id: string) {
     registers: Registers | null;
     message: EmailMessage | null;
     runs: ProjectRun[];
+    /** Per sheet: the active phases it looks like, best first (RV0). Absent where none. */
+    phaseSuggestions: Record<number, PhaseSuggestion[]>;
     reconciliation: Record<number, Reconciliation>;
     billSpecs: { id: string; status: string } | null;
     /** Per sheet, per staged line index: what its description cell becomes. */
@@ -266,6 +271,7 @@ export function useBoqImport(id: string) {
       registers?: Registers;
       message?: EmailMessage | null;
       runs?: ProjectRun[];
+      phaseSuggestions?: Record<number, PhaseSuggestion[]>;
       reconciliation?: Record<number, Reconciliation>;
       billSpecs?: { id: string; status: string } | null;
       descriptions?: Record<number, Record<number, ReviewDescription>>;
@@ -282,6 +288,7 @@ export function useBoqImport(id: string) {
       registers: res.data.registers ?? null,
       message: res.data.message ?? null,
       runs: res.data.runs ?? [],
+      phaseSuggestions: res.data.phaseSuggestions ?? {},
       reconciliation: res.data.reconciliation ?? {},
       billSpecs: res.data.billSpecs ?? null,
       descriptions: res.data.descriptions ?? {},

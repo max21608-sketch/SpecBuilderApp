@@ -20,7 +20,7 @@ import Note from "@/components/ui/Note";
 import ModelNote from "@/components/imports/ModelNote";
 import DocumentState from "@/components/imports/DocumentState";
 import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/intake-status";
-import Button from "@/components/ui/Button";
+import Button, { buttonClass } from "@/components/ui/Button";
 import Link from "next/link";
 import { DOCUMENT_KIND_LABELS } from "@/lib/spec-vocab";
 import type { PreambleNote, StagedPreamble } from "@/lib/preamble-document";
@@ -175,11 +175,15 @@ export default function PreambleReview({
     }
   }
 
-  const shell = (children: React.ReactNode) => (
+  // WHERE "BACK" GOES: the pack this preamble came in, or its project.
+  const back = { href: crumb.href, label: crumb.href.includes("/intake/") ? "Back to the pack" : "Back to the project" };
+
+  const shell = (children: React.ReactNode, actions?: React.ReactNode) => (
     <>
       <PageHeader
         crumbs={[crumb]}
         title={run?.filename ?? "Preamble"}
+        actions={actions}
         subtitle={
           <>
             {DOCUMENT_KIND_LABELS.preamble} · on{" "}
@@ -297,10 +301,39 @@ export default function PreambleReview({
   const pending = staged.notes.filter((note) => note.reviewStatus === "pending");
   const chosen = pending.filter((note) => selected.has(note.id));
   const blocked = new Set(blockers.map((blocker) => blocker.noteId));
+  const added = staged.notes.filter((note) => note.reviewStatus === "applied").length;
+  const ignored = staged.notes.filter((note) => note.reviewStatus === "ignored").length;
+  const done = pending.length === 0;
+
+  // THE PRIMARY ACTION, in the header's top-right slot as the bill review has
+  // it, and again under the list (F1, 2026-11-20): it sat only at the bottom
+  // of nineteen pages of notes. ONE button, two places, one handler. Once
+  // nothing is left to review it is not "Add 0 notes" any more — it is the
+  // way back.
+  const addButton = (
+    <Button
+      variant="primary"
+      onClick={() => void review(chosen, "confirm")}
+      disabled={busy !== null || chosen.length === 0 || chosen.some((note) => blocked.has(note.id))}
+    >
+      {busy === "confirm" ? "Adding…" : `Add ${chosen.length} note${chosen.length === 1 ? "" : "s"} to the project`}
+    </Button>
+  );
+  const backLink = (
+    <Link href={back.href} className={buttonClass("secondary", "sm", "no-underline")}>
+      {back.label}
+    </Link>
+  );
 
   return shell(
     <>
       {error && <Note tone="danger">{error}</Note>}
+      {done && (
+        <Note tone="good" title="Every requirement in this preamble has been reviewed:" actions={backLink}>
+          {added} added to the project{ignored > 0 ? `, ${ignored} ignored` : ""}. They appear on the project
+          overview, and can be retired there.
+        </Note>
+      )}
       <ModelNote text={staged?.documentNotes} />
 
       <Card
@@ -389,19 +422,16 @@ export default function PreambleReview({
           })}
         </ul>
 
-        <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-[#fcfcfc] px-4 py-3">
-          <span className="text-neutral-600">
-            They appear on the project overview, and can be retired later.
-          </span>
-          <span className="flex-1" />
-          <Button
-            variant="primary"
-            onClick={() => void review(chosen, "confirm")}
-            disabled={busy !== null || chosen.length === 0 || chosen.some((note) => blocked.has(note.id))}
-          >
-            {busy === "confirm" ? "Adding…" : `Add ${chosen.length} note${chosen.length === 1 ? "" : "s"} to the project`}
-          </Button>
-        </div>
+        {done && <p className="px-4 py-3 text-neutral-500">Nothing left to review.</p>}
+        {!done && (
+          <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-[#fcfcfc] px-4 py-3">
+            <span className="text-neutral-600">
+              They appear on the project overview, and can be retired later.
+            </span>
+            <span className="flex-1" />
+            {addButton}
+          </div>
+        )}
       </Card>
 
       <Collapsed
@@ -418,6 +448,7 @@ export default function PreambleReview({
         notes={staged.notes.filter((note) => note.reviewStatus === "applied")}
       />
     </>,
+    done ? backLink : addButton,
   );
 }
 

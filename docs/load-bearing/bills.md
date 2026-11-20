@@ -392,6 +392,26 @@ already exist.
   moment. Before this the line became a NEW record and the old one kept its
   drawings, retired. Files: `src/lib/boq-reconcile.ts`, `src/lib/confirm-boq.ts`,
   `src/app/api/imports/[id]/route.ts`, `src/app/dashboard/imports/[id]/page.tsx`.
+- **"A new phase" is not a default for a tab that looks like a phase the
+  project has** (prod-ready RV0, 2026-11-20). A revised `Guest Rooms` tab,
+  uploaded to a project whose active `Guest Rooms` held the same codes,
+  defaulted to "This sheet is: a new phase", and one press of the primary
+  Confirm made a second phase with every record twice. `suggestPhaseRevision`
+  (`src/lib/phase-revision-suggest.ts`) offers a phase whose name or source
+  sheet IS the tab's name — and only those, where any — or else every phase
+  holding MORE than half of the tab's codes (two where MUR and MAIN RUN quote
+  the same codes: which one is the person's call). It is a `SuggestButton`
+  with its evidence ("same sheet name · 12 of 14 codes are on it"); the select
+  shows the STORED choice, "— say which —" until there is one. "A new phase"
+  is now a stored choice, `newPhaseChosen` on the staged sheet (absent is not
+  decided; carried through a columns re-read and a model's structure read),
+  set by the sheet PATCH whenever `replacesRunId` is sent as null. The confirm
+  computes the suggestion again from LIVE phases and refuses `phase_undecided`
+  while a suggested tab has neither; `boqConfirmBlocker` and `billNeedsYou`
+  say so beside the button and link to the choice. A tab that looks like no
+  phase is a new phase by default, exactly as before. Nothing is ever written
+  from the suggestion. db-tier fixtures that stage a second bill with the same
+  sheet name on one project now say `newPhaseChosen: true`.
 
 ### A bill is never refused; it is mapped
 

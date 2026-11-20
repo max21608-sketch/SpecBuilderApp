@@ -79,6 +79,7 @@ import { readMockupQty } from "@/lib/bill-sheet-notices";
 import { addToMockupPhase, MOCKUP_PHASE_NAME } from "@/lib/mockup-phase";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
 import { documentClosedSentence } from "@/lib/intake-status";
+import { loadPhasesForSuggestion, phaseUndecided, suggestPhaseRevision } from "@/lib/phase-revision-suggest";
 import { categoryToWrite } from "@/lib/bill-category";
 import { billTwinPairs, linkBillTwins, type TwinStagedLine } from "@/lib/bill-twins";
 
@@ -468,6 +469,25 @@ async function refuseUnconfirmable(
       "phase_revised_twice",
       `${twice.map((name) => `“${name}”`).join(" and ")} are both set to revise the same phase. A phase is revised ` +
         "by one tab: make the others new phases, or drop them.",
+    );
+  }
+
+  // A TAB THAT LOOKS LIKE A PHASE THE PROJECT HAS, AND NOBODY HAS SAID WHICH
+  // IT IS (prod-ready RV0, 2026-11-20): "a new phase" was the default, and one
+  // press duplicated every record of a revised bill. Refused, by name, from
+  // live phases and the function the review suggests with; nothing is written
+  // from the suggestion. A tab that looks like no phase is not asked about.
+  const phases = await loadPhasesForSuggestion(txn, projectId);
+  const undecided = (sheets as StagedBoqSheet[]).filter((sheet) =>
+    phaseUndecided(sheet, suggestPhaseRevision(sheet, phases)),
+  );
+  if (undecided.length > 0) {
+    throw new DomainConflictError(
+      "phase_undecided",
+      `${undecided.map((sheet) => `“${sheet.proposedRunName || sheet.sheetName}”`).join(" and ")} ` +
+        `${undecided.length === 1 ? "looks" : "look"} like a phase this project already has. Say whether ` +
+        `${undecided.length === 1 ? "it is a revision of it or a new phase" : "each is a revision or a new phase"}, then confirm.`,
+      { status: 400, diff: undecided.map((sheet) => sheet.sheetName) },
     );
   }
 

@@ -19,6 +19,7 @@ import { useBoqImport } from "@/components/imports/use-boq-import";
 import { useStructureRead } from "@/components/imports/StructureRead";
 import { useNextStep } from "@/lib/use-next-step";
 import { formatDay } from "@/lib/format-day";
+import { cameFromUpload } from "@/lib/email-arrival";
 
 export default function ReviewImportPage() {
   const { id } = useParams<{ id: string }>();
@@ -134,7 +135,17 @@ export default function ReviewImportPage() {
         reload={() => load()}
         quietReload={() => load(true)}
         crumb={
-          run.document_kind === "email" ? { label: "Inbox", href: "/dashboard/inbox" } : packCrumb
+          // BACK TO WHERE THE PERSON CAME FROM (E2, 2026-11-20): an .eml
+          // somebody UPLOADED was reached from its project — its pack, or the
+          // Documents tab — not from the Inbox, which is where routed mail is
+          // assigned.
+          run.document_kind !== "email"
+            ? packCrumb
+            : cameFromUpload(data.message)
+              ? pack
+                ? packCrumb
+                : { label: "Documents", href: `/dashboard/projects/${run.project_id}?tab=documents` }
+              : { label: "Inbox", href: "/dashboard/inbox" }
         }
       />
     );

@@ -34,7 +34,7 @@ const params = (id: string) => ({ params: Promise.resolve({ id }) });
 type Bucket = { toQuote: number; alsoOutstanding: number; noTier: number; records?: number };
 type ProjectPayload = {
   ok: boolean;
-  unlinkedFinishCodes: { code: string; records: number }[];
+  unlinkedFinishCodes: { code: string; records: number; reason?: string }[];
   failedDocuments: number;
   designerCodes: Record<string, number>;
 };
@@ -294,6 +294,9 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
     // `__QAMOR005` are one code on both pages.
     expect(project.unlinkedFinishCodes).toEqual(library.unlinked);
     expect(project.unlinkedFinishCodes.map((row) => row.code)).toContain("__QAMOR005");
+    // A code the library has no row for says so (prod-ready F4): "absent" is
+    // the only reason "Add a finish" is the answer.
+    expect(project.unlinkedFinishCodes.find((row) => row.code === "__QAMOR005")?.reason).toBe("absent");
   });
 
   it("names the designer codes its records carry, with the item count behind each", async () => {

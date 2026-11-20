@@ -230,7 +230,10 @@ Project → "Documents" tab → "Add documents" → drop the files or "Choose fi
   this?" dropdown on each: Preamble, Bill of quantities, Shop drawings, FF&E
   schedule, Specification bible, Finishes schedule, Fabric schedule, Email,
   Other specification document. Files it cannot identify say "Not identified"
-  — choose the kind by hand.
+  — choose the kind by hand. Where the file's name and its contents disagree
+  ("The name says Bill of quantities; the model reads an FF&E schedule —
+  which is it?"), both are offered as buttons on its row: press the right one,
+  then press again. Nothing is read until you do.
 - **Nothing is read and nothing is charged until you press "Start intake
   (N)".** A bill from a spreadsheet is read by code and is free. Every other
   kind is a charged read.
@@ -266,13 +269,20 @@ Open the bill from Documents ("Review"). Each sheet tab becomes a phase.
 If Confirm is greyed out, the reason is written beside it (section 6.4).
 
 **A revised bill** (Rev B of a bill already confirmed): upload it the same way.
-The review shows each line "Against the phase" and suggests which existing
-record it is. Check the pairings ("Pair with…", "Make it a new item instead"),
-then confirm. Two lines with the same code (one per room type, say) are
-suggested by their area as well; anything less clear is left to pair by hand. Paired items keep their drawings, specs, picture and answers;
-only the bill's own columns are written over, and only the columns the revised
-bill HAS: a designer or an area somebody set on a record stays where the new
-bill has no such column, and the pairing shows no change for it.
+If a tab is named like a phase the project already has, or most of its codes
+are on one, the review says **"This tab looks like a phase this project
+already has."** and offers **"a revision of “<phase>”?"**: press it to revise
+that phase, or choose "a new phase" in "This sheet is" if it really is a new
+one. Confirm waits until you have said which — as a new phase, every item on
+it would be added to the project again. The review then shows each line
+"Against the phase" and suggests which existing record it is. Check the
+pairings ("Pair with…", "Make it a new item instead"), then confirm. Two lines
+with the same code (one per room type, say) are suggested by their area as
+well; anything less clear is left to pair by hand. Paired items keep their
+drawings, specs, picture and answers; only the bill's own columns are written
+over, and only the columns the revised bill HAS: a designer or an area
+somebody set on a record stays where the new bill has no such column, and the
+pairing shows no change for it.
 
 **A bill that arrived only as a PDF** shows **"Needs transcribing"**. Open it
 and press "Transcribe it" (charged, a few minutes). Ask the client for the
@@ -308,9 +318,19 @@ If the page says "N codes on the drawings are not in the library yet": add each
 with "Add a finish", then on each item that uses it open the record's "Specs
 captured" tab and press **"Attach to a finish…"**.
 
+If it says "the drawing's words for WD-01 differ from the library — decide
+which stands", the library already has that code: do **not** add it again.
+Open the item it links to; "Attach to a finish…" on its Specs tab uses the
+library's words, or "Edit" on the code's row in the library to take the
+drawing's.
+
 A finishes schedule document has its own review screen: tick the finishes to
-add, confirm. "already held and DIFFERENT" means the library already has that
-code with other words; decide which is right.
+add, press **"Accept all N suggested kinds"** if the kinds shown with "?" are
+right, then **"Add N to the library"** (top right, or under the list). Only an
+accepted kind is filed. "already held and DIFFERENT" means the library already
+has that code with other words; decide which is right. A preamble's review
+works the same way: "Add N notes to the project", top right or under the list;
+when nothing is left, it says so and offers "Back to the pack".
 
 ### 5.7 Levels and categories
 - **Levels.** A phase tab shows "N items have a suggested level" with "Accept
@@ -490,6 +510,7 @@ confirmed meanwhile. A failed attempt may still have been charged; Max can see.
 | "This bill is waiting on “The columns are right”." | Open the Columns panel, check the headings are mapped properly, press "The columns are right" |
 | "N finish lines on … have no item — say which item each belongs to." | Find those finish lines and choose the item each belongs to |
 | "The model is still reading the columns." / "Wait for the model to transcribe the PDF." | Wait, reload |
+| "Say whether the “…” tab is a new phase or a revision of one." | The tab looks like a phase the project already has. Press "a revision of “…”?" under the tab's name, or choose "a new phase" in "This sheet is" (5.4, "A revised bill") |
 | "Every line is dropped, so there is nothing to confirm." | Tick "Include" on the lines that should become records |
 | After pressing: "This bill changed since this screen loaded. Reload and check it before confirming." | Somebody else edited it, or it is open in two tabs. Reload, check, confirm |
 | "This bill has already been confirmed." | It is done. Go to the project's phase tab |

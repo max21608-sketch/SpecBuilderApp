@@ -44,6 +44,7 @@ import {
 // it calls ambiguous and the rows the carry refuses are one set.
 import { planCarry, listTabs, type CarryDecision, type CarrySheet } from "@/lib/boq-carry";
 import { fieldsTheBillStates, reconcileSheet, type ExistingRecord, type RevisedLine } from "@/lib/boq-reconcile";
+import { loadPhasesForSuggestion, suggestPhaseRevision, type PhaseSuggestion } from "@/lib/phase-revision-suggest";
 
 // ---- the review GET for a bill ---------------------------------------------
 
@@ -74,6 +75,19 @@ export async function getBillReview(run: Row): Promise<Response> {
     where r.project_id = ${run.project_id} and r.status = 'active'
     order by r.sort_order, r.created_at
   `;
+
+  // WHICH ACTIVE PHASE EACH UNDECIDED SHEET LOOKS LIKE (RV0, 2026-11-20): a
+  // sheet named like a phase, or most of whose codes are on one, is offered as
+  // its revision, and the confirm waits for a person to say which it is. On
+  // read, from live phases, by the function the confirm refuses with.
+  const phaseSuggestions: Record<number, PhaseSuggestion[]> = {};
+  if (parsed && run.status === "parsed" && runs.length > 0) {
+    const phases = await loadPhasesForSuggestion(sql, String(run.project_id));
+    for (const [sheetIndex, sheet] of parsed.sheets.entries()) {
+      const suggestions = suggestPhaseRevision(sheet, phases);
+      if (suggestions.length > 0) phaseSuggestions[sheetIndex] = suggestions;
+    }
+  }
 
   const reconciliation: Record<number, unknown> = {};
   if (parsed) {
@@ -281,6 +295,7 @@ export async function getBillReview(run: Row): Promise<Response> {
     import: { ...run, parsed },
     categories,
     runs,
+    phaseSuggestions,
     reconciliation,
     billSpecs,
     descriptions,
@@ -410,6 +425,10 @@ export async function patchBoqLine(
         return json({ ok: false, error: "The phase this sheet revises was not recognised. Reload and choose it again." }, 400);
       }
       patch.replacesRunId = body.replacesRunId;
+      // NULL IS A PERSON SAYING "a new phase" (RV0, 2026-11-20), stored as
+      // such: a sheet that looks like an active phase holds the confirm until
+      // one of the two is said, and absent is "not decided".
+      patch.newPhaseChosen = body.replacesRunId === null;
       clearPairings = true;
     }
     // ONE TAB REVISES A PHASE (audit 2026-11-06, C2): a second sheet set to
@@ -462,8 +481,12 @@ export async function patchBoqLine(
         )
       returning version
     `;
+    // The version AFTER the pairings are cleared, which is a second write: the
+    // first one's version is already stale by then, and a screen (or a test)
+    // carrying it forward was refused "this bill changed" by its own change.
+    let version = rows[0]?.version;
     if (rows[0] && clearPairings) {
-      await sql`
+      const cleared = await sql`
         update intake_runs
         set parsed = jsonb_set(
               parsed,
@@ -475,13 +498,15 @@ export async function patchBoqLine(
             ),
             updated_by = ${actor}
         where id = ${id} and status = 'parsed'
+        returning version
       `;
+      if (cleared[0]) version = cleared[0].version;
     }
     if (!rows[0]) {
       if (await billMoved(id, expectedVersion)) return json({ ok: false, error: BILL_MOVED }, 409);
       return json({ ok: false, error: "That sheet is no longer in this bill, or the bill is already confirmed." }, 409);
     }
-    return json({ ok: true, version: rows[0].version });
+    return json({ ok: true, version });
   }
 
   const patch: Record<string, unknown> = {};

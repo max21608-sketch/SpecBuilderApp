@@ -32,10 +32,13 @@ import { VersionLedger } from "@/lib/acked-versions";
 import Spinner from "@/components/ui/Spinner";
 import { usePoll } from "@/lib/use-poll";
 import EmailEnvelope, { type EmailMessage } from "@/components/imports/EmailHeader";
+import { emailArrival } from "@/lib/email-arrival";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import {
   classifyProposal,
   heldReading,
+  isConfirmable,
+  linesToChooseFrom,
   proposalBlockers,
   type Proposal,
   type RecordEntry,
@@ -295,7 +298,9 @@ export default function SpecDocumentReview({
    * text. Four states of one document, a tab each.
    */
   const sections = {
-    pending: proposals.filter((p) => classifyProposal(p) === "pending"),
+    // `isConfirmable` is the confirm route's whole-card set too: one predicate,
+    // so the card this screen sends is the card the server expects.
+    pending: proposals.filter(isConfirmable),
     ambiguous: proposals.filter((p) => classifyProposal(p) === "ambiguous"),
     unassigned: proposals.filter((p) => classifyProposal(p) === "unassigned"),
     ignored: proposals.filter((p) => classifyProposal(p) === "ignored"),
@@ -311,6 +316,15 @@ export default function SpecDocumentReview({
   const rows = groupIntoSpecRows(
     [...sections.pending, ...sections.ambiguous, ...sections.unassigned],
     proposals,
+  );
+  // Rows with a member that found NO item. A code on two lines of a phase
+  // found two, and its row says "choose which" instead (E1, 2026-11-20).
+  const notFound = rows.filter((row) =>
+    row.runs.some((member) => {
+      if (member.recordId) return false;
+      const proposal = proposals.find((entry) => entry.id === member.proposalId);
+      return !(proposal && linesToChooseFrom(proposal));
+    }),
   );
   // The record is STILL the unit of commit. This is the set of whole cards a
   // "confirm everything" would send, one request each.
@@ -411,6 +425,7 @@ export default function SpecDocumentReview({
       ? `${message.from_name} <${message.from_addr ?? "unknown"}>`
       : (message.from_addr ?? "unknown sender")
     : null;
+  const arrival = message ? emailArrival(message) : null;
   const received = message?.received_at
     ? new Date(message.received_at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })
     : null;
@@ -430,11 +445,15 @@ export default function SpecDocumentReview({
             </Link>
             {/* WHY THIS MESSAGE IS ON THIS PROJECT, in the app's own words.
                 Routing never breaks its own tie, so a reader has to be able to
-                see which signal decided it and disagree with it. */}
-            {message?.routing_reason && (
+                see which signal decided it and disagree with it — and an
+                .eml a PERSON uploaded here was decided by nobody's routing,
+                so it says who uploaded it (E2, 2026-11-20; it read "auto"). */}
+            {arrival && (
               <>
                 {" "}
-                <Chip tone="info">auto · {message.routing_reason}</Chip>
+                <Chip wrap tone={message?.assignment_kind === "auto" ? "info" : "plain"} title={arrival.title ?? undefined}>
+                  {arrival.words}
+                </Chip>
               </>
             )}
             {" · "}
@@ -597,6 +616,8 @@ export default function SpecDocumentReview({
   }
 
   const runsWritten = new Set(rows.flatMap((row) => row.runs.map((member) => member.runName).filter(Boolean))).size;
+  // The number SAID, and its plural from that number (E3: "each landing on 1 phases").
+  const landing = runsWritten || 1;
   const needsAck = commitBlockers.filter((blocker) => blocker.code === "overwrite" || blocker.code === "replace").length;
 
   const tabs = (
@@ -627,9 +648,9 @@ export default function SpecDocumentReview({
       {tab === "pending" && rows.length > 0 && (
         <Note
           tone="info"
-          title={`${rows.length} ${rows.length === 1 ? "specification" : "specifications"}, each landing on ${
-            runsWritten || 1
-          } ${runsWritten === 1 ? "phase" : "phases"}.`}
+          title={`${rows.length} ${rows.length === 1 ? "specification" : "specifications"}, each landing on ${landing} ${
+            landing === 1 ? "phase" : "phases"
+          }.`}
         >
           {rows[0]?.distinctRuns.length ? (
             <>
@@ -642,9 +663,9 @@ export default function SpecDocumentReview({
         </Note>
       )}
 
-      {rows.some((row) => row.unplacedCount > 0) && tab === "pending" && (
+      {notFound.length > 0 && tab === "pending" && (
         <Note tone="warn">
-          {rows.filter((row) => row.unplacedCount > 0).length} of these did not find an item on this project. If the
+          {notFound.length} of these did not find an item on this project. If the
           bill has changed since this was read, or the app has learnt to read something it could not before, press
           Re-match — it re-reads nothing and costs nothing.
         </Note>
@@ -729,7 +750,7 @@ export default function SpecDocumentReview({
                   {pendingPlaced} {pendingPlaced === 1 ? "spec" : "specs"}
                 </b>{" "}
                 · writes to {commits.length} {commits.length === 1 ? "record" : "records"} across{" "}
-                {runsWritten || 1} {runsWritten === 1 ? "phase" : "phases"}
+                {landing} {landing === 1 ? "phase" : "phases"}
               </span>
               {commitBlockers.length > 0 && (
                 <Chip tone="danger">
@@ -1280,7 +1301,9 @@ function SpecRowView({
         <div className="min-w-0 font-mono text-neutral-800">{row.valueRaw ?? "—"}</div>
 
         <div className="min-w-0">
-          <Chip tone={CHANGE_TONE[row.summary.kind]}>{row.summary.label}</Chip>
+          <Chip wrap tone={CHANGE_TONE[row.summary.kind]}>
+            {row.summary.label}
+          </Chip>
           {row.summary.was && (
             <span className="mt-0.5 block text-[11px] text-neutral-500">
               {row.summary.kind === "disagrees" ? "the bill says" : "was"} {row.summary.was}

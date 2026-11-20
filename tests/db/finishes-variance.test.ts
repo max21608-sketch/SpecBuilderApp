@@ -27,7 +27,8 @@
 import { it, expect, beforeAll, afterAll, describe, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
-import { loadUnlinkedFinishCodes, normaliseFinishCode } from "@/lib/finishes";
+import { normaliseFinishCode } from "@/lib/finishes";
+import { loadUnlinkedFinishCodes } from "@/lib/finish-unlinked";
 import { sql } from "@/lib/db";
 import { type SpecFieldEntry } from "@/lib/drawing-document";
 import { stageDrawings } from "@/lib/drawing-legacy";
@@ -351,6 +352,11 @@ describeIfDb("the finishes library, against the codes a client actually writes",
       const mine = unlinked.find((row) => row.code === normaliseFinishCode(code));
       expect(mine).toBeTruthy();
       expect(mine?.records).toBe(1);
+      // AND IT SAYS WHY (prod-ready F4): the library HOLDS this code, and the
+      // page's words differ — never "not in the library", which sent a person
+      // to add a duplicate.
+      expect(mine?.reason).toBe("differs");
+      expect(mine?.held?.description).toBe("__QA Yarn Harbour, boucle");
     });
   });
   describe("a code with no description anywhere (row e3)", () => {

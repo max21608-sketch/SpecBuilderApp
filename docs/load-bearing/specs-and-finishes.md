@@ -100,6 +100,21 @@ ONE 14-page document (`260824 - OMS and FF&E Tracker.pdf`, not named as a
 schedule, which is why nobody in the room recognised it). Building the code
 field and a schedule stage on the pack screen is still Max's decision.
 
+**A schedule's suggested kinds are accepted in one press, and only an accepted
+kind is filed** (prod-ready F3, 2026-11-20). Every row offered "Fabric ?",
+"Add 11 to the library" filed none, and the library then asked "14 of 14
+finishes have no kind" again. The confirm was right to write only `entry.kind`
+(a person's click); what was missing was the press. "Accept all N suggested
+kinds" sends every writable row's suggestion (`kindWritable`: a new code, or a
+held one with no kind) at the version shown, as ONE `PATCH {kinds}`, filed by
+the per-entry writer in one transaction — a stale row refuses the lot. The
+confirm then carries each into its library row; a suggestion nobody accepted
+stays unfiled. The same screen and the preamble's now put their primary action
+in the header's top-right slot as well as under the list (F1/F2), one reading
+(`scheduleConfirm`) for both buttons; the schedule's "Also read its furniture
+… one charged read" moved under the list; and with nothing left to review
+both say so and offer "Back to the pack" instead of "Add 0".
+
 ### A palette BWS owns is READ from BWS, and never invented
 
 `db/migrations/0030_spec_palettes.sql`, `db/migrations/0035_palette_option_code.sql`,
@@ -668,6 +683,20 @@ whole. Any failure rolls back everything: three finishes written and the fourth
 refused looks finished, and the missing one is invisible until somebody notices
 the answer is wrong.
 
+**"Currently pending assigned" is `isConfirmable` (`spec-document.ts`), and
+the screen and the server both call it** (prod-ready E0, 2026-11-20). The
+server compared against every PENDING row on the record while the screen sent
+only the PLACED ones, so an email that said a bar stool's quantity (no question
+matches "quantity") beside its seat height and footrest was refused "The rows
+on this record changed while you were reviewing" on a freshly loaded page,
+after a re-match, every time — reloading could not fix it, and the only way out
+was to ignore the unplaced row, which nothing said. Now the placed rows commit
+as a whole card and an unplaced row on the same record stays pending for a
+later decision (the run stays `parsed`); an unplaced row SENT in a card is
+refused `not_placed` in words. The drawings confirm was checked and has no such
+mismatch: its card sends every pending observation and the server counts
+every pending observation.
+
 `status = 'confirmed'` on an intake run means **no pending proposals remain** —
 applied or explicitly ignored. Label it *Review complete*, never "complete":
 settled answers are a different question. Restore accepts **ignored only**; an
@@ -763,7 +792,19 @@ words so a value stays checkable against its page; the CELL renders the library.
   description and a new drawing says something else, the attribute stays
   unlinked and shows on the finishes page as a code needing a person. Linking
   would make the item render the library's words while its own page said
-  otherwise.
+  otherwise. **And it is never called "not in the library"** (prod-ready F4,
+  2026-11-20): the list of unlinked codes did not tell that case apart, so
+  the overview's "Unresolved finish codes", its Finishes tile ("2 codes not in
+  the library") and the Finishes tab's banner ("… not in the library yet …
+  add it with Add a finish") sent a person to make a duplicate of a row the
+  library held. `loadUnlinkedFinishCodes` (`finish-unlinked.ts`, moved out of
+  `finishes.ts` because it needs the one library loader) gives each code a
+  `reason` by the confirm's own `findFinishByCode` / `resolveFinishCode`:
+  `absent` keeps today's words; `differs` says "the drawing's words for WD-01
+  differ from the library — decide which stands" with a link to an item
+  carrying it (Attach to a finish… takes the library's words; Edit on the row
+  takes the drawing's); `unattached` (held, same words, never linked) says
+  only that it is not attached. `unlinkedFinishWords` is the tile's line.
 - **`supplier_raw` does NOT satisfy "suppliers by modelled Capsule ID".** There
   is no supplier register in this app and no Capsule data in this repo; the
   `_raw` suffix marks it as what a document said. That invariant remains unmet.
@@ -882,8 +923,21 @@ the plan, with its defaults T1–T3.
   the phase table (`twin_codes`); `TwinTicks` under Add a spec, Edit value and
   Retire. NOT built, by scope: the fill-in's dimension row offers no twins;
   level and category "also set on its twin"; "Add a configuration" offering
-  the twin; the configuration review cards' twin sentence; emails and spec
-  documents do not read twins.
+  the twin; the configuration review cards' twin sentence. Emails and spec
+  documents were on this list until prod-ready E1 (2026-11-20, below).
+- **An email lands on linked twins as the drawings do** (prod-ready E1,
+  2026-11-20). `HH-CH-02` on two lines the reviewer linked: the drawings card
+  offered both, and the email review called the code ambiguous and its row
+  said "Item not found". `resolveProposals` now runs `landOnTwins` over the
+  phases a ref lands on: where EVERY line it reaches on a phase is a twin of
+  every other — `everyPairTwinned` in `record-refs.ts`, the one predicate
+  `readTwinLines` now calls too — the phase lands on each line, one proposal
+  per record sharing the observation's ordinal, each ignorable on its own,
+  with a sentence saying they are twins. A set the links do not wholly cover
+  stays ambiguous, and says so: "HH-CH-02 is on 2 lines of Guest Rooms —
+  choose which" (`linesToChooseFrom`), never "Item not found", and the "did
+  not find an item" note no longer counts it. A message read before the link
+  lands on both at a (free) re-match.
 
 ### A line's common specs are a reading, and an edit to one fans out
 

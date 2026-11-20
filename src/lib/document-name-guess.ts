@@ -139,3 +139,60 @@ export function guessKindFromName(filename: string): NameGuess | null {
     evidence: `The name says ${quotes.map((quote) => `“${quote}”`).join(" and ")}.`,
   };
 }
+
+// ============================================================================
+// WHEN THE NAME AND THE MODEL DISAGREE, A PERSON DECIDES (prod-ready K1,
+// 2026-11-20).
+//
+// A clean bill — Ref / Location / Description / Unit / Qty, no price columns —
+// named "… Bill of Quantities.xlsx" showed "Bill of quantities" in its box, the
+// press asked the model, the model answered an FF&E schedule, and the file was
+// filed as one and READ: a charged read, no records, no question. The name
+// still suggests and never settles; what changed is that a model answer the
+// name CONTRADICTS settles nothing either. The file is held with both readings
+// on its row, and nothing is registered or read until somebody chooses.
+// Where they agree, or either abstains, nothing here applies.
+// ============================================================================
+
+/** A genre in a sentence's subject position: "Bill of quantities". */
+const GENRE_LABEL: Record<Exclude<DocumentGenre, "unclear">, string> = {
+  bill_of_quantities: "Bill of quantities",
+  shop_drawings: "Shop drawings",
+  specification_sheets: "Specification sheets",
+  ffe_schedule: "FF&E schedule",
+  finishes_schedule: "Finishes schedule",
+  fabric_schedule: "Fabric schedule",
+  specification_bible: "Specification bible",
+  preamble: "Preamble",
+  email: "Email",
+};
+
+/** A genre as something the model reads it as: "an FF&E schedule". */
+const GENRE_READING: Record<Exclude<DocumentGenre, "unclear">, string> = {
+  bill_of_quantities: "a bill of quantities",
+  shop_drawings: "shop drawings",
+  specification_sheets: "specification sheets",
+  ffe_schedule: "an FF&E schedule",
+  finishes_schedule: "a finishes schedule",
+  fabric_schedule: "a fabric schedule",
+  specification_bible: "a specification bible",
+  preamble: "a preamble",
+  email: "an email",
+};
+
+/**
+ * The sentence for a file whose name and contents name different kinds, or
+ * null where they agree or either abstains. Compared on the app's two FIELDS,
+ * not the genre: "SPEC-346" (specification sheets) read as shop drawings is
+ * one kind, filed one way.
+ */
+export function nameModelDisagreement(
+  named: Pick<NameGuess, "genre" | "decision"> | null,
+  model: { genre: DocumentGenre; decision: KindDecision | null },
+): string | null {
+  if (!named || !model.decision || model.genre === "unclear") return null;
+  const same =
+    named.decision.importType === model.decision.importType && named.decision.documentKind === model.decision.documentKind;
+  if (same) return null;
+  return `The name says ${GENRE_LABEL[named.genre]}; the model reads ${GENRE_READING[model.genre]} — which is it?`;
+}

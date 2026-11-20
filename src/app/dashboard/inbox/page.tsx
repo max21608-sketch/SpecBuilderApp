@@ -697,7 +697,15 @@ function MessageRow({
             // IN WORDS, not "auto": since 2026-09-21 this row is the only
             // place a charged read nobody asked for is accounted for, and a
             // four-letter chip is not an account of it.
-            <Chip dot tone={message.assignment_kind === "auto" ? "live" : "plain"} title={message.routing_reason ?? undefined}>
+            // WRAPS (I1, 2026-11-20): "assigned by hand · Nothing in this
+            // message names a project: …" on one unbreakable line made the
+            // table 447px wider than its box at 1440. One line where it fits.
+            <Chip
+              dot
+              wrap
+              tone={message.assignment_kind === "auto" ? "live" : "plain"}
+              title={message.routing_reason ?? undefined}
+            >
               {message.assignment_kind === "auto" ? "assigned automatically" : "assigned by hand"}
               {message.routing_reason ? ` · ${message.routing_reason.split(" — ")[0]}` : ""}
             </Chip>

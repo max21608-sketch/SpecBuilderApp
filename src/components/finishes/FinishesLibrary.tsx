@@ -55,6 +55,7 @@ import { projectCodeGroup } from "@/lib/material-words";
 import FinishSwatch from "@/components/finishes/FinishSwatch";
 import { FinishStandardCell, FinishStandardPanel } from "@/components/finishes/FinishStandard";
 import type { Palette } from "@/lib/palettes";
+import type { UnlinkedFinishCode } from "@/lib/finish-unlinked-words";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
@@ -103,7 +104,8 @@ type Payload = {
   project: { id: string; number: string; name: string };
   finishes: Finish[];
   runs: Run[];
-  unlinked: { code: string; records: number }[];
+  /** Codes the specs carry that no library row links, and why (`finish-unlinked.ts`). */
+  unlinked: UnlinkedFinishCode[];
   /** The lists BW finishes are chosen from, keyed, sent once (0045). */
   palettes?: Record<string, Palette>;
 };
@@ -427,6 +429,11 @@ export default function FinishesLibrary({
     () => active.filter((finish) => suggestions.has(finish.id) && finish.state === "tbc"),
     [active, suggestions],
   );
+
+  // THE TWO KINDS OF UNLINKED CODE (F4): only an ABSENT one is added; one the
+  // library holds is attached, or the library's words are changed.
+  const absent = (data?.unlinked ?? []).filter((row) => row.reason === "absent");
+  const held = (data?.unlinked ?? []).filter((row) => row.reason !== "absent");
 
   const kindCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -799,15 +806,15 @@ export default function FinishesLibrary({
       {/* WHAT THE LIBRARY CANNOT REACH. A code a drawing carries but the
           library does not hold is a code nobody can correct once, which is the
           one promise this screen makes. */}
-      {data.unlinked.length > 0 && (
+      {absent.length > 0 && (
         <Note
           tone="warn"
-          title={`${data.unlinked.length} code${data.unlinked.length === 1 ? "" : "s"} on the drawings ${
-            data.unlinked.length === 1 ? "is" : "are"
+          title={`${absent.length} code${absent.length === 1 ? "" : "s"} on the drawings ${
+            absent.length === 1 ? "is" : "are"
           } not in the library yet,`}
         >
-          so correcting {data.unlinked.length === 1 ? "it" : "them"} once is not possible:{" "}
-          {data.unlinked.map((row, index) => (
+          so correcting {absent.length === 1 ? "it" : "them"} once is not possible:{" "}
+          {absent.map((row, index) => (
             <span key={row.code}>
               {index > 0 && " · "}
               <span className="font-mono">{row.code}</span> ({row.records} item{row.records === 1 ? "" : "s"})
@@ -823,12 +830,50 @@ export default function FinishesLibrary({
               appear to work and leave this note standing. The link is a
               person's act on each item's Specs tab, which shows the item's own
               words beside the library's. */}
-          Next: add {data.unlinked.length === 1 ? "it" : "each"} with <b className="font-semibold">Add a finish</b>,
+          Next: add {absent.length === 1 ? "it" : "each"} with <b className="font-semibold">Add a finish</b>,
           then <b className="font-semibold">Attach to a finish…</b> on each item&apos;s Specs tab.
           <Tip>
             Adding a code to the library does not link the items that carry it. Each item&apos;s spec is attached on its
             own Specs tab, where its words sit beside the library&apos;s; this note goes when every one is attached.
           </Tip>
+        </Note>
+      )}
+
+      {/* A CODE THE LIBRARY HOLDS, ON SPECS NOT ATTACHED TO IT (prod-ready F4,
+          2026-11-20). It was in the note above, "not in the library yet …
+          add it with Add a finish", which sent a person to make a duplicate
+          of a row this table already shows. Where the item's words differ it
+          is a decision — which stands — and where they agree it is only the
+          attach. Either way the act is on the item, or on the row here. */}
+      {held.length > 0 && (
+        <Note tone="warn" title={`${held.length} code${held.length === 1 ? " the library holds is" : "s the library holds are"} not attached to ${held.length === 1 ? "its" : "their"} items:`}>
+          {held.map((row, index) => (
+            <span key={row.code}>
+              {index > 0 && " · "}
+              {row.reason === "differs" ? (
+                <>
+                  the drawing&apos;s words for <span className="font-mono">{row.code}</span> differ from the library — decide
+                  which stands
+                </>
+              ) : (
+                <>
+                  <span className="font-mono">{row.code}</span> agrees with the library and is not attached yet
+                </>
+              )}{" "}
+              (
+              <Link
+                href={`/dashboard/records/${row.firstRecordId}`}
+                prefetch={false}
+                className="text-blue-700 no-underline hover:underline"
+              >
+                {row.records === 1 ? "open the item" : `open one of ${row.records} items`}
+              </Link>
+              )
+            </span>
+          ))}
+          .{" "}
+          Next: <b className="font-semibold">Attach to a finish…</b> on the item&apos;s Specs tab takes the library&apos;s
+          words; to keep the drawing&apos;s instead, <b className="font-semibold">Edit</b> the code&apos;s row below.
         </Note>
       )}
 

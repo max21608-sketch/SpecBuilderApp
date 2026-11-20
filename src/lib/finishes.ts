@@ -29,20 +29,8 @@
 // was written to avoid.
 // ============================================================================
 import type { AttributeState } from "@/lib/spec-vocab";
-import type { Row } from "@/lib/db";
 // A leaf: it imports nothing.
 import { stackedTagCode } from "@/lib/material-words";
-
-/**
- * Either driver, declared HERE rather than imported.
- *
- * `record-atoms.ts` exports the same shape and imports `isFinishKind` from this
- * file, so taking its type would close an import cycle — erased at compile time
- * today, and a real one the moment anything in it is read at import time. Six
- * lines is cheaper than the failure that produces, which lands somewhere
- * unrelated.
- */
-type FinishSql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Row[]>;
 
 export const FINISH_KINDS = ["fabric", "leather", "timber", "metal", "stone", "glass", "paint", "trim", "other"] as const;
 export type FinishKind = (typeof FINISH_KINDS)[number];
@@ -336,38 +324,9 @@ export function findFinishByCode(
   return null;
 }
 
-/**
- * Client finish codes the drawings carry that the library does not hold.
- *
- * NAMED RATHER THAN COUNTED, which is why it returns rows: an unlinked code is
- * a finish nobody can correct once, and "three codes are not in the library" is
- * a number somebody dismisses where `MOR005, WD-05, CH-01.1` is a job.
- *
- * ONE QUERY, TWO SCREENS. It was inline in the finishes route, and the project
- * overview needs the same list — a second copy is how the overview comes to say
- * two where the library shows three, which is the disagreement the check sheet
- * exists to prevent, between two screens instead of two files. Both the record
- * and its run must be ACTIVE, the same scope everything else on a project reads.
- */
-export async function loadUnlinkedFinishCodes(
-  exec: FinishSql,
-  projectId: string,
-): Promise<{ code: string; records: number }[]> {
-  const rows = await exec`
-    select upper(btrim(a.material_code)) as code, count(distinct a.record_id)::int as records
-    from record_attributes a
-    join spec_records r on r.id = a.record_id
-    where r.project_id = ${projectId}
-      and a.status = 'active'
-      and r.status = 'active'
-      and a.material_code is not null
-      and btrim(a.material_code) <> ''
-      and a.finish_id is null
-    group by upper(btrim(a.material_code))
-    order by 1
-  `;
-  return rows.map((row) => ({ code: String(row.code), records: Number(row.records) }));
-}
+// THE CODES THE LIBRARY DOES NOT LINK, and why each is unlinked, are
+// `finish-unlinked.ts` (prod-ready F4, 2026-11-20): the loader needs the one
+// library loader, which imports this file.
 
 /**
  * The WORDS a finish row states about its finish, or null where its value is

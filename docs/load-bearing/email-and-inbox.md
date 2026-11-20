@@ -98,7 +98,16 @@ Five things are load-bearing:
   the store's own server-side `copy` OUTSIDE the transaction, because blob I/O
   inside one holds a row lock across a network call. Copied, never moved: the
   mailbox path is the arrival record and `unassignMessage` must leave the
-  message something to have come from. Found 2026-09-17 by fake mail staged
+  message something to have come from.
+- **The review's header says how the message got there** (prod-ready E2,
+  2026-11-20). It printed `auto · <routing reason>` over every email, so an
+  `.eml` a PERSON uploaded read "auto · Nothing in this message names a
+  project…" while the Inbox said "assigned by hand" for the same message,
+  and its back link went to the Inbox. `emailArrival` (`email-arrival.ts`)
+  reads `origin` and `assignment_kind`: "uploaded to this project by <who>",
+  "assigned automatically · <the router's first clause>", or "assigned by
+  hand by <who>", the whole reason on hover; an uploaded message's back link
+  goes to its pack, or to the project's Documents tab. Found 2026-09-17 by fake mail staged
   through the real Graph path; it would have been the first real message.
 - **`spec_answers.source_kind = 'email'`** has been allowed by 0002's CHECK
   since the beginning and had never been written. It puts the answer out of
@@ -165,6 +174,10 @@ Six things are load-bearing:
   settled value being withdrawn, and that already reaches the state through
   `emailAwareState`. The label never stands in for a blocker: `changes` still
   requires the overwrite acknowledgement.
+- **Two lines of one phase linked as TWINS are not SX11A** (prod-ready E1,
+  2026-11-20): the code lands on each, by the drawings' predicate, and two
+  lines that are NOT linked say "… is on 2 lines of … — choose which" rather
+  than "Item not found" (`specs-and-finishes.md`, the twin section).
 - **"Item not found" and "question not matched" are different jobs.**
   Collapsing them produced a row that contradicted itself — *3 runs* in the
   Applies to column beside *Not yet placed*. Once the fan-out lands, the item is
@@ -212,6 +225,19 @@ each file, asks what it is, fills the box in and reads it.
   schedule must come back unclear, because the cost is not symmetric.
 - **Every answer is flagged with its evidence**, and a person's choice always
   beats the suggestion.
+- **A model answer the NAME contradicts settles nothing either** (prod-ready
+  K1, 2026-11-20). A clean bill named "… Bill of Quantities.xlsx" (no price
+  columns, its one sheet called "FF&E Schedule") showed "Bill of quantities"
+  from its name; the press asked the model, which said FF&E schedule, and the
+  file was filed and READ as one — 153k output tokens, no records, nothing
+  asked. `nameModelDisagreement` (`document-name-guess.ts`) compares the two
+  on the app's FIELDS (so specification sheets read as shop drawings agree);
+  where they differ the route answers `decision: null`, `held` ("The name says
+  Bill of quantities; the model reads an FF&E schedule — which is it?") and
+  `modelDecision`, and the row keeps the name's suggestion in the box and
+  offers the model's beside it, both one click. Nothing is registered or read
+  until a person chooses; agreement, or either abstaining, is unchanged. The
+  classify answer itself is still stored nowhere.
 - **The kind still arrives DECLARED** at `/api/imports`, which is untouched. The
   classify route creates no run, opens no attempt and stages nothing.
 - **A scanned, image-only PDF is refused at classify time** (`91360b6`,

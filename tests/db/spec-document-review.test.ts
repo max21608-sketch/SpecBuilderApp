@@ -320,6 +320,68 @@ describeIfDb("spec document review", () => {
     expect(await answersFor()).toHaveLength(0);
   });
 
+  // prod-ready E0 (2026-11-20). The rehearsal's bar stool: an email said its
+  // quantity (no question matches "quantity"), its seat height and its
+  // footrest. The screen sends the two PLACED rows; the confirm demanded every
+  // pending row on the record and refused "changed while you were reviewing"
+  // on a fresh page, every time.
+  it("confirms a record's placed rows and leaves an unplaced one beside them pending", async () => {
+    const seat = proposal({ requirementId: requirementIds[0], proposedValue: "760" });
+    const footrest = proposal({ requirementId: requirementIds[1], proposedValue: "Brass footrest" });
+    const quantity = proposal({
+      requirementId: null,
+      target: null,
+      proposedValue: "16",
+      raw: { ...proposal().raw, attributeRaw: "quantity", valueRaw: "16" },
+    });
+    const version = await stage([seat, footrest, quantity]);
+
+    const res = await confirm({
+      version,
+      action: "confirm",
+      recordId,
+      proposals: [
+        { id: seat.id, version: 1 },
+        { id: footrest.id, version: 1 },
+      ],
+    });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.applied).toBe(2);
+    expect(await answersFor()).toHaveLength(2);
+
+    const staged = await currentStaged();
+    expect(staged.lines.find((line) => line.id === quantity.id)?.reviewStatus).toBe("pending");
+    expect(staged.lines.filter((line) => line.reviewStatus === "applied")).toHaveLength(2);
+    // Something is still pending, so the document is not review-complete.
+    expect((await runRow()).status).toBe("parsed");
+  });
+
+  it("refuses an unplaced row sent as part of a card, and writes nothing", async () => {
+    const seat = proposal({ requirementId: requirementIds[0] });
+    const quantity = proposal({
+      requirementId: null,
+      target: null,
+      raw: { ...proposal().raw, attributeRaw: "quantity", valueRaw: "16" },
+    });
+    const version = await stage([seat, quantity]);
+
+    const res = await confirm({
+      version,
+      action: "confirm",
+      recordId,
+      proposals: [
+        { id: seat.id, version: 1 },
+        { id: quantity.id, version: 1 },
+      ],
+    });
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("not_placed");
+    expect(body.error).toMatch(/“quantity” is not placed on a question yet/);
+    expect(await answersFor()).toHaveLength(0);
+  });
+
   it("refuses a stale proposal version, and writes nothing", async () => {
     const a = proposal();
     const version = await stage([a]);

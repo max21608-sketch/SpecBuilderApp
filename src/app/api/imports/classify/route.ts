@@ -31,6 +31,7 @@ import {
   scannedPdfRefusal,
 } from "@/lib/document-classify";
 import type { ClassifyFailureCode } from "@/lib/classify-failure";
+import { guessKindFromName, nameModelDisagreement } from "@/lib/document-name-guess";
 import { MAX_MODEL_PDF_BYTES, MAX_MODEL_PDF_PAGES } from "@/lib/upload-limits";
 import { pdfBillRefusal, readPdfBill } from "@/lib/pdf-bill";
 import { isTranscribable, transcriptionReason, type TranscribableReason } from "@/lib/pdf-bill-checks";
@@ -282,6 +283,35 @@ export async function POST(request: Request): Promise<Response> {
         evidence: result.evidence || "the pages carry no text, only images",
         certain: result.certain,
         charged: true,
+      },
+      200,
+    );
+  }
+
+  // ============================================================================
+  // THE NAME AND THE MODEL DISAGREE, SO A PERSON DECIDES (prod-ready K1).
+  //
+  // A clean bill named "… Bill of Quantities.xlsx" was read by the model as an
+  // FF&E schedule and filed and read as one: a charged read, no records, no
+  // question. The name still settles nothing (`document-name-guess.ts`); a
+  // model answer the name contradicts settles nothing either. Held with both
+  // readings, the model's beside the name's, and nothing registered or read.
+  // ============================================================================
+  const disagreement = nameModelDisagreement(guessKindFromName(input.filename), result);
+  if (disagreement && result.decision) {
+    return json(
+      {
+        ok: true,
+        genre: result.genre,
+        decision: null,
+        unsupported: null,
+        held: disagreement,
+        modelDecision: result.decision,
+        titleText: result.titleText,
+        evidence: result.evidence,
+        certain: result.certain,
+        charged: true,
+        largeDocument: result.model !== CLASSIFY_MODEL,
       },
       200,
     );

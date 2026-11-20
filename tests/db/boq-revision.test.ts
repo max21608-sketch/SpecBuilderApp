@@ -136,6 +136,10 @@ describeIfDb("BOQ revision", () => {
               ignored: false,
               ignoredReason: null,
               replacesRunId,
+              // Every test here re-stages "__QA MAIN RUN" on one project, so a
+              // bill staged as NEW looks like the phase an earlier test made:
+              // the reviewer has said "a new phase" (RV0, 2026-11-20).
+              ...(replacesRunId ? {} : { newPhaseChosen: true }),
               metadata: { revision: replacesRunId ? "B" : "A", date: "14-Sep-26", notes: [] },
               lines,
               ...sheetExtra,

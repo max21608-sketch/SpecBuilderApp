@@ -44,7 +44,7 @@ import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Note from "@/components/ui/Note";
 import ModelNote from "@/components/imports/ModelNote";
 import Chip from "@/components/ui/Chip";
-import Button from "@/components/ui/Button";
+import Button, { buttonClass } from "@/components/ui/Button";
 import SuggestButton from "@/components/ui/SuggestButton";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import type { Tone } from "@/components/ui/tone";
@@ -87,6 +87,53 @@ const VERDICT_TONE: Record<ScheduleVerdict["status"], Tone> = {
 
 /** The verdicts a tick can do something with. The rest write nothing and stay for a person. */
 const TICKABLE: ReadonlySet<ScheduleVerdict["status"]> = new Set(["new", "fills", "enriches", "agrees"]);
+
+/**
+ * Whether the confirm will WRITE this row's kind: a new code, or a held one
+ * with no kind yet. On a conflict or an agreeing row the library already has
+ * its answer. The kind control and "Accept all suggested kinds" both read it.
+ */
+function kindWritable(verdict: ScheduleVerdict | null | undefined): boolean {
+  return (
+    verdict?.status === "new" ||
+    ((verdict?.status === "fills" || verdict?.status === "enriches") && !verdict.finish.kind)
+  );
+}
+
+/**
+ * What the confirm would do with the ticked rows, and its button's words —
+ * ONE reading for the header's button and the one under the table (F1/F2,
+ * 2026-11-20), so the two can never say different things.
+ */
+function scheduleConfirm(
+  staged: StagedFinishSchedule,
+  byEntry: Map<string, ScheduleReviewRow>,
+  selected: Set<string>,
+  withSwatches: boolean,
+) {
+  const pending = staged.entries.filter((entry) => entry.reviewStatus === "pending");
+  const chosen = pending.filter((entry) => selected.has(entry.id));
+  const count = (status: ScheduleVerdict["status"]) =>
+    chosen.filter((entry) => byEntry.get(entry.id)?.verdict?.status === status).length;
+  const writes = count("new") + count("fills") + count("enriches");
+  const label =
+    chosen.length === 0
+      ? "Tick a finish to add it"
+      : writes > 0
+        ? `Add ${writes} to the library`
+        : withSwatches
+          ? `Confirm ${chosen.length} already held, with their swatches`
+          : `Close ${chosen.length} already held`;
+  // THE KINDS A PERSON HAS NOT YET ACCEPTED (F3): a writable row with a
+  // suggestion and no kind filed. The confirm writes only an ACCEPTED kind.
+  const suggestedKinds = pending.flatMap((entry) => {
+    const row = byEntry.get(entry.id);
+    return kindWritable(row?.verdict) && !entry.kind && row?.suggestion
+      ? [{ entry, kind: row.suggestion.kind }]
+      : [];
+  });
+  return { pending, chosen, count, writes, label, suggestedKinds };
+}
 
 /** The provenance line, clamped: it is a whole row of the schedule and runs long. */
 const NOTES_LINES = 2;
@@ -266,6 +313,34 @@ export default function FinishScheduleReview({
     }
   }
 
+  /**
+   * EVERY SUGGESTED KIND, ACCEPTED BY ONE PRESS (F3, 2026-11-20) — a person's
+   * click, as "File all" is on the library. Each row at the version shown, in
+   * one request; the confirm then writes each accepted kind into its library
+   * row. A suggestion nobody accepts is never filed.
+   */
+  async function acceptKinds(kinds: { entry: FinishScheduleEntry; kind: FinishKind }[]) {
+    if (kinds.length === 0) return;
+    setBusy("kinds");
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await apiFetch<{ filed: number }>(`/api/imports/${importId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kinds: kinds.map(({ entry, kind }) => ({ entryId: entry.id, expectedVersion: entry.version, kind })),
+        }),
+      });
+      await reloadThen(
+        res.ok ? null : res.error,
+        res.ok ? `${res.data.filed} kind${res.data.filed === 1 ? "" : "s"} accepted — each is filed with its finish when you add it.` : null,
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function act(entries: FinishScheduleEntry[], action: "confirm" | "ignore" | "restore") {
     if (entries.length === 0) return;
     setBusy(action);
@@ -324,7 +399,23 @@ export default function FinishScheduleReview({
     }
   }
 
-  const shell = (children: React.ReactNode) => (
+  // WHERE "BACK" GOES: the pack this schedule came in, or its project.
+  const back = { href: crumb.href, label: crumb.href.includes("/intake/") ? "Back to the pack" : "Back to the project" };
+
+  // THE SECONDARY ACTION, out of the header's primary slot (F2, 2026-11-20):
+  // reading the same file again as an FF&E schedule is one charged read and
+  // the exception, not the thing this screen is for. It sits under the list.
+  const furniture = furnitureRunId ? (
+    <Link href={`/dashboard/imports/${furnitureRunId}`} className="text-sm text-blue-700 no-underline hover:underline">
+      Its furniture, read as an FF&amp;E schedule →
+    </Link>
+  ) : (
+    <Button variant="secondary" size="xs" disabled={busy !== null} onClick={() => void readFurniture()}>
+      {busy === "furniture" ? "Registering…" : "Also read its furniture as an FF&E schedule — one charged read"}
+    </Button>
+  );
+
+  const shell = (children: React.ReactNode, actions?: React.ReactNode) => (
     <>
       <PageHeader
         crumbs={[crumb]}
@@ -353,19 +444,15 @@ export default function FinishScheduleReview({
             </Link>
           </>
         }
-        actions={
-          furnitureRunId ? (
-            <Link href={`/dashboard/imports/${furnitureRunId}`} className="text-sm text-blue-700 no-underline hover:underline">
-              Its furniture, read as an FF&amp;E schedule →
-            </Link>
-          ) : (
-            <Button variant="secondary" disabled={busy !== null} onClick={() => void readFurniture()}>
-              {busy === "furniture" ? "Registering…" : "Also read its furniture as an FF&E schedule — one charged read"}
-            </Button>
-          )
-        }
+        actions={actions}
       />
-      <PageBody>{children}</PageBody>
+      <PageBody>
+        {children}
+        {/* Under every state of the screen, as it was in the header. */}
+        <p className="mt-4 flex flex-wrap items-center gap-2 text-[12.5px] text-neutral-600">
+          Does this schedule list furniture as well as finishes? {furniture}
+        </p>
+      </PageBody>
     </>
   );
 
@@ -453,24 +540,51 @@ export default function FinishScheduleReview({
     );
   }
 
+  // THE PRIMARY ACTION, TOP RIGHT, as the bill review has it — the same
+  // reading and handler as the button under the table (F1/F2). Once nothing
+  // is left to review, the way back instead of "Add 0".
+  const confirm = scheduleConfirm(staged, byEntry, selected, offersSwatches(staged));
+  const backLink = (
+    <Link href={back.href} className={buttonClass("secondary", "sm", "no-underline")}>
+      {back.label}
+    </Link>
+  );
+  const headerAction =
+    confirm.pending.length === 0 ? (
+      backLink
+    ) : (
+      <Button
+        variant="primary"
+        onClick={() => void act(confirm.chosen, "confirm")}
+        disabled={busy !== null || confirm.chosen.length === 0}
+      >
+        {busy === "confirm" ? "Adding…" : confirm.label}
+      </Button>
+    );
+
   return shell(
-    <FinishScheduleTable
-      importId={importId}
-      staged={staged}
-      byEntry={byEntry}
-      selected={selected}
-      setSelected={setSelected}
-      busy={busy}
-      error={error}
-      notice={notice}
-      onKind={(entry, kind) => void fileKind(entry, kind)}
-      onAct={(entries, action) => void act(entries, action)}
-      onSwatch={rememberSwatch}
-      showIgnored={showIgnored}
-      setShowIgnored={setShowIgnored}
-      showApplied={showApplied}
-      setShowApplied={setShowApplied}
-    />,
+    <>
+      <FinishScheduleTable
+        importId={importId}
+        staged={staged}
+        byEntry={byEntry}
+        selected={selected}
+        setSelected={setSelected}
+        busy={busy}
+        error={error}
+        notice={notice}
+        onKind={(entry, kind) => void fileKind(entry, kind)}
+        onAcceptKinds={(kinds) => void acceptKinds(kinds)}
+        onAct={(entries, action) => void act(entries, action)}
+        onSwatch={rememberSwatch}
+        back={backLink}
+        showIgnored={showIgnored}
+        setShowIgnored={setShowIgnored}
+        showApplied={showApplied}
+        setShowApplied={setShowApplied}
+      />
+    </>,
+    headerAction,
   );
 }
 
@@ -488,8 +602,10 @@ export function FinishScheduleTable({
   error,
   notice,
   onKind,
+  onAcceptKinds,
   onAct,
   onSwatch,
+  back,
   showIgnored,
   setShowIgnored,
   showApplied,
@@ -504,30 +620,37 @@ export function FinishScheduleTable({
   error: string | null;
   notice: string | null;
   onKind: (entry: FinishScheduleEntry, kind: FinishKind | null) => void;
+  /** Accept every suggested kind in one press (F3). Absent: the button is not offered. */
+  onAcceptKinds?: (kinds: { entry: FinishScheduleEntry; kind: FinishKind }[]) => void;
   onAct: (entries: FinishScheduleEntry[], action: "confirm" | "ignore" | "restore") => void;
   /** Absent on a caller with no upload behind it; the picker then is not offered. */
   onSwatch?: (entryId: string, image: CroppedImage | null, page: number | null, origin: "proposed" | "person") => void;
+  /** The way back, shown once nothing is left to review. */
+  back?: React.ReactNode;
   showIgnored: boolean;
   setShowIgnored: (update: (value: boolean) => boolean) => void;
   showApplied: boolean;
   setShowApplied: (update: (value: boolean) => boolean) => void;
 }) {
-  const pending = staged.entries.filter((entry) => entry.reviewStatus === "pending");
-  const chosen = pending.filter((entry) => selected.has(entry.id));
-  const count = (status: ScheduleVerdict["status"]) =>
-    chosen.filter((entry) => byEntry.get(entry.id)?.verdict?.status === status).length;
+  const withSwatches = offersSwatches(staged) && Boolean(onSwatch);
+  const { pending, chosen, count, label, suggestedKinds } = scheduleConfirm(staged, byEntry, selected, withSwatches);
   const waitingOnPerson = pending.filter((entry) => {
     const verdict = byEntry.get(entry.id)?.verdict;
     return verdict && !TICKABLE.has(verdict.status);
   }).length;
-  const writes = count("new") + count("fills") + count("enriches");
-  const withSwatches = offersSwatches(staged) && Boolean(onSwatch);
   const columns = withSwatches ? 7 : 6;
+  const applied = staged.entries.filter((entry) => entry.reviewStatus === "applied").length;
+  const ignored = staged.entries.filter((entry) => entry.reviewStatus === "ignored").length;
 
   return (
     <>
       {error && <Note tone="danger">{error}</Note>}
       {notice && <Note tone="good">{notice}</Note>}
+      {pending.length === 0 && (
+        <Note tone="good" title="Every finish in this schedule has been reviewed:" actions={back}>
+          {applied} added or closed{ignored > 0 ? `, ${ignored} ignored` : ""}. Confirm each one on the finishes library.
+        </Note>
+      )}
       <ModelNote text={staged?.documentNotes} />
 
       <Card
@@ -537,6 +660,18 @@ export function FinishScheduleTable({
             {staged.entries.length} finish{staged.entries.length === 1 ? "" : "es"} in this schedule
             <CardHeadingNote>{pending.length} still to review</CardHeadingNote>
           </>
+        }
+        actions={
+          // THE SUGGESTED KINDS, ACCEPTED IN ONE PRESS (F3, 2026-11-20).
+          // Each row offered "Fabric ?", "Add 11 to the library" filed none
+          // of them, and the library then asked about all eleven again.
+          onAcceptKinds && suggestedKinds.length > 0 ? (
+            <Button size="xs" disabled={busy !== null} onClick={() => onAcceptKinds(suggestedKinds)}>
+              {busy === "kinds"
+                ? "Accepting…"
+                : `Accept all ${suggestedKinds.length} suggested kind${suggestedKinds.length === 1 ? "" : "s"}`}
+            </Button>
+          ) : undefined
         }
       >
         <Table>
@@ -668,15 +803,7 @@ export function FinishScheduleTable({
               onClick={() => onAct(chosen, "confirm")}
               disabled={busy !== null || chosen.length === 0}
             >
-              {busy === "confirm"
-                ? "Adding…"
-                : chosen.length === 0
-                  ? "Tick a finish to add it"
-                  : writes > 0
-                    ? `Add ${writes} to the library`
-                    : withSwatches
-                      ? `Confirm ${chosen.length} already held, with their swatches`
-                      : `Close ${chosen.length} already held`}
+              {busy === "confirm" ? "Adding…" : label}
             </Button>
           )}
         </div>
@@ -800,9 +927,7 @@ function KindControl({
   busy: boolean;
   onKind: (entry: FinishScheduleEntry, kind: FinishKind | null) => void;
 }) {
-  const writable =
-    verdict?.status === "new" ||
-    ((verdict?.status === "fills" || verdict?.status === "enriches") && !verdict.finish.kind);
+  const writable = kindWritable(verdict);
   if (
     verdict &&
     (verdict.status === "agrees" ||

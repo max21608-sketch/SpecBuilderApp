@@ -346,6 +346,15 @@ export type StagedBoqSheet = {
    * approved rather than what a fresh match would produce now.
    */
   replacesRunId?: string | null;
+  /**
+   * A PERSON SAID this sheet is a NEW phase (prod-ready RV0, 2026-11-20). Kept
+   * apart from `replacesRunId: null`, which is also "nobody has said": a sheet
+   * that looks like an active phase (`phase-revision-suggest.ts`) holds the
+   * confirm until one of the two is stored. OPTIONAL, and absent is "not
+   * decided" — every sheet staged before the field, and every sheet nobody has
+   * touched; one that looks like no phase is a new phase by default anyway.
+   */
+  newPhaseChosen?: boolean;
   /** Defaulted from the sheet name, edited by the reviewer, becomes the run. */
   proposedRunName: string;
   headerRow: number;

@@ -197,6 +197,8 @@ async function setColumns(run: BoqRunRow, body: z.infer<typeof SetColumns>, acto
       ...(keepsStructure ? { lines: applyStructureToLines(fresh.lines, structure.rows), structure } : {}),
       proposedRunName: current.proposedRunName,
       replacesRunId: current.replacesRunId ?? null,
+      // "A new phase" is a person's decision about the SHEET too (RV0).
+      ...(current.newPhaseChosen === true ? { newPhaseChosen: true } : {}),
       // A person's columns are seen by definition.
       columnsChecked: true,
     };

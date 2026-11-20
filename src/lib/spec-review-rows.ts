@@ -196,10 +196,11 @@ export function commitGroups(proposals: Proposal[]): { recordId: string; recordL
     if (proposal.reviewStatus !== "pending" || !proposal.recordId) continue;
     // A dimension proposal carries no target — it writes an attribute, not an
     // answer — so its label comes off the proposal itself.
-    // EVERY pending row on a record goes in its group, labelled or not: the
-    // confirm counts the record's whole pending set, so a row left out here
-    // refuses the item as "changed while you were reviewing" with nothing
-    // having changed. A row with no label borrows its record's from a sibling.
+    // EVERY row it is given goes in its record's group, labelled or not: the
+    // confirm counts the record's whole CONFIRMABLE set (`isConfirmable`, which
+    // is what the caller filters by), so a row left out here refuses the item
+    // as "changed while you were reviewing" with nothing having changed. A row
+    // with no label borrows its record's from a sibling.
     const label = proposal.target?.recordLabel ?? proposal.recordLabel ?? "";
     const existing = groups.get(proposal.recordId);
     if (existing) {

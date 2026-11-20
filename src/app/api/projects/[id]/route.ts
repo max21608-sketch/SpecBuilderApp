@@ -21,7 +21,8 @@ import { getSessionUser } from "@/lib/session";
 import { validateProgramme, type ProgrammeDates } from "@/lib/project-programme";
 import { ATTRIBUTE_UNITS, PROJECT_STATUSES, normaliseUnit } from "@/lib/spec-vocab";
 import { billDescriptionsReadAtConfirm } from "@/lib/bill-specifications";
-import { finishCodePrefixProblem, loadUnlinkedFinishCodes, normaliseFinishCodePrefix } from "@/lib/finishes";
+import { finishCodePrefixProblem, normaliseFinishCodePrefix } from "@/lib/finishes";
+import { loadUnlinkedFinishCodes } from "@/lib/finish-unlinked";
 import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 const EMAIL = /^[^\s,;<>@]+@[^\s,;<>@]+\.[^\s,;<>@]+$/;

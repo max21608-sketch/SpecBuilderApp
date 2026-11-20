@@ -285,6 +285,7 @@ export function stageStructureReading(
     lines: applyStructureToLines(fresh.lines, reading.rows),
     proposedRunName: current.proposedRunName,
     replacesRunId: current.replacesRunId ?? null,
+    ...(current.newPhaseChosen === true ? { newPhaseChosen: true } : {}),
     mappingEvidence: reading.evidence,
     ...(Object.keys(reading.keptEvidence).length > 0 ? { keptEvidence: reading.keptEvidence } : {}),
     columnsChecked: false,

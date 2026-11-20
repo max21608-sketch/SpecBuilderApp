@@ -22,7 +22,15 @@ import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
 import NeedsYou from "@/components/ui/NeedsYou";
-import { billNeedsYou, needsYouListId, sheetColumnsId, sheetsWaiting, transcriptionNeedsYou } from "@/lib/needs-you";
+import {
+  billNeedsYou,
+  needsYouListId,
+  sheetColumnsId,
+  sheetPhaseId,
+  sheetsWaiting,
+  transcriptionNeedsYou,
+} from "@/lib/needs-you";
+import { phaseUndecided } from "@/lib/phase-revision-suggest";
 import { goToAndFlash } from "@/lib/go-to";
 import { TONE } from "@/components/ui/tone";
 import PageHeader from "@/components/ui/PageHeader";
@@ -212,6 +220,12 @@ export default function BoqReview({
   const unchecked = sheetsAwaitingColumnCheck({ sheets });
   /** Live sheets whose columns the reader itself doubts (C6/C7) — the confirm waits for a look. */
   const doubted = sheetsWithColumnsInDoubt({ sheets });
+  /**
+   * Live sheets that look like a phase the project has and nobody has said
+   * which they are (RV0): the confirm refuses them, by `phaseUndecided` over
+   * the suggestions the server computed from live phases.
+   */
+  const undecidedPhases = sheets.filter((sheet, index) => phaseUndecided(sheet, data.phaseSuggestions[index] ?? []));
   /** Fabric lines that cannot be written, from the function the confirm runs. */
   const kindProblems = activeSheets.flatMap((sheet) => rowKindProblems(sheet.lines));
   const counts = boqConfirmCounts(sheets);
@@ -263,6 +277,7 @@ export default function BoqReview({
           reading,
           unmapped: unmapped.map(tabName),
           unchecked: [...unchecked, ...doubted].map(tabName),
+          undecidedPhases: undecidedPhases.map(tabName),
           kindProblems: activeSheets
             .map((sheet) => ({ tab: tabName(sheet), count: rowKindProblems(sheet.lines).length }))
             .filter((entry) => entry.count > 0),
@@ -282,6 +297,7 @@ export default function BoqReview({
             unchecked: unchecked.includes(sheet),
             doubt: doubted.includes(sheet) ? (sheet.columnsDoubt ?? null) : null,
             problems: sheet.ignored ? [] : rowKindProblems(sheet.lines),
+            phaseUndecided: undecidedPhases.includes(sheet),
           })),
           single: sheets.length === 1,
           reading,
@@ -420,6 +436,7 @@ export default function BoqReview({
               unmapped.length > 0 ||
               unchecked.length > 0 ||
               doubted.length > 0 ||
+              undecidedPhases.length > 0 ||
               kindProblems.length > 0
             }
             title={confirmBlocker ?? undefined}
@@ -782,6 +799,8 @@ export default function BoqReview({
                 sheet={sheet}
                 status={run.status}
                 runs={runs}
+                suggestions={data.phaseSuggestions[sheetIndex] ?? []}
+                anchorId={sheetPhaseId(sheetIndex)}
                 busy={busy}
                 panelOpen={panelOpen}
                 notice={data.sheetNotices[sheetIndex]}
