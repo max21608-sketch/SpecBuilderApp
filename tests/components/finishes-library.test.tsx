@@ -312,8 +312,8 @@ describe("the codes the library cannot reach (row e2)", () => {
   const withUnlinked = {
     ...PAYLOAD,
     unlinked: [
-      { code: "CH-02", records: 3 },
-      { code: "UPH-07", records: 1 },
+      { code: "CH-02", records: 3, firstRecordId: "rec-ch", reason: "absent", held: null },
+      { code: "UPH-07", records: 1, firstRecordId: "rec-uph", reason: "absent", held: null },
     ],
   };
 
@@ -355,6 +355,39 @@ describe("the codes the library cannot reach (row e2)", () => {
     expect(banner.textContent).toContain("Add a finish");
     expect(banner.textContent).toContain("Attach to a finish…");
     expect(within(banner).getByRole("note").getAttribute("title")).toMatch(/does not link the items that carry it/);
+  });
+});
+
+describe("a code the library HOLDS, on specs not attached to it (prod-ready F4)", () => {
+  // The drawing's words for WD-01 differ from the library's, so the confirm
+  // linked nothing — by design. The banner called it "not in the library yet"
+  // and said "add it with Add a finish": a duplicate of a row this table shows.
+  const withHeld = {
+    ...PAYLOAD,
+    unlinked: [
+      { code: "WD-01", records: 2, firstRecordId: "rec-wd", reason: "differs", held: { finishId: "f-wd", code: "WD-01", description: "Oak natural" } },
+      { code: "CH-02", records: 1, firstRecordId: "rec-ch", reason: "absent", held: null },
+    ],
+  };
+
+  beforeEach(() => {
+    fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify(withHeld), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  it("says the words differ and offers the decision, never “add it”", async () => {
+    render(<FinishesLibrary projectId="proj-1" />);
+    const absent = (await screen.findByText(/not in the library yet/)).closest("div")!;
+    expect(absent.textContent).toContain("CH-02 (1 item)");
+    expect(absent.textContent).not.toContain("WD-01");
+
+    const held = screen.getByText(/the library holds is not attached/).closest("div")!;
+    expect(held.textContent).toContain("the drawing's words for WD-01 differ from the library — decide which stands");
+    expect(held.textContent).toContain("Attach to a finish…");
+    expect(held.textContent).not.toContain("Add a finish");
+    expect(within(held).getByRole("link", { name: "open one of 2 items" }).getAttribute("href")).toBe("/dashboard/records/rec-wd");
   });
 });
 

@@ -135,7 +135,7 @@ function serve(over: { project?: Record<string, unknown>; documents?: unknown[] 
         { id: "note-1", topic: "Fire", title: "Flame retardancy", body: "All upholstery to an invented standard. ".repeat(4), flagged: true, source_page: 3, source_filename: "preamble.pdf", version: 1 },
         { id: "note-2", topic: "General", title: null, body: "Short.", flagged: false, source_page: null, source_filename: null, version: 2 },
       ],
-      unlinkedFinishCodes: ["A-01", "A-02", "A-03", "A-04", "A-05", "A-06", "A-07"].map((code) => ({ code, records: 1 })),
+      unlinkedFinishCodes: ["A-01", "A-02", "A-03", "A-04", "A-05", "A-06", "A-07"].map((code) => ({ code, records: 1, firstRecordId: "rec-1", reason: "absent", held: null })),
       failedDocuments: 1,
       designerCodes: { DES: 4, OTHER: 1 },
     },

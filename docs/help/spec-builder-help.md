@@ -312,6 +312,12 @@ If the page says "N codes on the drawings are not in the library yet": add each
 with "Add a finish", then on each item that uses it open the record's "Specs
 captured" tab and press **"Attach to a finish…"**.
 
+If it says "the drawing's words for WD-01 differ from the library — decide
+which stands", the library already has that code: do **not** add it again.
+Open the item it links to; "Attach to a finish…" on its Specs tab uses the
+library's words, or "Edit" on the code's row in the library to take the
+drawing's.
+
 A finishes schedule document has its own review screen: tick the finishes to
 add, confirm. "already held and DIFFERENT" means the library already has that
 code with other words; decide which is right.

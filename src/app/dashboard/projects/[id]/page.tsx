@@ -69,6 +69,7 @@ import ProjectWideCard from "@/components/projects/ProjectWideCard";
 import ProjectDetailsCard from "@/components/projects/ProjectDetailsCard";
 import { inboxBuckets, type InboxOutcomeFields } from "@/lib/inbox-outcome";
 import { formatDay } from "@/lib/format-day";
+import { unlinkedFinishWords, type UnlinkedFinishCode } from "@/lib/finish-unlinked-words";
 import NotesCard, { type ProjectNote } from "@/components/projects/NotesCard";
 import DocumentsTab, { useDocumentsPoll, useProjectDocuments, type DocumentRun } from "@/components/projects/DocumentsTab";
 
@@ -154,7 +155,7 @@ function ProjectOverview() {
   const [addingContact, setAddingContact] = useState(false);
   const [suggestedCodes, setSuggestedCodes] = useState<string[]>([]);
   const [codeCounts, setCodeCounts] = useState<Record<string, number>>({});
-  const [unlinkedFinishCodes, setUnlinkedFinishCodes] = useState<{ code: string; records: number }[]>([]);
+  const [unlinkedFinishCodes, setUnlinkedFinishCodes] = useState<UnlinkedFinishCode[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // Derived on the server and re-read on every load, because it changes when
@@ -184,7 +185,7 @@ function ProjectOverview() {
       documents: DocumentRun[];
       runs: SpecRun[];
       notes: ProjectNote[];
-      unlinkedFinishCodes: { code: string; records: number }[];
+      unlinkedFinishCodes: UnlinkedFinishCode[];
       failedDocuments: number;
       designerCodes: Record<string, number>;
     }>(`/api/projects/${encodeURIComponent(projectId)}`);
@@ -713,7 +714,7 @@ function ProjectOverview() {
                   value={summary.finishes}
                   meaning={
                     unlinkedFinishCodes.length > 0
-                      ? `${unlinkedFinishCodes.length} code${unlinkedFinishCodes.length === 1 ? "" : "s"} not in the library`
+                      ? unlinkedFinishWords(unlinkedFinishCodes)
                       : summary.finishes === 0
                         ? "none in the library yet"
                         : summary.finishesNoKind > 0
@@ -896,8 +897,24 @@ function ProjectOverview() {
                         ) : (
                           <span className="flex flex-wrap gap-1">
                             {unlinkedFinishCodes.slice(0, 6).map((row) => (
-                              <Link key={row.code} href={finishesHref} className="no-underline">
-                                <Chip mono>{row.code}</Chip>
+                              // A code the library HOLDS says so (F4): its
+                              // words differ, or it is only not attached.
+                              <Link
+                                key={row.code}
+                                href={finishesHref}
+                                className="no-underline"
+                                title={
+                                  row.reason === "differs"
+                                    ? `The drawing's words for ${row.code} differ from the library — decide which stands`
+                                    : row.reason === "unattached"
+                                      ? `${row.code} is in the library; its items are not attached to it yet`
+                                      : `${row.code} is not in the library`
+                                }
+                              >
+                                <Chip mono tone={row.reason === "absent" ? "plain" : "warn"}>
+                                  {row.code}
+                                  {row.reason === "differs" ? " · words differ" : row.reason === "unattached" ? " · not attached" : ""}
+                                </Chip>
                               </Link>
                             ))}
                             {unlinkedFinishCodes.length > 6 && (
@@ -908,7 +925,7 @@ function ProjectOverview() {
                       }
                       action={
                         <Link href={finishesHref} className={buttonClass("secondary", "xs", "no-underline")}>
-                          Bring them in
+                          {unlinkedFinishCodes.some((row) => row.reason === "absent") ? "Bring them in" : "Decide which stands"}
                         </Link>
                       }
                     />

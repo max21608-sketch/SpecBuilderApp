@@ -777,7 +777,19 @@ words so a value stays checkable against its page; the CELL renders the library.
   description and a new drawing says something else, the attribute stays
   unlinked and shows on the finishes page as a code needing a person. Linking
   would make the item render the library's words while its own page said
-  otherwise.
+  otherwise. **And it is never called "not in the library"** (prod-ready F4,
+  2026-11-20): the list of unlinked codes did not tell that case apart, so
+  the overview's "Unresolved finish codes", its Finishes tile ("2 codes not in
+  the library") and the Finishes tab's banner ("… not in the library yet …
+  add it with Add a finish") sent a person to make a duplicate of a row the
+  library held. `loadUnlinkedFinishCodes` (`finish-unlinked.ts`, moved out of
+  `finishes.ts` because it needs the one library loader) gives each code a
+  `reason` by the confirm's own `findFinishByCode` / `resolveFinishCode`:
+  `absent` keeps today's words; `differs` says "the drawing's words for WD-01
+  differ from the library — decide which stands" with a link to an item
+  carrying it (Attach to a finish… takes the library's words; Edit on the row
+  takes the drawing's); `unattached` (held, same words, never linked) says
+  only that it is not attached. `unlinkedFinishWords` is the tile's line.
 - **`supplier_raw` does NOT satisfy "suppliers by modelled Capsule ID".** There
   is no supplier register in this app and no Capsule data in this repo; the
   `_raw` suffix marks it as what a document said. That invariant remains unmet.
