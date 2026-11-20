@@ -390,8 +390,9 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
   // The record's CURRENT picture — a bill's, or a crop off the drawings. Its
   // storage_path is stored beside the id because an attachment can be
   // superseded, and a version that pointed only at an id would lose the
-  // picture it was taken with. Superseded rows are kept (nothing deletes an
-  // attachment since 0013), so the current one is the newest nobody
+  // picture it was taken with. Superseded rows are kept (nothing in the app
+  // deletes an attachment since 0013; only a project deleted by script takes
+  // its own, `db/project-delete.mjs`), so the current one is the newest nobody
   // superseded; an offered alternative is not the record's picture at all.
   const imageRows = await exec`
     select distinct on (entity_id) entity_id, id, storage_path from attachments

@@ -206,12 +206,18 @@ than a paragraph.
    recovery point is whenever a human last remembered.
 3. **Dumps contain real client data.** Keep them out of git and out of any
    cloud-synced folder.
-4. **Blob retention: nothing deletes uploaded documents, ever.** `del` from
-   `@vercel/blob` is called nowhere in this codebase and uploads use
-   `addRandomSuffix`, so every version of every BOQ, FF&E schedule and spec
-   bible accumulates indefinitely — NDA-covered client material, in no backup
-   and on no retention schedule. That is a data-protection exposure in its own
-   right, not merely a housekeeping gap. Inherited from `bw-app-kit`.
+4. **Blob retention: the app deletes no uploaded document.** Nothing under
+   `src/` calls `del` from `@vercel/blob`, and uploads use `addRandomSuffix`,
+   so every version of every BOQ, FF&E schedule and spec bible accumulates
+   for as long as its project exists — NDA-covered client material, in no
+   backup and on no retention schedule. That is a data-protection exposure in
+   its own right, not merely a housekeeping gap. Inherited from `bw-app-kit`.
+   **Corrected 2026-11-20:** this said `del` was "called nowhere", and since
+   2026-11-06 it is called by `db/delete-project.mjs`, which removes every
+   file under `projects/<id>/` after the project's rows commit (see
+   "Deleting a project" below) — the only way a client document leaves the
+   store. The sandbox-only `qa:fake-inbox` and `qa:demo` sweeps also `del`
+   the invented mail they wrote. A retention schedule is still open.
 
 **Observed 2026-09-12: (1), (2) and (4) are open items, not solved problems.**
 (3) is enforced — `.gitignore` covers `db/backups/`, and `db/backup.mjs`
