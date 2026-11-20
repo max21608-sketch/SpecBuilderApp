@@ -52,7 +52,12 @@ node --env-file=.env.production db/run-migrations.mjs --yes-production
 2. Copy `.env.example` to `.env.local` and fill it in.
 3. `npm run db:migrate`
 4. `npm run db:seed`
-5. `npm run create-user -- <email> "<name>" admin '<password>'`
+5. `read -rs NEW_USER_PASSWORD && export NEW_USER_PASSWORD`, then
+   `npm run create-user -- <email> "<name>" admin`. The password is at least 12
+   characters and, read this way, stays out of the shell history and `ps` (as
+   a fourth argument it still works, with a warning). `--deactivate <email>`
+   switches an account off and ends its sessions; a deactivated account is
+   switched back on only with `--activate` (2026-11-20).
 
 ## Migrations
 
