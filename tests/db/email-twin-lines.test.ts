@@ -146,3 +146,98 @@ describeIfDb("an email's code on two lines of one phase (E1)", () => {
     expectLanded(((await client.query(`select parsed from intake_runs where id = $1`, [runId])).rows[0].parsed as StagedSpecDocument).lines);
   }, SLOW);
 });
+
+// THE ITEM WAS FOUND AND HAS NO CATEGORY (prod-ready follow-up, 2026-11-20).
+// T20120's "HH-CH-02 lounge chair: no swivel." carried the twin note and one
+// candidate per twin, and read "Not placed · Item not found" — the lounge
+// chairs had no category, so no question could be matched. Nothing is placed
+// differently; the row says which item, and what to do.
+describeIfDb("an email's statement about an item with no category", () => {
+  const SLOW = 60_000;
+  const client = new pg.Client({ connectionString: databaseUrl });
+  let projectId = "";
+  let twinA = "";
+  let twinB = "";
+
+  beforeAll(async () => {
+    await client.connect();
+    projectId = (
+      await client.query(
+        `insert into projects (bws_project_number, name, created_by, updated_by) values ($1, '__QA Email no category', 'qa', 'qa') returning id`,
+        [qaNumber("P90214")],
+      )
+    ).rows[0].id;
+    const phase = (await withTransaction((txn) => createRun(txn, { projectId, name: "__QA Guest Rooms", actor: "qa" }))).runId;
+    const line = (area: string) =>
+      withTransaction((txn) =>
+        createRecord(txn, { projectId, runId: phase, itemDescription: "Lounge chair", clientRef: "__QA-CH-02", qty: 2, area, actor: "qa" }),
+      ).then((result) => result.recordId);
+    twinA = await line("Suite A");
+    twinB = await line("Suite B");
+    await withTransaction((txn) => linkTwins(txn, { recordId: twinA, otherId: twinB, reason: "__QA one chair", actor: "qa" }));
+  }, SLOW);
+
+  afterAll(async () => {
+    await client.query(`delete from intake_runs where project_id = $1`, [projectId]);
+    await client.query(`delete from projects where id = $1`, [projectId]);
+    await client.end();
+  }, SLOW);
+
+  const swivel: RawProposal = {
+    refRaw: "__QA-CH-02",
+    attributeRaw: "Swivel",
+    valueRaw: "no swivel",
+    page: null,
+    sourceSheet: null,
+    sourceRow: null,
+    confidence: "high",
+    note: null,
+    quotedText: "__QA-CH-02 lounge chair: no swivel.",
+  };
+
+  it("says each twin has no category, names it, and places nothing", async () => {
+    const registers = await loadExtractionRegisters(projectId);
+    const label = (id: string) => registers.records.find((record) => record.id === id)!.label;
+    const lines = resolveProposals([swivel], registers, () => randomUUID());
+    expect(lines).toHaveLength(2);
+    // Not placed: a record with no category has no question to match.
+    expect(lines.every((proposal) => proposal.recordId === null)).toBe(true);
+    expect(lines.map((proposal) => proposal.uncategorised?.recordId).sort()).toEqual([twinA, twinB].sort());
+    for (const proposal of lines) {
+      const sentence = `${label(proposal.uncategorised!.recordId)} has no category — give it one on the record, then Re-match`;
+      expect(describeChange(proposal).label).toBe(sentence);
+      expect(proposalBlockers(proposal, lines)).toEqual([{ code: "no_category", message: `${sentence}.` }]);
+    }
+  }, SLOW);
+
+  it("a run staged before the field reads as before, and gains it at a (free) re-match", async () => {
+    const registers = await loadExtractionRegisters(projectId);
+    // As staged before the field existed: the same rows without it.
+    const before = resolveProposals([swivel], registers, () => randomUUID()).map((proposal) => {
+      const old = { ...proposal };
+      delete old.uncategorised;
+      return old;
+    });
+    expect(describeChange(before[0]!).label).toBe("Item not found");
+    const runId = (
+      await client.query(
+        `insert into intake_runs (project_id, source_kind, document_kind, status, parsed, created_by, updated_by)
+         values ($1, 'spec_document', 'email', 'parsed', $2::jsonb, 'qa', 'qa') returning id`,
+        [projectId, JSON.stringify({ schemaVersion: 1, lines: before, documentNotes: null, filename: "__QA swivel.eml" })],
+      )
+    ).rows[0].id;
+    const { POST } = await import("@/app/api/imports/[id]/rematch/route");
+    const res = await POST(
+      new Request("http://localhost/test", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }),
+      params(runId),
+    );
+    expect(res.status).toBe(200);
+    const after = ((await client.query(`select parsed from intake_runs where id = $1`, [runId])).rows[0].parsed as StagedSpecDocument).lines;
+    // The same rows, ids kept, each now naming its own item.
+    expect(after.map((proposal) => proposal.id).sort()).toEqual(before.map((proposal) => proposal.id).sort());
+    for (const proposal of after) {
+      expect(proposal.uncategorised?.recordId).toBe(proposal.recordCandidates[0]?.id);
+    }
+    expect(after.map((proposal) => proposal.uncategorised?.recordId).sort()).toEqual([twinA, twinB].sort());
+  }, SLOW);
+});

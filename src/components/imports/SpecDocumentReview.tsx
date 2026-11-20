@@ -39,6 +39,7 @@ import {
   heldReading,
   isConfirmable,
   linesToChooseFrom,
+  noCategorySentence,
   proposalBlockers,
   type Proposal,
   type RecordEntry,
@@ -323,7 +324,7 @@ export default function SpecDocumentReview({
     row.runs.some((member) => {
       if (member.recordId) return false;
       const proposal = proposals.find((entry) => entry.id === member.proposalId);
-      return !(proposal && linesToChooseFrom(proposal));
+      return !(proposal && (linesToChooseFrom(proposal) || noCategorySentence(proposal)));
     }),
   );
   // The record is STILL the unit of commit. This is the set of whole cards a
@@ -1244,6 +1245,14 @@ function SpecRowView({
   const members = row.runs
     .map((member) => all.find((proposal) => proposal.id === member.proposalId))
     .filter((proposal): proposal is Proposal => Boolean(proposal));
+  // Unplaced members whose item WAS found and has no category, one per item.
+  const noCategory = [
+    ...new Map(
+      members
+        .filter((proposal) => !proposal.recordId && proposal.uncategorised)
+        .map((proposal) => [proposal.uncategorised!.recordId, proposal.uncategorised!]),
+    ).values(),
+  ];
 
   // RED WHERE THE DOCUMENT AND THE BILL DISAGREE, whatever else the row is.
   // Amber still marks a row that cannot commit; a disagreement commits by
@@ -1338,7 +1347,18 @@ function SpecRowView({
           the top of the page, which is where a 400 used to land. */}
       {blocked && !isOpen && (
         <p className="px-4 pb-2 text-xs text-amber-900">
-          {[...new Set(row.blockers.map((blocker) => blocker.message))].join(" ")}
+          {[...new Set(row.blockers.filter((blocker) => blocker.code !== "no_category").map((blocker) => blocker.message))].join(" ")}
+          {/* THE ITEM WAS FOUND AND HAS NO CATEGORY: named, with a link to the
+              record where the category is set, then Re-match (free). One per
+              item — each twin says it for itself. */}
+          {noCategory.map((item) => (
+            <span key={item.recordId} className="block">
+              <Link href={`/dashboard/records/${item.recordId}`} prefetch={false} className="font-medium underline">
+                {item.label}
+              </Link>{" "}
+              has no category — give it one on the record, then Re-match.
+            </span>
+          ))}
         </p>
       )}
 

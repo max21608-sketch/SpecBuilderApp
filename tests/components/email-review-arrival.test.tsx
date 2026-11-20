@@ -59,7 +59,7 @@ const message = (over: Partial<EmailMessage>): EmailMessage => ({
 let n = 0;
 const ids = () => `00000000-0000-4000-8000-${String((n += 1)).padStart(12, "0")}`;
 
-function mount(msg: EmailMessage, ref = "ZZ-ST-01") {
+function mount(msg: EmailMessage, ref = "ZZ-ST-01", said: { attributeRaw: string; valueRaw: string } = { attributeRaw: "Seat height", valueRaw: "760mm" }) {
   const registers: Registers = { records: [stool], requirements: [], answers: [], attributes: [], specFields: [], documentKind: "email" };
   const data: SpecImport = {
     id: "run-email",
@@ -80,7 +80,7 @@ function mount(msg: EmailMessage, ref = "ZZ-ST-01") {
     parsed: {
       schemaVersion: 1,
       lines: resolveProposals(
-        [{ refRaw: ref, attributeRaw: "Seat height", valueRaw: "760mm", page: null, sourceSheet: null, sourceRow: null, confidence: "high", note: null }],
+        [{ refRaw: ref, ...said, page: null, sourceSheet: null, sourceRow: null, confidence: "high", note: null }],
         registers,
         ids,
       ),
@@ -125,5 +125,24 @@ describe("how an email came to be on the project", () => {
     mount(message({ origin: "upload", assignment_kind: "manual", assigned_by: "someone@example.test" }), "ZZ-NOT-ON-BILL");
     expect(screen.getByText(/each landing on 1 phase\./)).toBeTruthy();
     expect(screen.queryByText(/1 phases/)).toBeNull();
+  });
+});
+
+// THE ITEM WAS FOUND AND HAS NO CATEGORY (follow-up, 2026-11-20): T20120's
+// "no swivel" read "Not placed · Item not found" about a lounge chair the code
+// had found. The row names the item, links to it, and says the next step.
+describe("a statement about an item with no category", () => {
+  it("says which item, links to it, and does not count it as not found", () => {
+    mount(message({ origin: "upload", assignment_kind: "manual", assigned_by: "someone@example.test" }), "ZZ-ST-01", {
+      attributeRaw: "Swivel",
+      valueRaw: "no swivel",
+    });
+    expect(screen.getByText("ZZ001-012 has no category — give it one on the record, then Re-match")).toBeTruthy();
+    const link = screen.getByRole("link", { name: "ZZ001-012" });
+    expect(link.getAttribute("href")).toBe("/dashboard/records/rec-st");
+    expect(link.parentElement?.textContent).toContain("has no category — give it one on the record, then Re-match.");
+    expect(screen.queryByText("Item not found")).toBeNull();
+    expect(screen.queryByText(/did not find an item/)).toBeNull();
+    expect(screen.queryByText(/Choose which record and question/)).toBeNull();
   });
 });

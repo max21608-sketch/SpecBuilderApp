@@ -28,7 +28,7 @@
 // ============================================================================
 import type { AnswerState } from "@/lib/spec-vocab";
 import { fieldDisplayName } from "@/lib/spec-field-label";
-import { heldReading, linesToChooseFrom, type HeldTarget, type Proposal } from "@/lib/spec-document";
+import { heldReading, linesToChooseFrom, noCategorySentence, type HeldTarget, type Proposal } from "@/lib/spec-document";
 import { composeDimensionCell } from "@/lib/dimensions";
 
 /**
@@ -109,10 +109,16 @@ function overTheBill(proposal: Proposal, what: string): ChangeDescription | null
 /**
  * NO ITEM YET. "Item not found" where the code found none; where it found
  * several lines of one phase and no twin link settles which, it says so
- * (prod-ready E1, 2026-11-20) — the item was found twice, not lost.
+ * (prod-ready E1, 2026-11-20) — the item was found twice, not lost; and where
+ * it found the item and the item has no category, it says that.
  */
 function unplaced(proposal: Proposal): ChangeDescription {
-  return { kind: "unplaced", label: linesToChooseFrom(proposal) ?? "Item not found", was: null, notable: true };
+  return {
+    kind: "unplaced",
+    label: linesToChooseFrom(proposal) ?? noCategorySentence(proposal) ?? "Item not found",
+    was: null,
+    notable: true,
+  };
 }
 
 export function describeChange(proposal: Proposal): ChangeDescription {
