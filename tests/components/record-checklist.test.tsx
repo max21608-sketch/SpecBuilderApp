@@ -162,6 +162,20 @@ describe("the record checklist", () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ requirement_id: "q2" }), "", "tbc");
   });
 
+  // U4, 2026-11-20: the checklist's answer box is the fill-in screen's, and
+  // Enter did nothing in either. It saves now, once.
+  it("saves a typed answer on Enter, once, as the blur would", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderChecklist({ readiness: { ...READINESS, toQuote: 0 } });
+    const boxes = screen.getAllByPlaceholderText("Value");
+    const box = boxes[0]!;
+    await user.type(box, "Sprung seat, foam wrap{Enter}");
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ answer_id: expect.any(String) }), "Sprung seat, foam wrap", "confirmed");
+    await user.tab();
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
   it("says in words that an uncategorised record has no questions rather than none outstanding", () => {
     renderChecklist({ answers: [] });
     expect(screen.getByText(/No checklist yet/)).toBeInTheDocument();

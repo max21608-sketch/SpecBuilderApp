@@ -321,7 +321,8 @@ code with other words; decide which is right.
 
 ### 5.8 Fill in what we know, then chase
 Project → **"Fill in ourselves"**. Internal; nothing is sent. Open an item (the
-arrow at the left of its row) and type the answer, or press "TBC" if it
+arrow at the left of its row) and type the answer, then press Enter or click
+away — either saves it — or press "TBC" if it
 has been asked and is not decided yet. "By question"
 answers one question across many items.
 
