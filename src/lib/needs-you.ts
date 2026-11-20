@@ -49,6 +49,8 @@ export const replacePanelId = (observationId: string) => `replace-${observationI
 export const uncertainNoticeId = (itemId: string, index: number) => `uncertain-${itemId}-${index}`;
 export const runTargetsId = (itemId: string) => `runs-${itemId}`;
 export const sheetColumnsId = (sheetIndex: number) => `sheet-${sheetIndex}-columns`;
+/** The sheet's "This sheet is" choice — a new phase or a revision of one (RV0). */
+export const sheetPhaseId = (sheetIndex: number) => `sheet-${sheetIndex}-phase`;
 export const billLineId = (sheetIndex: number, lineNo: number) => `bill-line-${sheetIndex}-${lineNo}`;
 
 /** Up to the first full stop, for a blocker no rule below has shorter words for. */
@@ -215,6 +217,8 @@ export type BillSheetState = {
   doubt?: string | null;
   /** Finish lines with no item, from `rowKindProblems`. */
   problems: readonly { lineNo: number; problem: string }[];
+  /** It looks like an active phase and nobody has said new or revision (`phaseUndecided`, RV0). */
+  phaseUndecided?: boolean;
 };
 
 /**
@@ -259,6 +263,17 @@ export function billNeedsYou(input: {
         words: `Check the columns${on(sheet)}, then press “The columns are right”`,
         target: sheetColumnsId(sheet.index),
         why: sheet.doubt,
+        sheetIndex: sheet.index,
+      });
+    }
+  }
+  for (const sheet of input.sheets) {
+    if (sheet.phaseUndecided) {
+      out.push({
+        key: `phase-${sheet.index}`,
+        words: `Say whether ${input.single ? "this tab" : `“${sheet.tab}”`} is a new phase or a revision of one`,
+        target: sheetPhaseId(sheet.index),
+        why: "This tab is named like a phase this project already has, or most of its codes are on one. As a new phase, every item on it would be added to the project again; as a revision, it updates that phase and keeps its drawings and specs.",
         sheetIndex: sheet.index,
       });
     }

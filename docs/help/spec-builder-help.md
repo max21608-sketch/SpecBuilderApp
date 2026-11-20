@@ -265,8 +265,13 @@ Open the bill from Documents ("Review"). Each sheet tab becomes a phase.
 If Confirm is greyed out, the reason is written beside it (section 6.4).
 
 **A revised bill** (Rev B of a bill already confirmed): upload it the same way.
-The review shows each line "Against the phase" and suggests which existing
-record it is. Check the pairings ("Pair with…", "Make it a new item instead"),
+If a tab is named like a phase the project already has, or most of its codes
+are on one, the review says **"This tab looks like a phase this project
+already has."** and offers **"a revision of “<phase>”?"**: press it to revise
+that phase, or choose "a new phase" in "This sheet is" if it really is a new
+one. Confirm waits until you have said which — as a new phase, every item on
+it would be added to the project again. The review then shows each line
+"Against the phase" and suggests which existing record it is. Check the pairings ("Pair with…", "Make it a new item instead"),
 then confirm. Paired items keep their drawings, specs, picture and answers;
 only the bill's own columns are written over.
 
@@ -479,6 +484,7 @@ confirmed meanwhile. A failed attempt may still have been charged; Max can see.
 | "This bill is waiting on “The columns are right”." | Open the Columns panel, check the headings are mapped properly, press "The columns are right" |
 | "N finish lines on … have no item — say which item each belongs to." | Find those finish lines and choose the item each belongs to |
 | "The model is still reading the columns." / "Wait for the model to transcribe the PDF." | Wait, reload |
+| "Say whether the “…” tab is a new phase or a revision of one." | The tab looks like a phase the project already has. Press "a revision of “…”?" under the tab's name, or choose "a new phase" in "This sheet is" (5.4, "A revised bill") |
 | "Every line is dropped, so there is nothing to confirm." | Tick "Include" on the lines that should become records |
 | After pressing: "This bill changed since this screen loaded. Reload and check it before confirming." | Somebody else edited it, or it is open in two tabs. Reload, check, confirm |
 | "This bill has already been confirmed." | It is done. Go to the project's phase tab |

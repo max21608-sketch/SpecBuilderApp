@@ -104,7 +104,11 @@ describeIfDb("BOQ confirm concurrency", () => {
     };
   }
 
-  async function stageImport(prefix: string, count: number, sheets?: ReturnType<typeof sheet>[]): Promise<string> {
+  async function stageImport(
+    prefix: string,
+    count: number,
+    sheets?: (ReturnType<typeof sheet> & { newPhaseChosen?: boolean })[],
+  ): Promise<string> {
     const run = await client.query(
       `insert into intake_runs (project_id, source_kind, status, parsed, created_by, updated_by)
        values ($1, 'boq_xlsx', 'parsed', $2::jsonb, 'qa', 'qa') returning id`,
@@ -356,9 +360,11 @@ describeIfDb("BOQ confirm concurrency", () => {
 
   it("creates ONE RUN PER SHEET, and files each sheet's records under its own", async () => {
     // The bug 0007 exists for: a three-tab bill imported as one tab, silently.
+    // "MUR" is a phase the rename test above already made, so the reviewer
+    // says these are new phases (RV0, 2026-11-20).
     const runId = await stageImport("__QAG", 0, [
-      sheet("__QAG", 2, "MUR"),
-      sheet("__QAH", 3, "MAIN RUN"),
+      { ...sheet("__QAG", 2, "MUR"), newPhaseChosen: true },
+      { ...sheet("__QAH", 3, "MAIN RUN"), newPhaseChosen: true },
       { ...sheet("__QAI", 1, "Template"), ignored: true, ignoredReason: "No rows under the header." },
     ]);
     expect((await confirm(runId)).status).toBe(200);

@@ -669,6 +669,8 @@ export function boqConfirmBlocker(input: {
   unmapped: readonly string[];
   /** Live sheets whose columns a model read and nobody has agreed to. */
   unchecked: readonly string[];
+  /** Live sheets that look like an active phase and nobody has said new or revision (RV0). */
+  undecidedPhases?: readonly string[];
   /** Finish lines with no item, by the tab they are on. */
   kindProblems: readonly { tab: string; count: number }[];
   /** Every line on every live sheet is dropped. */
@@ -687,6 +689,11 @@ export function boqConfirmBlocker(input: {
     const subject = where(input.unchecked);
     const verb = input.single || new Set(input.unchecked).size === 1 ? "is" : "are";
     reasons.push(`${subject.charAt(0).toUpperCase()}${subject.slice(1)} ${verb} waiting on “The columns are right”.`);
+  }
+  const undecided = input.undecidedPhases ?? [];
+  if (undecided.length > 0) {
+    const one = input.single || new Set(undecided).size === 1;
+    reasons.push(`Say whether ${where(undecided)} ${one ? "is" : "are"} a new phase or a revision of one.`);
   }
   const problems = input.kindProblems.reduce((total, entry) => total + entry.count, 0);
   if (problems > 0) {

@@ -9,12 +9,14 @@ import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Note from "@/components/ui/Note";
 import Tip from "@/components/ui/Tip";
+import SuggestButton from "@/components/ui/SuggestButton";
 // Pure and type-only inside: the parser's own wording for what it did with a
 // sheet, so the screen cannot describe the parse differently from the parser.
 import { describeHeader } from "@/lib/boq-import";
 import { NO_CODES_REVIEW_SENTENCE, type BillSheetNotice } from "@/lib/bill-sheet-notices";
 import { BOQ_ROLE_LABELS, BOQ_MAPPING_SOURCE_LABELS, columnLetter, type BoqReadRole } from "@/lib/boq-roles";
 import type { ProjectRun, Sheet } from "@/components/imports/use-boq-import";
+import { phaseSuggestionEvidence, phaseUndecided, type PhaseSuggestion } from "@/lib/phase-revision-suggest";
 
 /** One read-only fact about the sheet, in the run card's four-column grid. */
 function Field({ label, tip, children }: { label: string; tip?: string; children: React.ReactNode }) {
@@ -33,6 +35,8 @@ export default function SheetHeader({
   sheet,
   status,
   runs,
+  suggestions = [],
+  anchorId,
   busy,
   panelOpen,
   notice,
@@ -44,6 +48,10 @@ export default function SheetHeader({
   status: string;
   /** The project's live phases, any of which this sheet may revise. */
   runs: ProjectRun[];
+  /** The active phases this sheet looks like, best first (RV0). Empty where none. */
+  suggestions?: PhaseSuggestion[];
+  /** Where "Before you can confirm" points for the phase choice. */
+  anchorId?: string;
   busy: boolean;
   /** Whether the sheet's Columns panel is open, so its button is not offered twice. */
   panelOpen: boolean;
@@ -164,26 +172,95 @@ export default function SheetHeader({
           replaced a run would rewrite quantities on records somebody
           is already working from; one that silently made a new run
           leaves the work stranded on the old copy. Both are
-          consequential, so a person says which. */}
+          consequential, so a person says which.
+
+          AND "A NEW PHASE" IS NOT A DEFAULT FOR A TAB THAT LOOKS LIKE A
+          PHASE THE PROJECT HAS (RV0, 2026-11-20): a revised “Guest Rooms”
+          read as a new phase and one press of Confirm put every item on
+          the project twice. Such a tab shows no choice until a person
+          makes one, offers the phase it looks like as a suggestion with
+          its evidence, and the confirm waits. */}
       {!sheet.ignored && runs.length > 0 && status === "parsed" && (
-        <label className="mt-3.5 block text-sm text-neutral-600">
-          This sheet is
-          <select
-            value={sheet.replacesRunId ?? ""}
-            disabled={busy}
-            onChange={(event) => void onSetSheet({ replacesRunId: event.target.value || null })}
-            className="ml-2 rounded border border-neutral-300 px-2 py-1 text-sm disabled:opacity-50"
-          >
-            <option value="">a new phase</option>
-            {runs.map((projectRun) => (
-              <option key={projectRun.id} value={projectRun.id}>
-                a revision of “{projectRun.name}” ({projectRun.record_count} items
-                {projectRun.boq_revision ? `, ${projectRun.boq_revision}` : ""})
-              </option>
-            ))}
-          </select>
-        </label>
+        <PhaseChoice
+          sheet={sheet}
+          runs={runs}
+          suggestions={suggestions}
+          anchorId={anchorId}
+          busy={busy}
+          onSetSheet={onSetSheet}
+        />
       )}
     </Card>
+  );
+}
+
+/** Which phase this tab is: new, or a revision of one — and, where it looks like one, the suggestion. */
+function PhaseChoice({
+  sheet,
+  runs,
+  suggestions,
+  anchorId,
+  busy,
+  onSetSheet,
+}: {
+  sheet: Sheet;
+  runs: ProjectRun[];
+  suggestions: PhaseSuggestion[];
+  anchorId?: string;
+  busy: boolean;
+  onSetSheet: (patch: { replacesRunId?: string | null }) => Promise<void>;
+}) {
+  const undecided = phaseUndecided(sheet, suggestions);
+  // The select shows what is STORED, never the suggestion: "" is "nobody has
+  // said", and it is only offered where the tab looks like a phase. A tab that
+  // looks like none shows "a new phase", which is what it is by default.
+  const value = sheet.replacesRunId ?? (undecided ? "" : "new");
+  const select = (
+    <label className="block text-sm text-neutral-600">
+      This sheet is
+      <select
+        value={value}
+        disabled={busy}
+        onChange={(event) => {
+          const chosen = event.target.value;
+          if (chosen === "") return;
+          void onSetSheet({ replacesRunId: chosen === "new" ? null : chosen });
+        }}
+        className="ml-2 max-w-full rounded border border-neutral-300 px-2 py-1 text-sm disabled:opacity-50"
+      >
+        {undecided && (
+          <option value="" disabled>
+            — say which —
+          </option>
+        )}
+        <option value="new">a new phase</option>
+        {runs.map((projectRun) => (
+          <option key={projectRun.id} value={projectRun.id}>
+            a revision of “{projectRun.name}” ({projectRun.record_count} items
+            {projectRun.boq_revision ? `, ${projectRun.boq_revision}` : ""})
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+  if (!undecided) return <div id={anchorId} className="mt-3.5">{select}</div>;
+  return (
+    <div id={anchorId}>
+      <Note tone="warn" title="This tab looks like a phase this project already has.">
+        Say which it is before confirming — as a new phase, every item on it would be added again.
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+          {select}
+          {suggestions.map((suggestion) => (
+            <SuggestButton
+              key={suggestion.runId}
+              value={<>a revision of “{suggestion.runName}”</>}
+              evidence={phaseSuggestionEvidence(suggestion)}
+              disabled={busy}
+              onAccept={() => void onSetSheet({ replacesRunId: suggestion.runId })}
+            />
+          ))}
+        </div>
+      </Note>
+    </div>
   );
 }
