@@ -1,7 +1,13 @@
 // Parsing an email. Synthetic fixtures only — real client mail never enters
 // this repo, the same rule as every other document.
 import { describe, expect, it } from "vitest";
-import { buildEmailModelText, parseEnvelope, readAttachment, stripReplyPrefixes } from "@/lib/email-envelope";
+import {
+  buildEmailModelText,
+  parseEnvelope,
+  readAttachment,
+  sameListedAttachment,
+  stripReplyPrefixes,
+} from "@/lib/email-envelope";
 
 function eml(headers: string, body: string): Buffer {
   return Buffer.from(`${headers.trim()}\r\n\r\n${body}`, "utf8");
@@ -400,5 +406,34 @@ Content-Type: multipart/mixed; boundary="H"`,
       Buffer.from([0x43, 0x61, 0x66, 0xe9, 0x20, 0x96, 0x20, 0x31, 0x30, 0x0d, 0x0a]),
     ]);
     expect((await parseEnvelope(message)).textBody).toContain("Café – 10");
+  });
+});
+
+// ============================================================================
+// THE FILE SENT IS THE FILE CLICKED (2026-11-20). The download route compares
+// what a fresh parse holds at an index with what registration LISTED there.
+// The route's own refusal is proven in tests/db/email-attachment-route.test.ts.
+// ============================================================================
+describe("sameListedAttachment", () => {
+  const fresh = { filename: "X-100 sizes.pdf", contentType: "application/pdf", size: 28, isRfc822: false };
+
+  it("agrees with the entry registration wrote for the same file", () => {
+    expect(sameListedAttachment({ ...fresh }, fresh, { sizeComparable: true })).toBe(true);
+  });
+
+  it("refuses a different name, type or kind at the same index", () => {
+    expect(sameListedAttachment({ ...fresh, filename: "forwarded.eml" }, fresh, { sizeComparable: true })).toBe(false);
+    expect(sameListedAttachment({ ...fresh, filename: null }, fresh, { sizeComparable: true })).toBe(false);
+    expect(sameListedAttachment({ ...fresh, contentType: "message/rfc822" }, fresh, { sizeComparable: true })).toBe(false);
+    expect(sameListedAttachment({ ...fresh, isRfc822: true }, fresh, { sizeComparable: true })).toBe(false);
+    expect(sameListedAttachment(undefined, fresh, { sizeComparable: true })).toBe(false);
+  });
+
+  it("compares the size only where this parser wrote the list", () => {
+    // An upload's list is parseEnvelope's own, so a different count is a
+    // different reading. A Graph arrival lists Graph's count, which is not
+    // known to be the decoded bytes, so it cannot be held to it.
+    expect(sameListedAttachment({ ...fresh, size: 0 }, fresh, { sizeComparable: true })).toBe(false);
+    expect(sameListedAttachment({ ...fresh, size: 4096 }, fresh, { sizeComparable: false })).toBe(true);
   });
 });

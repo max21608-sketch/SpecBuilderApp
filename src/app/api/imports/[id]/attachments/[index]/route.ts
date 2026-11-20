@@ -36,7 +36,7 @@
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
-import { readAttachment } from "@/lib/email-envelope";
+import { readAttachment, sameListedAttachment } from "@/lib/email-envelope";
 import { contentDisposition } from "@/lib/content-disposition";
 import { requireUuid } from "@/lib/route-guards";
 
@@ -60,10 +60,15 @@ export async function GET(
     return json({ ok: false, error: "That is not an attachment on this message." }, 400);
   }
 
+  // The message row is the LIST the screen rendered (`attachments_meta`, written
+  // at registration). `intake_run_id` is unique on email_messages, so at most
+  // one row joins.
   const rows = await sql`
-    select r.project_id, r.document_kind, a.storage_path
+    select r.project_id, r.document_kind, a.storage_path,
+           em.id as message_id, em.origin as message_origin, em.attachments_meta
     from intake_runs r
     join attachments a on a.id = r.attachment_id
+    left join email_messages em on em.intake_run_id = r.id
     where r.id = ${id}
   `;
   const run = rows[0];
@@ -73,6 +78,25 @@ export async function GET(
   // a second meaning for the same URL.
   if (String(run.document_kind) !== "email") {
     return json({ ok: false, error: "That document is not an email." }, 404);
+  }
+
+  // NOTHING IS SENT WITHOUT THE LIST IT WAS CLICKED FROM. The screen offers a
+  // download only off the message row joined above, so a run with none (the
+  // email was taken off this project, which clears the link) was not reached
+  // by a click, and there is nothing to check the index against.
+  if (!run.message_id) {
+    return json(
+      {
+        ok: false,
+        code: "email_not_on_document",
+        error: "This email is no longer on this document, so its attachments are not served here. Find it in the inbox.",
+      },
+      404,
+    );
+  }
+  const listed = Array.isArray(run.attachments_meta) ? run.attachments_meta[position] : undefined;
+  if (!listed) {
+    return json({ ok: false, error: "That message does not carry that attachment." }, 404);
   }
 
   let bytes: Buffer;
@@ -87,14 +111,32 @@ export async function GET(
     return json({ ok: false, error: "That message could not be read." }, 502);
   }
 
-  // `readAttachment` takes the index against the SAME parse that produced the
-  // list the screen renders, so the route cannot serve file three while the
-  // screen was naming file four.
+  // `readAttachment` takes the index against ONE parse, so its list and its
+  // bytes agree; whether that list is still the one the screen rendered is the
+  // comparison below.
   const found = await readAttachment(bytes, position);
   if (!found) {
     return json({ ok: false, error: "That message does not carry that attachment." }, 404);
   }
   const { meta, bytes: body } = found;
+
+  // THE FILE SENT IS THE FILE CLICKED, or nothing is sent. The bytes are
+  // re-parsed now and the list was parsed at registration; a parser that reads
+  // the message differently (postal-mime 4, 2026-11-20) moves the index, and
+  // the browser would save a different document under the name the person
+  // clicked. `sameListedAttachment` says what is compared and why the size is
+  // compared only on an upload.
+  if (!sameListedAttachment(listed, meta, { sizeComparable: String(run.message_origin) === "upload" })) {
+    return json(
+      {
+        ok: false,
+        code: "attachment_changed",
+        error:
+          'This attachment reads differently now from when the email arrived, so it is not sent in case it is a different file. Use "open the .eml" and save it from your mail program.',
+      },
+      409,
+    );
+  }
 
   // A filename a stranger chose, in any script. `contentDisposition` keeps it
   // inside the header and keeps `Headers` from throwing on a character above
