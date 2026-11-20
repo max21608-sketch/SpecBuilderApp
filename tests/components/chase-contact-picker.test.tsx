@@ -160,6 +160,22 @@ describe("the contact strip", () => {
   });
 });
 
+// U1, 2026-11-20: the Contacts card on this screen offered "Draft a chase" as a
+// link to this same page, which changed nothing. It selects the contact now.
+describe("Draft a chase in this screen's Contacts card", () => {
+  it("selects that contact's tab in place", async () => {
+    render(<DraftsPage />);
+    const colleague = await screen.findByRole("tab", { name: /Ana Whitcombe/ });
+    expect(colleague.getAttribute("aria-selected")).not.toBe("true");
+    const buttons = screen.getAllByRole("button", { name: "Draft a chase" });
+    expect(buttons).toHaveLength(2);
+    await userEvent.click(buttons[1]!);
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: /Ana Whitcombe/ }).getAttribute("aria-selected")).toBe("true"),
+    );
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Found on pilot, 2026-10-12, on a project with NO contacts: "Everyone 0"
 // beside "Nobody assigned 3128", and "Furniture lines 67 · 67 with nothing

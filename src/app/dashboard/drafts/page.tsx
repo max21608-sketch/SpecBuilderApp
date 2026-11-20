@@ -1017,6 +1017,7 @@ function DraftsView() {
             adding={addingContactOpen}
             onAddingChange={setAddingContact}
             onChanged={() => void load()}
+            onDraftChase={chooseContact}
           />
         </Card>
 
