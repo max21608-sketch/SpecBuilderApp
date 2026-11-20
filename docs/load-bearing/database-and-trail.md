@@ -124,7 +124,10 @@ reported as "someone else was changing this") against any records-first
 writer, and left the occupancy check unguarded, so two moves into one slot
 both passed and the second died on the slot index as a 500. Each now calls
 `record-lock.ts` before it reads its row, and batch callers
-(`applyProjectWide`, the apply route) lock every record in id order first.
+(`applyProjectWide`, the apply route, and since 2026-11-20 the designer batch
+`designer-batch.ts`) lock every record in id order first — the designer batch
+took them a line at a time in TICK order until the pre-push review (E1), which
+deadlocked against a phase retire.
 The lock is `for update`, which fires no trigger, so `spec_records.version`
 never moves. The test forces each interleaving with `pg_blocking_pids`, never
 a sleep. `attribute-standard.ts` (`setAttributeStandard`) is the one writer

@@ -19,7 +19,12 @@ wrong deployment.
 
 Without signing in, `/api/health` answers `{"ok":true,"commit":"<sha>"}` when
 the deployment can reach its database and `{"ok":false}` (503) when it cannot,
-and nothing else (2026-11-20). An uncaught server error leaves one log line
+and nothing else (2026-11-20). A deployment whose environment is wrong answers
+503 with `problem`: `environment_misconfigured` (APP_ENV and
+DATABASE_ENVIRONMENT disagree) or `session_secret_misconfigured` (AUTH_SECRET
+missing, or under 32 characters on production) — the code only, never a
+value; every other page answers 503 too until it is fixed in the Vercel
+project's variables and redeployed. An uncaught server error leaves one log line
 starting `[request-error]`, with the route, the method and a reference — never
 the error's text, which the route's own `reportFailure` line carries where
 there is one.
