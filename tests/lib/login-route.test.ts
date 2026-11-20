@@ -198,11 +198,12 @@ describe("POST /api/auth/login from another site", () => {
   it("refuses a sibling on the same site, Sec-Fetch-Site: cross-site, and an opaque origin", async () => {
     const email = `sibling${address}@example.test`;
     state.user = { id: "u", email, name: "Attacker", role: "editor" };
-    for (const headers of [
+    const forged: Record<string, string>[] = [
       { origin: "https://other-app.example.test" },
       { "sec-fetch-site": "cross-site" },
       { origin: "null" },
-    ]) {
+    ];
+    for (const headers of forged) {
       const res = await attempt({ ...headers, "content-type": "application/json" }, email);
       expect(res.status, JSON.stringify(headers)).toBe(403);
       expect(((await res.json()) as { code: string }).code).toBe("cross_site_refused");
