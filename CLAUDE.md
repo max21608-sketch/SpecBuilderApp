@@ -67,6 +67,7 @@ one agent.
 | `npm run palette:gap` | read only: every callout that lands on a palette-backed BWS field, how many match an option exactly, and — the point — what a SUBSTRING step would have written instead. Run it before widening the match past the exact step. On 2026-09-22 it read 98 callouts over 47 staged runs, **0 matching and 0 near misses**, which is the evidence §6.2 asked for |
 | `npm run bill:descriptions -- <bill.xlsx> [--layouts f.json] [--kinds golden.json] [--out file]` | read only: per item line, the name, the composed dimension cell, each finish with its field and each note — exactly what the confirm will write from the description cells. Output goes OUTSIDE the repo. Run it before and after changing the reader. On the real Aman bill, 2026-09-30: 67 of 67 read, 61 with dimensions (164 slots), 70 finishes (64 in a BWS field) |
 | `npm run pdf:schedule -- <out.xlsx> <schedule.pdf> [...]` | read only: a schedule that arrived only as a PDF PRINTED FROM EXCEL (the Ronnie Scott's procurement schedules, 2026-10-15) put back into a workbook, one sheet per file, by the PDF's own text layer — columns by the header's label positions, rows anchored on ORDER QTY, no model. Pictures are not carried. Output OUTSIDE the repo; read the rows it prints against the PDF before uploading. Ask the specifier for the native workbook first |
+| `npm run eval:survey -- --golden <key.json> --files <dir> --label <name> [--only <substr>] [--rescore <label>]` | CHARGED, cents (Haiku 5.5): the open-intake pack SURVEY over a folder, scored against an answer key — parts found, held, wrong reader, missed; codes; item links. Every response is saved OUTSIDE the repo (`~/dev/localstack/survey-eval/<label>/`), so `--rescore` re-scores with today's code for nothing. Keys live in `~/dev/localstack/survey-golden/`; only `verified: true` ones are the score. Run a survey prompt change TWICE over every key before it lands: a pack moves by about one part between runs, and one paragraph of 'helpful' knowledge cost the invented bill workbook all 20 of its item codes (2026-11-20) |
 | `npm run db:backfill-ref-norm` | one-off (5.4): re-folds `spec_record_refs.ref_value_norm` with the one `normaliseRef`; dry run unless `--apply`; reports a pair that now collides and never merges it; `--yes-pilot` / `--yes-production`; `:local` |
 | `npx tsx --env-file=<env> tools/orphan-blobs.ts` | read only: every stored file under `projects/` and `mailbox/` that no `attachments`, `email_messages` or staged `intake_runs.parsed` row names. Lists, never deletes |
 | `node tools/localstack/ci.mjs` | what the CI `db-tier` job runs after `db/run-migrations.mjs` and `db/run-seed.mjs`: the whole suite with the database tier REQUIRED, on a throwaway Postgres 17, through the stack server and preload. Reads no env file; rehearse it with `env -i` and the four declarations on a fresh `createdb` and a free `LOCAL_STACK_PORT` (its header). A port in use is refused, never taken over |
@@ -515,6 +516,9 @@ moved with it: model 740 s < abort 770 s < `maxDuration` 800 s (Pro's GA
 maximum; the project default was raised to match) < claim 900 s < queue
 visibility 1200 s. Measured on the merged 44-page Panther pack: 358 s and 43,095
 output tokens, so TIME binds first, at about 90 pages.
+**The upload's file check (`CLASSIFY_MODEL`) and the pack survey are `claude-haiku-5-5` since 2026-11-20** (Max): one
+model for every file whatever its length, a forced tool, no thinking; it hedges between two genres the app reads the
+same way, which `fileDocument` settles in code (`weighedAgainst`), never the prompt.
 Capsule CRM (contacts) — read-only, built 2026-09-16, no token set yet. Microsoft Graph read-only mailbox
 ingestion (M5) is planned and disabled. The region pinning is deliberate: this
 app handles NDA-covered client specification material, so keep any new service
@@ -527,6 +531,7 @@ in the UK.
 | Company standards — non-negotiable, not app-specific | `house/conventions.md` |
 | The load-bearing workflows, by area (the traps; read before a change) | `docs/load-bearing/*.md` — the index is in this file's "Load-bearing workflows" |
 | The milestone history since M1, dated | `docs/plans/milestone-diary.md` |
+| Open intake: any mix of documents surveyed into parts, each read by its reader, then joined — and Stage 0's measurement | `docs/plans/open-intake-2026-11-20.md` |
 | Trust boundaries, staged vs canonical, backups | `house/data-safety.md` |
 | The six reporting terms and the release traps | `house/deployment.md` |
 | How to write docs here | `house/writing-docs.md` |
@@ -714,10 +719,18 @@ press). The four checks pass on `prod-ready` at `cef9a40` with the database
 tier required (5,386 tests); CI's db-tier job was rehearsed on a fresh
 database. Production itself does not exist; the decisions that come first are
 Max's (plan §5). Human acceptance is outstanding on every screen it touched.
-Another session's `open-intake-2026-11-20.md` (branch `intake-2026-11-20`,
-built on `prod-ready`) amends the "Explicitly excluded" list below now that
-`prod-ready` has landed on `origin/staging`; from `72a69fe` on, this file
-belongs to that session.
+
+**Open intake (2026-11-20).** Max approved `docs/plans/open-intake-2026-11-20.md`
+whole: a cheap SURVEY maps every file of a pack into PARTS (page ranges,
+sheets), each part goes to the reader that suits it, and a text-only pass joins
+the readings up, a person confirming at every gate. Stage 0 (measure first) is
+built and NOT wired into any route or screen: `src/lib/pack-survey.ts`,
+`npm run eval:survey`, answer keys outside the repo. First measurement, six
+packs, two runs: no part went to the wrong reader; the merged 44-page Panther
+PDF came back as exactly its three documents; Ronnie Scott's procurement
+schedules were held (bill or schedule) every time. The four real keys await
+Max's check. Next: Stages 1–2 (the survey on the upload; reading by part);
+Stage 3 waits for the item-review design.
 
 **Explicitly excluded, so it is not built speculatively:** a BWS *import*
 file carrying job numbers; images and scanned documents other than a bill; M6
