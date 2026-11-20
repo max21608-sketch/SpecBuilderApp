@@ -12,6 +12,29 @@ work, so we need to set out a plan."*
 This is a plan, not a build. Nothing in it is started. The decisions it needs
 are named at the end, with the person who owns each.
 
+**Decided, Max, 2026-11-20, on the plan as a whole:** *"that's exactly what I
+want to do … measure, survey, route and read, piece it together … we can be
+given stuff in whatever format. It could all be mixed into one document. It
+could be in 3, 5, 10 separate documents. Doesn't matter … by teaching it
+limits that I thought would increase its productivity, it's actually made it
+worse. So I think it's just kind of about removing those. So yeah, let's go
+ahead."* Taken as the yes to both items the plan put to him against
+CLAUDE.md's excluded list — reading PART of a file, and sending readings into
+a later model call — because the plan named both and he approved it whole.
+CLAUDE.md's list is amended when `prod-ready` lands: until then CLAUDE.md
+belongs to the production-readiness session (one owner at a time). Stage 0
+starts now; Stages 1–2 wait for `prod-ready`, because they change the same
+upload code it is still changing.
+
+**Which limits go, and which stay.** The limits that made the reading worse
+are limits on what the model may SEE and SAY: one kind per file, a fixed
+label list, a closed answer where an open one was true ("answer unclear
+whenever you are not sure" is what made Haiku 5.5 hold real drawing sets).
+Those are what this plan removes. The limits on what gets WRITTEN without a
+person — code copying numbers out of cells, a confirm before anything is
+canonical — are why the result can be trusted line by line, which a chat's
+answer cannot, and they stay.
+
 ## The step back: is the current approach right?
 
 **The readers are right; the routing around them is the part to change.** It
