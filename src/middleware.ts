@@ -123,6 +123,12 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 //                       the request's own body (src/lib/queue-callback.ts).
 //                       Adding them here would break every background job.
 //   api/cron/*        - same, but authenticated with CRON_SECRET.
+//   api/health        - the health check (production hardening H4,
+//                       2026-11-20): `select 1` and the commit SHA, nothing
+//                       else, so a monitor and a person confirming a
+//                       promotion can ask without a session. EXACTLY this
+//                       path; `src/app/api/health/route.ts` says what it may
+//                       and may not say.
 //   api/graph/notifications
 //                     - Microsoft Graph's change notifications. Graph cannot
 //                       carry a session cookie. EXACTLY this path, not a
@@ -148,6 +154,6 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 // Anything added to this list is a deliberate decision to expose a route.
 export const config = {
   matcher: [
-    "/((?!_next/static/|_next/image$|favicon\\.ico$|login$|api/auth/login$|api/queues/|api/cron/|api/graph/notifications$).*)",
+    "/((?!_next/static/|_next/image$|favicon\\.ico$|login$|api/auth/login$|api/health$|api/queues/|api/cron/|api/graph/notifications$).*)",
   ],
 };

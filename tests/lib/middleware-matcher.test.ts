@@ -32,6 +32,7 @@ const PUBLIC = [
   "/api/cron/sweep-reads",
   "/api/queues/extraction",
   "/api/graph/notifications",
+  "/api/health",
   "/_next/static/chunks/main.js",
   "/_next/image",
   "/favicon.ico",
@@ -56,6 +57,10 @@ const PROTECTED = [
   "/api/auth/login-as",
   "/api/auth/loginas",
   "/favicon.ico.php",
+  // The health check is ONE route (H4, 2026-11-20); its neighbours are not.
+  "/api/healthz",
+  "/api/health-admin",
+  "/api/health/details",
 ];
 
 describe("the middleware matcher", () => {
