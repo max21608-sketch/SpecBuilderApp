@@ -506,6 +506,12 @@ export type BillFinishWrite = {
    * this line itself where it creates one. Null where it links none.
    */
   finishKey: string | null;
+  /**
+   * The words this line gives, as its description, to a finish THIS confirm
+   * creates with none (R10) — the confirm writes them onto that row. Absent
+   * otherwise: a row that existed before the confirm is never described here.
+   */
+  describes?: string;
 };
 
 /** A revision a held bill finish refuses (see the note above). */
@@ -575,6 +581,9 @@ export function planBillFinishWrites(input: PlanInput): BillFinishPlan {
     for (const line of items) {
       for (const { code, words } of input.descriptionCodes(sheetIndex, line.index)) {
         const resolution = resolveFinishCodeInWalk(code, words, library);
+        // A row this confirm created with no words takes the first real ones
+        // a later statement of its code gives (R10, `describeCreatedFinish`).
+        if (resolution.status === "matched") describeCreatedFinish(resolution.finish, words, planned);
         if (resolution.status !== "new") continue;
         plan(pendingFinish(`planned:${sheetIndex}:${line.lineNo}:${resolution.codeNorm}`, resolution.code, "client", words), line.lineNo, false);
       }
@@ -624,17 +633,30 @@ export function planBillFinishWrites(input: PlanInput): BillFinishPlan {
       const writes = onRows.some((entry) => !entry.held);
       let filing: FabricFiling | null = null;
       let finishKey: string | null = null;
+      let describes: string | null = null;
       if (writes) {
+        const statement = finishLineStatement(line.itemDescription).value;
         filing = decideFabricFiling({
           materialCode: fabricMaterialCode(line),
           says,
           // The placeholder test reads the statement, its label read off (R8).
-          words: finishLineStatement(line.itemDescription).value,
+          words: statement,
           parentName: parent ? billItemName(parent) : null,
           library,
           byScheduleCode: filedByScheduleCode(line),
         });
         if (filing.outcome === "matched" || filing.outcome === "same_words") finishKey = filing.finish.id;
+        // THE WORDS DESCRIBE A ROW THIS CONFIRM MADE WITH NONE (R10): a
+        // description cell's `Base: MTL-01` created it first, wordless. Real
+        // words only — never a placeholder, never a schedule-coded line, whose
+        // cloth the schedule describes (see above).
+        if (
+          filing.outcome === "matched" &&
+          !filedByScheduleCode(line) &&
+          !fabricLineIsPlaceholder(statement, parent ? billItemName(parent) : null)
+        ) {
+          describes = describeCreatedFinish(filing.finish, says, planned);
+        }
         else if (filing.outcome === "new") {
           finishKey = `planned:${sheetIndex}:${line.lineNo}`;
           plan(pendingFinish(finishKey, filing.code, "client", filing.describe ? says : null), line.lineNo, false);
@@ -654,6 +676,7 @@ export function planBillFinishWrites(input: PlanInput): BillFinishPlan {
         targets: { rows: targets.rows, sentence: targets.sentence ?? null },
         filing,
         finishKey,
+        ...(describes ? { describes } : {}),
       });
     }
 
@@ -682,6 +705,44 @@ export function planBillFinishWrites(input: PlanInput): BillFinishPlan {
     }
   }
   return { lines, refusals, planned, series };
+}
+
+/**
+ * A ROW THIS CONFIRM CREATES WITH NO WORDS TAKES THE FIRST REAL ONES (R10,
+ * 2026-11-20). A description cell's wordless `Base: MTL-01` on one item
+ * created MTL-01 before the item's own finish line `MTL-01 / Finish: Brushed
+ * brass, lacquered` was walked; the line linked to it and the library row
+ * stayed empty, so the BWS cell shipped "MTL-01" and nothing else. So where a
+ * statement MATCHES a finish this confirm itself creates (`planned`) and that
+ * finish has no description yet, its words become the description — returned,
+ * so the confirm writes them, and set on the planned row so a later line
+ * reads it exactly as the confirm's library will. A finish that existed
+ * before the confirm is NEVER described here: the CONFLICT rule stands, and
+ * an empty row in the library is a person's to describe.
+ */
+function describeCreatedFinish(
+  finish: Finish,
+  words: string | null | undefined,
+  planned: ReadonlyMap<string, Planned>,
+): string | null {
+  const said = (words ?? "").trim();
+  if (!wordsDescribeAFinish(said) || !planned.has(finish.id) || (finish.description ?? "").trim() !== "") return null;
+  finish.description = said;
+  return said;
+}
+
+/**
+ * WORDS THAT MAY DESCRIBE A FINISH A CONFIRM CREATED EMPTY (R10): real words
+ * with no TBC token anywhere in them (`fabricLineState`). "Fabric @ Daybed
+ * Technical Details TBC", printed under an armchair on the real Aman bill,
+ * is not the item's own name and so not a placeholder by
+ * `fabricLineIsPlaceholder` — but it says the fabric is not decided, and
+ * written as the code's description it would make every later real
+ * statement of the code a CONFLICT. The confirm asks the same question.
+ */
+export function wordsDescribeAFinish(words: string | null | undefined): boolean {
+  const said = (words ?? "").trim();
+  return said !== "" && fabricLineState(said) === "confirmed";
 }
 
 /**

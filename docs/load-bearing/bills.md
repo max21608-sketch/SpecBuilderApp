@@ -841,6 +841,29 @@ rule below is a trap rather than a preference.
   value, and words that `fabricLineIsPlaceholder` calls nothing give TBC with
   the words kept. "Fabric @ Armchair" used to be a CONFIRMED COM 1 that shipped
   to BWS as written. Future confirms only: nothing stored was rewritten.
+- **A row THIS confirm creates with no words takes the first real ones the
+  bill gives its code** (2026-11-20, R10, `describeCreatedFinish` in
+  `bill-fabric-filing.ts`, written by `describeCreatedRow` in the confirm).
+  The planner walks each sheet's description cells before its finish lines,
+  so a wordless `Base: MTL-01` on one item created MTL-01 before the sofa's
+  own line `MTL-01 / Finish: Brushed brass, lacquered` was reached; the line
+  matched the empty row and linked, and the library — and so the BWS cell —
+  said "MTL-01" and nothing else. Now a later statement of the code, a finish
+  line or a description cell, whose words are real gives them to that row,
+  once, and the plan says so (`describes`) so the confirm writes it. Three
+  limits, each a trap: ONLY a row this confirm created (an existing row is a
+  person's to describe, empty or not, and the CONFLICT rule stands); never a
+  schedule-coded line (the schedule describes its code); and never words
+  carrying a TBC token (`wordsDescribeAFinish`) — the real Aman bill prints
+  "Fabric @ Daybed Technical Details TBC" under an ARMCHAIR, which is not
+  that item's placeholder, and as a description it would turn every later
+  real statement into a conflict. Measured over every staged bill, with its
+  real library and with an empty one: the Aman copies' MTL-01 now reads
+  "Antique Bronze" and TIM-03 "SMOKED STAINED OAK VENEER" (wordless `Finish:
+  STN-02, MTL-01, TIM-03` lines created them; later `GR-MTL-01 …` statements
+  describe them, every one agreeing, so no link changes); the invented bill's
+  MTL-01, FAB-01 and FAB-02 take their lines' words; Aman's placeholder lines
+  and FAB-12 stay empty; no other real bill changes.
 - **In-house codes are `BW-<short code>-nnn`** (`projects.finish_code_prefix`,
   set on the project's details; `BW-F-nnn` where none is set). Minted under the
   project row lock as before. Changing the short code starts a new series and

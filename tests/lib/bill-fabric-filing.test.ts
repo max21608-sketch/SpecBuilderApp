@@ -16,6 +16,7 @@ import {
   planBillFinishWrites,
   planFinishSwatches,
   swatchDifferNotice,
+  wordsDescribeAFinish,
   type SwatchCandidate,
 } from "@/lib/bill-fabric-filing";
 import type { BillRowImage } from "@/lib/bill-row-image";
@@ -860,5 +861,66 @@ describe("a finish line's own label is read off its value", () => {
     });
     expect(plan.refusals).toEqual([]);
     expect(plan.lines.get("0:1")?.onRows.map((entry) => entry.held)).toEqual([true]);
+  });
+});
+
+// R10 (2026-11-20). A wordless description statement (`Base: ZZ-MTL-01`)
+// created the code before the item's own finish line, with words, was walked;
+// the row stayed empty. A row THIS confirm creates takes the first real words.
+describe("a finish this confirm creates is described by the first real words", () => {
+  type Line = Parameters<typeof planBillFinishWrites>[0]["sheets"][number]["lines"][number];
+  const table: Line = { index: 0, lineNo: 3, code: "ZZ-ST-01", itemDescription: "Side table", ignored: false, rowKind: "item" };
+  const sofa: Line = { index: 1, lineNo: 4, code: "ZZ-SF-01", itemDescription: "Sofa", ignored: false, rowKind: "item" };
+  const line = (index: number, code: string, words: string): Line => ({
+    index,
+    lineNo: index + 3,
+    code,
+    itemDescription: words,
+    ignored: false,
+    rowKind: "finish_for",
+    finishFor: { row: 4, code: "ZZ-SF-01" },
+  });
+  const run = (lines: Line[], codes: Record<number, { code: string; words: string | null }[]>, library: Finish[] = []) =>
+    planBillFinishWrites({
+      sheets: [{ sheetName: "Rooms", ignored: false, lines }],
+      library,
+      prefix: "ZZA",
+      descriptionCodes: (_sheet, index) => codes[index] ?? [],
+      heldFabric: () => [],
+      heldSlots: () => [],
+    });
+  const describedAs = (plan: ReturnType<typeof run>, code: string) =>
+    [...plan.planned.values()].find((entry) => entry.finish.code === code)?.finish.description ?? null;
+
+  it("gives the row a wordless description statement created the finish line's words, once", () => {
+    const plan = run([table, sofa, line(2, "ZZ-MTL-01", "Finish: Example brass, lacquered")], { 0: [{ code: "ZZ-MTL-01", words: null }] });
+    expect(plan.lines.get("0:2")).toMatchObject({ filing: { outcome: "matched" }, describes: "Example brass, lacquered" });
+    expect(describedAs(plan, "ZZ-MTL-01")).toBe("Example brass, lacquered");
+  });
+
+  it("lets a later description statement with words describe it too, and never a placeholder", () => {
+    const words = run([table, sofa], { 0: [{ code: "ZZ-MTL-01", words: null }], 1: [{ code: "ZZ-MTL-01", words: "example bronze" }] });
+    expect(describedAs(words, "ZZ-MTL-01")).toBe("example bronze");
+    const placeholder = run([table, sofa, line(2, "ZZ-FAB-13", "Technical details TBC")], { 0: [{ code: "ZZ-FAB-13", words: null }] });
+    expect(placeholder.lines.get("0:2")?.describes).toBeUndefined();
+    expect(describedAs(placeholder, "ZZ-FAB-13")).toBeNull();
+  });
+
+  it("never describes it with words that say the finish is not decided, though they are not the item's placeholder", () => {
+    // The real Aman shape, invented: a daybed's TBC fabric line copied under an armchair.
+    const copied = { ...line(2, "ZZ-FAB-12", "Fabric @ Daybed Technical Details TBC"), finishFor: { row: 4, code: "ZZ-SF-01" } };
+    const plan = run([table, sofa, copied], { 0: [{ code: "ZZ-FAB-12", words: null }] });
+    expect(plan.lines.get("0:2")?.describes).toBeUndefined();
+    expect(describedAs(plan, "ZZ-FAB-12")).toBeNull();
+    expect(wordsDescribeAFinish("Example brass")).toBe(true);
+    expect(wordsDescribeAFinish("Example brass TBC")).toBe(false);
+  });
+
+  it("never describes a row that existed before the confirm, empty or not", () => {
+    const existing = finish({ id: "fin-9", code: "ZZ-MTL-09", codeNorm: "ZZ-MTL-09", description: null });
+    const plan = run([table, sofa, line(2, "ZZ-MTL-09", "Finish: Example bronze")], {}, [existing]);
+    expect(plan.lines.get("0:2")).toMatchObject({ filing: { outcome: "matched" }, finishKey: "fin-9" });
+    expect(plan.lines.get("0:2")?.describes).toBeUndefined();
+    expect(existing.description).toBeNull();
   });
 });
