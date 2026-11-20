@@ -331,7 +331,12 @@ Project → **"Chase N"**.
 
 1. **Contacts first.** Each record carries a designer code from the bill. Add a
    contact with that same "Designer code" and that person's questions route to
-   them. "Nobody can be asked yet." means no contact has a matching code.
+   them. "Nobody can be asked yet." means no contact has a matching code. Where
+   it adds "N items have no designer", the bill gave them none: on the phase
+   table tick them, press **"Set designer…"**, type the code (the contacts'
+   codes are offered) and press "Set on N items". It sets each item as its
+   Edit would, and its configurations with no designer of their own; any it
+   could not change are listed by number, with why.
 2. Tick what to ask and press **"Draft the email · N questions"**.
 3. **"Open in Outlook (.eml)"** downloads the draft. Open it, check it, and
    send it from your own Outlook. The app sends nothing.

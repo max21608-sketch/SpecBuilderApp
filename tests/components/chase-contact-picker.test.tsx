@@ -195,12 +195,24 @@ describe("a project nobody has been assigned to yet", () => {
         settledLines: 0,
         uncategorisedLines: 1,
         blocked: [
-          { recordId: "r-1", recordLabel: "P17231-001", itemDescription: "Stool", designer: null, questionCount: 40, kind: "nobody_to_ask", reason: "no designer on the record" },
-          { recordId: "r-2", recordLabel: "P17231-002", itemDescription: "Drawers", designer: null, questionCount: 44, kind: "nobody_to_ask", reason: "no designer on the record" },
+          { recordId: "r-1", recordLabel: "P17231-001", itemDescription: "Stool", designer: null, runId: "run-1", questionCount: 40, kind: "nobody_to_ask", reason: "no designer on the record" },
+          { recordId: "r-2", recordLabel: "P17231-002", itemDescription: "Drawers", designer: null, runId: "run-1", questionCount: 44, kind: "nobody_to_ask", reason: "no designer on the record" },
         ],
       },
     };
   }
+
+  // U2, 2026-11-20: an item with no designer has no code for any contact to
+  // carry, so "add a contact" was not the next step for it. Said in a few
+  // words, with the way to the button that is.
+  it("points items with no designer at Set designer… on their phase table", async () => {
+    apiFetch.mockResolvedValue({ ok: true, status: 200, data: unrouted() });
+    render(<DraftsPage />);
+    const note = (await screen.findByText("Nobody can be asked yet.")).closest("[role='note'], div")!.parentElement!;
+    expect(note.textContent).toMatch(/2 items have no designer: tick them on the phase table and press “Set designer…”/);
+    const link = within(note).getByRole("link", { name: "Open the phase table" });
+    expect(link.getAttribute("href")).toBe("/dashboard/projects/p1?tab=run-1");
+  });
 
   it("counts everything outstanding under Everyone, and lists who cannot be asked", async () => {
     apiFetch.mockResolvedValue({ ok: true, status: 200, data: unrouted() });
