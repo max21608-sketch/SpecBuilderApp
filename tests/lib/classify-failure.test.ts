@@ -10,9 +10,12 @@ import {
   CLASSIFY_FAILURE_CODES,
   classifyFailureFromResponse,
 } from "@/lib/classify-failure";
-import { classifyModelFor, CLASSIFY_MODEL } from "@/lib/document-classify";
-import { EXTRACTION_MODEL } from "@/lib/anthropic";
-import { CLASSIFY_MODEL_MAX_PDF_PAGES } from "@/lib/upload-limits";
+import {
+  CLASSIFY_DEADLINE_MS,
+  classifyDeadlineFor,
+  LARGE_CLASSIFY_DEADLINE_MS,
+  LONG_PDF_PAGES,
+} from "@/lib/document-classify";
 
 describe("classifyFailureFromResponse", () => {
   it("takes the route's own code and charge", () => {
@@ -58,15 +61,16 @@ describe("classifyFailureFromResponse", () => {
   });
 });
 
-describe("classifyModelFor", () => {
-  it("keeps the fast model up to its page ceiling and for anything uncounted", () => {
-    expect(CLASSIFY_MODEL_MAX_PDF_PAGES).toBe(100);
-    expect(classifyModelFor("pdf", 100)).toBe(CLASSIFY_MODEL);
-    expect(classifyModelFor("pdf", null)).toBe(CLASSIFY_MODEL);
-    expect(classifyModelFor("spreadsheet", 5000)).toBe(CLASSIFY_MODEL);
+describe("classifyDeadlineFor", () => {
+  it("gives the short deadline up to a hundred pages and to anything uncounted", () => {
+    expect(LONG_PDF_PAGES).toBe(100);
+    expect(classifyDeadlineFor("pdf", 100)).toBe(CLASSIFY_DEADLINE_MS);
+    expect(classifyDeadlineFor("pdf", null)).toBe(CLASSIFY_DEADLINE_MS);
+    expect(classifyDeadlineFor("spreadsheet", 5000)).toBe(CLASSIFY_DEADLINE_MS);
   });
 
-  it("uses the reading model past it", () => {
-    expect(classifyModelFor("pdf", 101)).toBe(EXTRACTION_MODEL);
+  it("gives a longer PDF the longer deadline", () => {
+    expect(classifyDeadlineFor("pdf", 101)).toBe(LARGE_CLASSIFY_DEADLINE_MS);
+    expect(classifyDeadlineFor("pdf", 600)).toBe(LARGE_CLASSIFY_DEADLINE_MS);
   });
 });

@@ -266,5 +266,6 @@ each file, asks what it is, fills the box in and reads it.
   Registration itself does not yet check it (logged): a hand-declared kind on
   an image-only PDF still spends the read.
 - A `.eml` costs nothing — it is unambiguously an email. Haiku, not the
-  extraction model. The blob is addressed by PATHNAME and scoped to the project
+  extraction model: Haiku 5.5 since 2026-11-20 (it was Haiku 4.5), one model
+  for every file whatever its length (`CLASSIFY_MODEL`). The blob is addressed by PATHNAME and scoped to the project
   before a byte is read.

@@ -21,6 +21,7 @@ describe("which models may be forced to call a tool", () => {
   it.each([
     ["claude-opus-5", true],
     ["claude-haiku-4-5-20251001", true],
+    ["claude-haiku-5-5", true],
     ["claude-opus-5-5", false],
     ["claude-sonnet-5-5", false],
     ["claude-fable-5-1", false],

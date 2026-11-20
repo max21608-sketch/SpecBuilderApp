@@ -163,25 +163,6 @@ describe("trying again", () => {
   });
 });
 
-describe("a large document", () => {
-  it("says it was identified with the reading model", async () => {
-    server(() => ({
-      ok: true,
-      status: 200,
-      data: {
-        decision: { importType: "spec_document", documentKind: "shop_drawings" },
-        evidence: "elevations",
-        charged: true,
-        largeDocument: true,
-      },
-    }));
-    const { drop } = mount();
-    drop("Whole set.pdf");
-    await userEvent.click(screen.getByRole("button", { name: /Start intake/ }));
-    expect(await screen.findByText("Large document — identified with the reading model.")).toBeTruthy();
-  });
-});
-
 describe("no empty packs", () => {
   it("creates no batch when every upload fails to store", async () => {
     upload.mockRejectedValue(new Error("store unavailable"));

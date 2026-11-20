@@ -25,7 +25,6 @@ import { intakeSourceKind, legacySpreadsheetAdvice } from "@/lib/intake-source-t
 import { readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { countPdfPages, prepareDocumentSource, pdfHasTextLayer } from "@/lib/intake-source";
 import {
-  CLASSIFY_MODEL,
   classifyDocument,
   KIND_FROM_GENRE,
   scannedPdfRefusal,
@@ -44,9 +43,9 @@ import { loadBoqReadingRegisters } from "@/lib/boq-stage";
 import { requireWriter } from "@/lib/route-guards";
 import { explainFailure, reportFailure } from "@/lib/error-detail";
 
-// 300, not 60: a PDF over the fast model's page ceiling is identified by the
-// READING model (`classifyModelFor`), which has to take in up to 600 pages
-// before it answers. `LARGE_CLASSIFY_DEADLINE_MS` (270 s) sits under this, so
+// 300, not 60: a long PDF has to be taken in whole, up to 600 pages, before
+// the one answer comes back (`classifyDeadlineFor`, `LONG_PDF_PAGES`).
+// `LARGE_CLASSIFY_DEADLINE_MS` (270 s) sits under this, so
 // the route answers a slow look in words rather than Vercel answering it with
 // an HTML 504 the screen can only call "took too long".
 export const maxDuration = 300;
@@ -252,7 +251,6 @@ export async function POST(request: Request): Promise<Response> {
           evidence: result.evidence,
           certain: result.certain,
           charged: true,
-          largeDocument: result.model !== CLASSIFY_MODEL,
         },
         200,
       );
@@ -274,7 +272,6 @@ export async function POST(request: Request): Promise<Response> {
           evidence: result.evidence,
           certain: result.certain,
           charged: true,
-          largeDocument: result.model !== CLASSIFY_MODEL,
         },
         200,
       );
@@ -336,7 +333,6 @@ export async function POST(request: Request): Promise<Response> {
         evidence: result.evidence,
         certain: result.certain,
         charged: true,
-        largeDocument: result.model !== CLASSIFY_MODEL,
       },
       200,
     );
@@ -362,7 +358,6 @@ export async function POST(request: Request): Promise<Response> {
           evidence: result.evidence,
           certain: result.certain,
           charged: true,
-          largeDocument: result.model !== CLASSIFY_MODEL,
         },
         200,
       );
@@ -401,7 +396,6 @@ export async function POST(request: Request): Promise<Response> {
           evidence: result.evidence,
           certain: result.certain,
           charged: true,
-          largeDocument: result.model !== CLASSIFY_MODEL,
         },
         200,
       );
@@ -426,7 +420,6 @@ export async function POST(request: Request): Promise<Response> {
       charged: true,
       // Said on the row: a long document is identified by the reading model,
       // and somebody reading the cost of a pack is owed that.
-      largeDocument: result.model !== CLASSIFY_MODEL,
     },
     200,
   );

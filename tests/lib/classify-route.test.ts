@@ -122,7 +122,7 @@ describe("the model looked", () => {
     const { body } = await classify();
     expect(body.ok).toBe(true);
     expect(body.decision).toEqual({ importType: "spec_document", documentKind: "shop_drawings" });
-    expect(body.largeDocument).toBe(false);
+    expect(body).not.toHaveProperty("largeDocument");
   });
 });
 
@@ -167,53 +167,38 @@ describe("the call failed", () => {
 });
 
 describe("which model looks", () => {
-  it("uses the fast model for a short PDF", async () => {
+  // ONE model for every file since 2026-11-20: Haiku 5.5 takes every PDF the
+  // upload admits, so a long set no longer goes to the extraction model.
+  it("asks the file-check model, with its forced tool and no thinking", async () => {
     answers({ genre: "shop_drawings", titleText: null, evidence: "x", certain: true });
     await classify();
-    const { CLASSIFY_MODEL } = await import("@/lib/document-classify");
-    expect(create.mock.calls[0]?.[0]).toMatchObject({ model: CLASSIFY_MODEL });
+    const { CLASSIFY_MODEL, CLASSIFY_TOOL_NAME } = await import("@/lib/document-classify");
+    expect(CLASSIFY_MODEL).toBe("claude-haiku-5-5");
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      model: CLASSIFY_MODEL,
+      tool_choice: { type: "tool", name: CLASSIFY_TOOL_NAME },
+    });
     expect(create.mock.calls[0]?.[0]).not.toHaveProperty("thinking");
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty("fallbacks");
   });
 
-  it("uses the reading model for a PDF over the fast model's page ceiling, counted off the bytes", async () => {
+  it("asks the same model of a PDF over a hundred pages, counted off the bytes", async () => {
     stored.bytes = buildPdfOfPages(101);
-    // Opus 5.5 answers in the text, as structured output.
-    create.mockResolvedValue({
-      content: [{ type: "text", text: JSON.stringify({ genre: "shop_drawings", titleText: null, evidence: "x", certain: true }) }],
-      stop_reason: "end_turn",
-    });
+    answers({ genre: "shop_drawings", titleText: null, evidence: "x", certain: true });
     const { body } = await classify();
-    const { EXTRACTION_MODEL } = await import("@/lib/anthropic");
-    const params = create.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(params.model).toBe(EXTRACTION_MODEL);
-    // No forced tool on Opus 5.5: the answer is asked for as structured output,
-    // at low effort, with the refusal fallback on.
-    expect(params).not.toHaveProperty("tool_choice");
-    expect(params.output_config).toMatchObject({ effort: "low", format: { type: "json_schema" } });
-    expect(params.fallbacks).toBe("default");
-    expect(params.betas).toEqual(["server-side-fallback-2026-07-01"]);
-    expect(body.largeDocument).toBe(true);
+    const { CLASSIFY_MODEL } = await import("@/lib/document-classify");
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ model: CLASSIFY_MODEL });
     expect(body).toMatchObject({ ok: true, decision: { importType: "spec_document", documentKind: "shop_drawings" } });
   });
 
-  it("takes the browser's count where the server cannot read the page tree", async () => {
-    // Two pages that the server CAN count: the server's count wins, so a hint
-    // of 300 does not move a two-page document onto the dearer model.
-    answers({ genre: "shop_drawings", titleText: null, evidence: "x", certain: true });
-    await classify({ pages: 300 });
-    const { CLASSIFY_MODEL } = await import("@/lib/document-classify");
-    expect(create.mock.calls[0]?.[0]).toMatchObject({ model: CLASSIFY_MODEL });
-  });
-
-  it("uses the hint when the bytes carry no legible page count", async () => {
+  it("asks the same model where only the browser's count says the PDF is long", async () => {
     // A PDF whose page tree is unreadable to the byte scan (the object-stream
     // case): strip the /Count so `countPdfPages` returns null.
     stored.bytes = Buffer.from(buildPdfOfPages(2).toString("latin1").replace(/\/Count \d+/, ""), "latin1");
     answers({ genre: "shop_drawings", titleText: null, evidence: "x", certain: true });
-    const { body } = await classify({ pages: 250 });
-    const { EXTRACTION_MODEL } = await import("@/lib/anthropic");
-    expect(create.mock.calls[0]?.[0]).toMatchObject({ model: EXTRACTION_MODEL });
-    expect(body.largeDocument).toBe(true);
+    await classify({ pages: 250 });
+    const { CLASSIFY_MODEL } = await import("@/lib/document-classify");
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ model: CLASSIFY_MODEL });
   });
 });
 
