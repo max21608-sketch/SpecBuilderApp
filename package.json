@@ -54,7 +54,8 @@
     "measure:screens": "tsx --env-file-if-exists=.env.local tools/measure-screens.ts",
     "reread:drawings": "tsx --env-file-if-exists=.env.local tools/reread-drawings.ts",
     "copy:project": "tsx tools/copy-project.ts",
-    "eval:drawings": "tsx --env-file-if-exists=.env.localstack.local tools/eval-drawings.ts"
+    "eval:drawings": "tsx --env-file-if-exists=.env.localstack.local tools/eval-drawings.ts",
+    "eval:survey": "tsx --env-file-if-exists=.env.localstack.local tools/eval-survey.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
