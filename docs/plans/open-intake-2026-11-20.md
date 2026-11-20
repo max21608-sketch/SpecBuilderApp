@@ -153,6 +153,69 @@ Nothing below can be judged without it, and it is the cheapest stage to build.
 - Add the file check itself to it now: the 2026-11-20 Haiku comparison was run
   by hand (`~/dev/localstack/haiku-live/`) and should not have to be again.
 
+#### Stage 0, first measurement (2026-11-20)
+
+Built: `src/lib/pack-survey.ts` (the survey, Haiku 5.5, a forced tool, a
+short open prompt; code drops impossible places, merges adjacent PDF parts
+that go to the same reader, and sets aside parts with nothing to read),
+`tools/survey-golden.ts` + `npm run eval:survey` (the scorer and the run),
+answer keys in `~/dev/localstack/survey-golden/` — two invented Harbour House
+keys, exact by construction and `verified: true`; four real keys drafted by
+Claude, `verified: false`, with the drafter's doubts in `NOTES.md` there.
+
+| Pack | Files | Parts in the key | Found | Held for a person | Wrong reader | Missed / extra |
+|---|---|---|---|---|---|---|
+| Harbour House, six separate files (invented) | 6 | 8 | 8 | 0 | 0 | 0 / 0 |
+| Harbour House, the same pack mixed into 3 files (invented) | 3 | 8 | 8 | 0 | 0 | 0 / 0 |
+| Panther, merged into one 44-page PDF | 1 | 3 | 3 | 0 | 0 | 0 / 0 |
+| Panther, as delivered | 12 | 14 | 11–12 | 2 | 0 | 0–1 cut wrong |
+| Aman | 36 | 40 | 34 | 3–4 | 0 | 2–3 / 1 |
+| Ronnie Scott's | 5 | 7 | 0 | 7 | 0 | 0 / 0 |
+
+Ranges are two runs of the same prompt. All six packs cost about $0.14 a
+run. What it says:
+
+- **No part went to the wrong reader**, in any pack, on any run. The failure
+  mode is HELD — a person asked — which is the safe one.
+- **A mixed file works.** The merged Panther PDF came back as exactly its
+  three documents with every page boundary right (drawings 1–11, preamble
+  12–30, specification sheets 31–44), and the invented 3-file pack scored as
+  well as the 6-file one. The model splits a drawing set one part per item
+  (Panther: 29 parts); code's merge of adjacent same-reader parts is what makes
+  it three. Without the merge the eval would show the set cut in pieces.
+- **The holds sit on three genre boundaries**: bill or schedule (all of
+  Ronnie Scott's: procurement schedules with an order quantity and no price),
+  preamble or specification bible (Panther's Argenta preamble), finishes or
+  fabric list (Ronnie Scott's COM list). And the Aman tracker came back as one
+  finishes part where the key has finishes (pp 1–7) then furniture (pp 8–14):
+  the genre wording the survey reuses still says a finishes schedule is one
+  "even where it also tracks some furniture" — the one-kind-per-file rule,
+  showing through.
+- **Adding knowledge to the prompt made it WORSE, and was reverted.** A
+  paragraph stating what the app knows (a procurement schedule is a bill; a
+  tracker of finishes then furniture is two parts; a COM list is a finishes
+  schedule; preamble versus bible) moved Ronnie Scott's not at all, cost the
+  invented bill-and-finishes workbook a part and all 20 of its item codes, and
+  gave Panther five extra parts. Both runs without it scored those packs
+  clean, so it is not noise. Max's point — limits taught to the model made it
+  worse — held under measurement.
+
+**What follows from it, for Stage 1:**
+
+1. **A person verifies the four real keys** (`NOTES.md` lists where to look
+   first). Until then they are Claude's opinion of the documents.
+2. **Bill or schedule goes to CODE, not to more prompt.** A part held as
+   bill-or-schedule is tried by the bill reader, for nothing — the known
+   headings, a saved layout, `pdf-bill.ts` for a PDF printed from a
+   spreadsheet — and the person sees "reads as a bill: 26 lines, code and
+   quantity columns found" beside the press. The same rule as everywhere else
+   in this app: the model says what it saw, code makes the exact step.
+3. **The survey gets its own genre wording**, without the one-kind-per-file
+   clauses ("even where it also tracks some furniture"), and the eval says
+   whether that splits the Aman tracker without costing anything else.
+4. **Every prompt change is run twice against all six keys before it lands.**
+   One run cannot tell a change from the ±1 part a pack moves by between runs.
+
 ### Stage 1 — the survey (medium)
 
 Replaces the per-file classify. Same model (Haiku 5.5), same place in the
