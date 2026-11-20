@@ -171,7 +171,8 @@ describe("the overview", () => {
     serve();
     await screen.findByRole("heading", { level: 1, name: /T90001/ });
     expect(screen.getByText("Documents disagree")).toBeInTheDocument();
-    expect(screen.getByText(/3 of these 12 items are/)).toBeInTheDocument();
+    expect(screen.getByText(/3 of these 12 items use a provisional checklist/)).toBeInTheDocument();
+    expect(screen.getByText(/20 not answered, 4 TBC/)).toBeInTheDocument();
     expect(screen.getByText("and 1 more")).toBeInTheDocument();
     expect(screen.getByText("Still being read")).toBeInTheDocument();
     expect(screen.getAllByText(/specs due/).length).toBeGreaterThan(0);

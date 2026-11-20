@@ -342,9 +342,9 @@ when nothing is left, it says so and offers "Back to the pack".
 - **Category.** On the record, or on the Fill-in screen under "N items cannot
   be filled in until categorised". Once an item's questions have been chased,
   its category cannot be changed (the chase keeps the questions it asked).
-- "N of these M items are in a category Matthew has not written a gate model
-  for" means their TGQ count is a placeholder that treats every open question
-  as blocking. That is a question for Matthew, not a fault.
+- "N of these M items use a provisional checklist — their category has no gate
+  model yet" means their TGQ count is a placeholder that treats every open
+  question as blocking. That is a question for Matthew, not a fault.
 
 ### 5.8 Fill in what we know, then chase
 Project → **"Fill in ourselves"**. Internal; nothing is sent. Open an item (the

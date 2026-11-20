@@ -118,7 +118,7 @@ export default function ExportMenu({
       />
       <Output
         name="Quote lines"
-        tip="Eight of the twelve columns Matthew's quote sheet carries. The prices, the UUID and the image URL are blank because this app holds none of them, and the interliner, stone, mattress and delivery lines are not generated — the interliner quantity is the fabric metreage, which this app deliberately does not hold. A person adds those and prices the file."
+        tip="Eight of the twelve columns the quote sheet carries. The prices, the UUID and the image URL are blank because this app holds none of them, and the interliner, stone, mattress and delivery lines are not generated — the interliner quantity is the fabric metreage, which this app deliberately does not hold. A person adds those and prices the file."
         formats={[{ label: ".csv", href: `/api/projects/${projectId}/export/quote${scope}` }]}
       />
       <Output

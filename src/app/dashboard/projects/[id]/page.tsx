@@ -699,7 +699,7 @@ function ProjectOverview() {
                   label="Also outstanding"
                   tone="warn"
                   value={summary.alsoOutstandingItems}
-                  meaning={`of ${summary.itemsWithQuestions.toLocaleString()} items · ${summary.missing.toLocaleString()} unlooked, ${summary.tbc.toLocaleString()} TBC`}
+                  meaning={`of ${summary.itemsWithQuestions.toLocaleString()} items · ${summary.missing.toLocaleString()} not answered, ${summary.tbc.toLocaleString()} TBC`}
                   href={firstRunHref}
                 />
                 <StatTile
@@ -795,15 +795,20 @@ function ProjectOverview() {
                     arithmetically the same number as "outstanding". Printing it
                     in red as though it were a measurement is the
                     confidently-wrong figure this app exists to avoid, so where
-                    it is a placeholder it is labelled one. */}
+                    it is a placeholder it is labelled one.
+
+                    In the screen's words, not ours (2026-11-20, G1): no
+                    person's name and no "his matrix" — a reader who has never
+                    met the people behind the gate model still has to read it. */}
                 {summary.tgqFromFallback > 0 && (
                   <Note tone="warn" className="mx-4 mt-3">
                     <b className="font-semibold">
-                      {summary.tgqFromFallback} of these {summary.tgqFromMatrix + summary.tgqFromFallback} items are
-                      in a category Matthew has not written a gate model for
-                    </b>
-                    , so their TGQ is still the placeholder — every outstanding question on them counts as blocking.
-                    The other {summary.tgqFromMatrix} use his matrix. The figure will only ever come down.
+                      {summary.tgqFromFallback} of these {summary.tgqFromMatrix + summary.tgqFromFallback} items use a
+                      provisional checklist
+                    </b>{" "}
+                    — their category has no gate model yet — so every outstanding question on them counts as blocking.
+                    The other {summary.tgqFromMatrix} use their category&rsquo;s gate model. The figure can only come
+                    down as gate models are written.
                   </Note>
                 )}
                 <Table>
@@ -829,8 +834,8 @@ function ProjectOverview() {
                         <>
                           Items with something still blocking a quotation, of the{" "}
                           {summary.itemsWithQuestions.toLocaleString()} that have a category —{" "}
-                          {summary.toQuote.toLocaleString()} to answer between them (questions, and on
-                          Matthew&rsquo;s matrix also dimension slots and record columns)
+                          {summary.toQuote.toLocaleString()} to answer between them (questions, and under a
+                          gate model also dimension slots and record columns)
                           {summary.projectWide > 0 && (
                             <>
                               , and{" "}

@@ -419,7 +419,7 @@ export default function GatePanel({
         }
         actions={
           <CardHeadingNote>
-            Matthew&rsquo;s matrix, 17 Sept{categoryName ? ` · ${categoryName}` : ""} ·{" "}
+            Gate model, 17 Sept{categoryName ? ` · ${categoryName}` : ""} ·{" "}
             {matrixFields?.length ?? 0} fields{why ? "" : " · collapsed by default"}
           </CardHeadingNote>
         }
@@ -501,10 +501,15 @@ export default function GatePanel({
         )}
       </Card>
 
-      <Note tone="warn" title="These answers are Max standing in for Matthew.">
-        The category mapping and the TGQ set were settled on 17 Sept so the work could start, and every one is still
-        to be confirmed with him — <span className="font-mono">docs/plans/matrix-assumptions.md</span>. TG2 is not
-        modelled and the cabinetry half of the matrix is not written.
+      {/* PROVISIONAL, SAID IN THE SCREEN'S WORDS (2026-11-20, G1). It named
+          the two people and a docs/ path, which a project manager who has met
+          neither can do nothing with; what they need is that the rules may
+          still change and where they stop. `docs/plans/matrix-assumptions.md`
+          is still where the assumptions themselves are listed. */}
+      <Note tone="warn" title="These gate rules are provisional.">
+        Which categories use which gate model, and which questions block a quote, were set on 17 Sept so the work could
+        start, and are still being confirmed. TG2 is not modelled yet, and the cabinetry categories have no gate rules
+        written.
       </Note>
     </>
   );

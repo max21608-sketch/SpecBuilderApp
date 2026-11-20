@@ -1287,8 +1287,8 @@ export default function SpecTable({
                   <Th num>
                     TGQ
                     <Tip>
-                      Questions blocking a quotation. Matthew&rsquo;s matrix where he has written one for this
-                      category, the older per-level model where he has not.
+                      Questions blocking a quotation — counted by the category&rsquo;s gate model where it has one, and by
+                      the provisional per-level checklist where it has not.
                     </Tip>
                     {/* THE SAME QUESTIONS, THE OTHER WAY UP. "Show me all the
                         jobs with dimensions missing" is a real question this

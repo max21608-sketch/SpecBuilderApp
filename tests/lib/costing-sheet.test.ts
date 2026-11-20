@@ -260,8 +260,12 @@ describe("what the file admits about itself", () => {
     expect(compose().notes[0]).toContain("Columns A to J only");
   });
 
-  it("owns the Tags decision as this repo's judgement", () => {
-    expect(compose().notes.join(" ")).toContain("this repo's judgement");
+  it("says plainly what Tags holds, in words an estimator can use", () => {
+    const notes = compose().notes.join(" ");
+    expect(notes).toContain("Tags carries the app's composed dimensions in millimetres");
+    expect(notes).toContain("in place of the measurements that used to be pasted in by hand in mixed units");
+    // Written for the estimator, not for whoever built it (2026-11-20, G1).
+    expect(notes).not.toMatch(/\brepo\b|Matthew|judgement/);
   });
 
   it("says the links are the app's own copy, not SharePoint", () => {
