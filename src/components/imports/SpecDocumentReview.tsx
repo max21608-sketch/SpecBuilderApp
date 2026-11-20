@@ -1301,7 +1301,9 @@ function SpecRowView({
         <div className="min-w-0 font-mono text-neutral-800">{row.valueRaw ?? "—"}</div>
 
         <div className="min-w-0">
-          <Chip tone={CHANGE_TONE[row.summary.kind]}>{row.summary.label}</Chip>
+          <Chip wrap tone={CHANGE_TONE[row.summary.kind]}>
+            {row.summary.label}
+          </Chip>
           {row.summary.was && (
             <span className="mt-0.5 block text-[11px] text-neutral-500">
               {row.summary.kind === "disagrees" ? "the bill says" : "was"} {row.summary.was}

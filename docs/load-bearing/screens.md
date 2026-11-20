@@ -61,7 +61,9 @@ waiting for you" table ran 447px past its box and the page 256px past the
 window. `Chip` takes `wrap` (one line where it fits, more where it does not,
 never wider than its box); it is off by default because a code or a state
 must never break across lines, and on for a chip whose text is somebody's
-sentence.
+sentence — the email review's "Does what" chip too, since E1 put "HH-CH-03
+is on 2 lines of Guest Rooms — choose which" in it (20px past its column at
+1440 until it wrapped).
 
 ### The UI must survive a response that is not JSON
 
