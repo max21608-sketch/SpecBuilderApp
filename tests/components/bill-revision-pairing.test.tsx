@@ -90,7 +90,7 @@ const record = (id: string, label: string, over: Record<string, unknown> = {}) =
   ...over,
 });
 
-function mount(lines: unknown[], reconciliation: unknown, fabricFilings: unknown = {}) {
+function mount(lines: unknown[], reconciliation: unknown, fabricFilings: unknown = {}, descriptions: unknown = {}) {
   routes.current = {
     [`/api/imports/${IMPORT}`]: {
       ok: true,
@@ -128,6 +128,7 @@ function mount(lines: unknown[], reconciliation: unknown, fabricFilings: unknown
       runs: [{ id: RUN, name: "MAIN", status: "active", boq_revision: "A", boq_date: null, record_count: 3 }],
       reconciliation: { 0: reconciliation },
       fabricFilings,
+      descriptions: { 0: descriptions },
     },
   };
   return render(<ReviewImportPage />);
@@ -225,3 +226,31 @@ describe("a finish line the confirm will refuse says so where it is (audit 1.5)"
     expect(alert.textContent).toContain(sentence);
   });
 });
+
+// RV3 (2026-11-20). Two lines carrying one code, told apart by their area,
+// are offered their records as suggestions.
+describe("a revision's twin lines", () => {
+  const typeA = record("rec-a", "ZZ001-002", { area: "Room Type A", codes: ["ZZ-CH-02"] });
+  const typeB = record("rec-b", "ZZ001-011", { recordNo: 11, area: "Room Type B", codes: ["ZZ-CH-02"] });
+  const twins = {
+    lines: [
+      { index: 0, lineNo: 2, code: "ZZ-CH-02", status: "paired", accepted: false, suggestedRecordId: "rec-a", candidates: ["rec-a", "rec-b"], restoreCandidates: [], deltas: [], suggestedBy: "code_and_area" },
+      { index: 1, lineNo: 3, code: "ZZ-CH-02", status: "paired", accepted: false, suggestedRecordId: "rec-b", candidates: ["rec-a", "rec-b"], restoreCandidates: [], deltas: [], suggestedBy: "code_and_area" },
+    ],
+    missing: [],
+    counts: { paired: 2, changed: 0, new: 0, ambiguous: 0, missing: 0, restored: 0, suggested: 2 },
+    records: [typeA, typeB],
+    retired: [],
+  };
+
+  it("offers each twin its own record, says it was read from code and area, and pairs both in one press", async () => {
+    mount([{ ...line(0, "ZZ-CH-02"), area: "Room Type A" }, { ...line(1, "ZZ-CH-02"), area: "Room Type B" }], twins);
+    expect(await screen.findByText(/the same code and area \(Room Type A\), on one item of the phase/)).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: /Pair the 2 suggested/ }));
+    expect(patches()).toEqual([
+      { sheetIndex: 0, index: 0, replaces: { recordId: "rec-a", recordVersion: 5 }, version: 1 },
+      { sheetIndex: 0, index: 1, replaces: { recordId: "rec-b", recordVersion: 5 }, version: 2 },
+    ]);
+  });
+});
+

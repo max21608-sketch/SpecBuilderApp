@@ -297,6 +297,16 @@ already exist.
   run, active, and at the version shown.
 - **One-to-one only.** A code on two records, or two lines carrying one code,
   pairs NOTHING — `SX11A` again. Candidates are offered; nothing is chosen.
+  **Since 2026-11-20 (RV3) two lines carrying one code may be SUGGESTED by
+  their area**: where a line's (code, area) — `effectiveArea`, folded, never
+  a substring — matches exactly ONE record of the phase that no stored
+  pairing claims, and no other line carries that same code and area, the
+  record is offered ("Pair with …", the evidence saying code and area), and
+  counted in "Pair the n suggested". The invented bill's HH-CH-02 under
+  Guest Room Type A and Type B now offers records 2 and 11. It is a
+  suggestion, never a pairing: until accepted the line confirms as new. Two
+  lines in one area, a line with no area, or a record already paired stays
+  "pair by hand".
 - **A new line is in `carriedForward` too.** It is on the run from the moment
   it is inserted, and a retire step that subtracted only the PAIRED records
   inserted it and retired it in the same confirm. Caught by a db-tier test.

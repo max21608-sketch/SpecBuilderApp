@@ -267,7 +267,8 @@ If Confirm is greyed out, the reason is written beside it (section 6.4).
 **A revised bill** (Rev B of a bill already confirmed): upload it the same way.
 The review shows each line "Against the phase" and suggests which existing
 record it is. Check the pairings ("Pair with…", "Make it a new item instead"),
-then confirm. Paired items keep their drawings, specs, picture and answers;
+then confirm. Two lines with the same code (one per room type, say) are
+suggested by their area as well; anything less clear is left to pair by hand. Paired items keep their drawings, specs, picture and answers;
 only the bill's own columns are written over, and only the columns the revised
 bill HAS: a designer or an area somebody set on a record stays where the new
 bill has no such column, and the pairing shows no change for it.

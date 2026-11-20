@@ -101,6 +101,8 @@ export type ProjectRun = {
 };
 export type ReconciledRecord = {
   id: string; version: number; label: string; itemDescription: string; qty: number | null;
+  /** The area it carries, as stored — what an area-based suggestion names (RV3). */
+  area?: string | null;
   /** Its live configurations' short labels (`12.1`), which follow it. */
   configurations?: string[];
 };
@@ -115,6 +117,8 @@ export type Reconciliation = {
     /** Retired lines of the phase carrying this line's code, offered back. */
     restoreCandidates?: string[];
     deltas: { field: string; label: string; was: string | null; now: string | null }[];
+    /** What a suggestion was read from (RV3): the code, or the code and the area. */
+    suggestedBy?: "code" | "code_and_area";
   }[];
   missing: {
     recordId: string; label: string; itemDescription: string; codes: string[];
