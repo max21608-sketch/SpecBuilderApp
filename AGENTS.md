@@ -719,14 +719,25 @@ built on `prod-ready`) amends the "Explicitly excluded" list below now that
 `prod-ready` has landed on `origin/staging`; from `72a69fe` on, this file
 belongs to that session.
 
-**Explicitly excluded, so it is not built speculatively:** feeding preamble
-notes into later model calls; a BWS *import* file carrying job numbers; images
-and scanned documents other than a bill; splitting an oversize drawing set; M6
+**Explicitly excluded, so it is not built speculatively:** a BWS *import*
+file carrying job numbers; images and scanned documents other than a bill; M6
 VE rounds; any write to BWS; automatic email sending; SharePoint writes
 (SharePoint READS from BWS's P-number folder are an INVESTIGATION Matthew asked
 for on 2026-10-12, not a build: `docs/plans/catchup-2026-10-12.md` P5 and P6);
 BWS Messenger and Teams ingestion; the post-order/production flow; the TOE
 calculator (Matthew's next-phase picture, not this one).
+
+**Lifted from that list on 2026-11-20 (Max).** Two items left the list:
+*splitting an oversize drawing set* and *feeding preamble notes into later
+model calls*. The open-intake plan (`docs/plans/open-intake-2026-11-20.md`)
+reads PART of a file (its Stage 2) and sends readings into a later model call
+(its Stage 3). Max approved the plan whole: *"that's exactly what I want to do
+… let's go ahead"*. He confirmed the amendment to the production-readiness
+session the same evening: *"listen to the other session. It's correct. Let's
+change that."* Both are built only as that plan's stages describe. Every
+reading is still STAGED, and only a person's confirm writes. Scanned documents
+other than a bill, and images, stay excluded: "any format" there means any MIX
+of PDF with text, spreadsheet and email.
 
 **Decisions awaiting somebody** (the person is named; the detail is in the
 diary and the README):
