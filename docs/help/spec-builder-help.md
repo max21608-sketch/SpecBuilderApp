@@ -268,7 +268,9 @@ If Confirm is greyed out, the reason is written beside it (section 6.4).
 The review shows each line "Against the phase" and suggests which existing
 record it is. Check the pairings ("Pair with…", "Make it a new item instead"),
 then confirm. Paired items keep their drawings, specs, picture and answers;
-only the bill's own columns are written over.
+only the bill's own columns are written over, and only the columns the revised
+bill HAS: a designer or an area somebody set on a record stays where the new
+bill has no such column, and the pairing shows no change for it.
 
 **A bill that arrived only as a PDF** shows **"Needs transcribing"**. Open it
 and press "Transcribe it" (charged, a few minutes). Ask the client for the
