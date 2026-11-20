@@ -673,6 +673,31 @@ describe("an unlabelled size line", () => {
     const statements = readBillDescription("Armchair\nCom: EXAMPLE CLOTH NAME\n12345-0001")!.statements;
     expect(withUnlabelledSizeLine(statements)).toBe(statements);
   });
+
+  // Pre-push review E6: the combined-line reader takes ONE trailing word after
+  // the last figure as the line's unit, and drops it when it is not a unit.
+  // On a labelled size line that has always been so; on an unlabelled one it
+  // put a PART's size in the item's slots — a 25mm top as the table's height
+  // — and the part's word was nowhere. Such a line stays the note it was.
+  it("stays a note where the word after the last figure is not a unit — a part's size, not the item's", () => {
+    const table = plan("Round dining table\nDia 900 x H 25 top\nOak base");
+    expect(table.dimensionCell).toBe("");
+    expect(slots(table.attributes)).toEqual([]);
+    expect(notes(table.attributes)).toEqual(["Note: Dia 900 x H 25 top", "Note: Oak base"]);
+    expect(table.figures ?? []).toEqual([]);
+
+    const base = plan("Coffee table\nW 600 x D 600 base");
+    expect(base.dimensionCell).toBe("");
+    expect(notes(base.attributes)).toEqual(["Note: W 600 x D 600 base"]);
+  });
+
+  it("is still placed where the word after the last figure IS a unit, or a slot letter", () => {
+    expect(plan("Round dining table\nDia 900 x H 750 mm\nOak base").dimensionCell).toBe("Dia.900 x H750mm");
+    expect(plan("Coffee table\nW 600 x D 600 x H 400mm").dimensionCell).toBe("W600 x D600 x H400mm");
+    expect(plan("Side table\nDia 45 x H55 cm").dimensionCell).toBe("Dia.450 x H550mm");
+    // A slot letter AFTER its figure is the page's label, never a unit (audit 5.4 A4).
+    expect(slots(plan("Side table\n600 Ø x 750 H").attributes)).toEqual(["DIA 600null", "H 750null"]);
+  });
 });
 
 // R4 (2026-11-20): an invented bar stool's `Frame: MTL-02` is the client's metal.

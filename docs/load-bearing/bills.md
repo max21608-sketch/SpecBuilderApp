@@ -224,8 +224,10 @@ size on a line of its own with no label (`W2100 x D950 x H820mm, SH 440mm`,
 size was a note. Such a line is now read as the overall size ONLY where every
 figure carries its own slot letter through `readDimension` (no figure placed
 by printed order, none bare beside a lettered one, nothing left over — `L` is
-not a slot), it prints at least two figures, and it is the line's ONLY size
-line: beside a labelled size line, a Dims column or a second such line it
+not a slot — and no word after the last figure but a unit: the combined
+reader drops a trailing non-unit, so `Dia 900 x H 25 top` placed a top's
+thickness as the table's height, pre-push review E6), it prints at least two
+figures, and it is the line's ONLY size line: beside a labelled size line, a Dims column or a second such line it
 stays the note it was, because a line with no label has no claim to win "which
 size is the item's". The unit is the line's own or none (placed unconverted,
 bracketed). It is written under the label `Size`, the figure rows on the
