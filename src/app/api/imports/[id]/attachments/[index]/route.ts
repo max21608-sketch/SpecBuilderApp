@@ -65,7 +65,7 @@ export async function GET(
   // one row joins.
   const rows = await sql`
     select r.project_id, r.document_kind, a.storage_path,
-           em.id as message_id, em.origin as message_origin, em.attachments_meta
+           em.id as message_id, em.attachments_meta
     from intake_runs r
     join attachments a on a.id = r.attachment_id
     left join email_messages em on em.intake_run_id = r.id
@@ -124,9 +124,9 @@ export async function GET(
   // re-parsed now and the list was parsed at registration; a parser that reads
   // the message differently (postal-mime 4, 2026-11-20) moves the index, and
   // the browser would save a different document under the name the person
-  // clicked. `sameListedAttachment` says what is compared and why the size is
-  // compared only on an upload.
-  if (!sameListedAttachment(listed, meta, { sizeComparable: String(run.message_origin) === "upload" })) {
+  // clicked. `sameListedAttachment` says what is compared, and why the size is
+  // not compared on an entry Graph described.
+  if (!sameListedAttachment(listed, meta)) {
     return json(
       {
         ok: false,

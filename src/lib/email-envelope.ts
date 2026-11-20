@@ -218,6 +218,13 @@ export async function readAttachment(
 }
 
 /**
+ * The mark on an attachment entry MICROSOFT GRAPH described rather than this
+ * parser (`mail-ingest.ts`, only where a Graph arrival had no parsed bytes):
+ * its size is Graph's own count, not the decoded bytes.
+ */
+export const GRAPH_LISTED = "graph" as const;
+
+/**
  * Is the attachment a fresh parse found at an index the one the screen LISTED
  * at that index, when the email was registered?
  *
@@ -231,26 +238,25 @@ export async function readAttachment(
  * and a disagreement is refused rather than served.
  *
  * Name, content type and the forwarded-message flag must always agree. The
- * byte count is compared only where this parser wrote the list
- * (`sizeComparable`, an upload): a Graph arrival lists what GRAPH says about
- * each attachment (`mail-ingest.ts`), and Graph's `size` is its own count, not
- * known to equal the decoded bytes. A strict comparison costs something too,
- * and it is the safe direction: an invite or a forward registered under 3.0.0
- * was listed at a different size (0 bytes; line endings rewritten) and is now
- * refused here, and the whole `.eml` is the way to it.
+ * byte count is compared wherever this parser wrote the list — an upload, and
+ * a Graph arrival whose bytes were parsed, which since 2026-11-20 (pre-push
+ * review E4) stores the parser's list rather than Graph's, because Graph's
+ * description of a forwarded item and Graph's order could never match this
+ * one. An entry marked `GRAPH_LISTED` (no parsed bytes at ingest) carries
+ * Graph's own count, not known to equal the decoded bytes, so its size is not
+ * held to it. A strict comparison costs something too, and it is the safe
+ * direction: an invite or a forward registered under 3.0.0 was listed at a
+ * different size (0 bytes; line endings rewritten) and is now refused here,
+ * and the whole `.eml` is the way to it.
  */
-export function sameListedAttachment(
-  listed: unknown,
-  fresh: EmailAttachmentMeta,
-  { sizeComparable }: { sizeComparable: boolean },
-): boolean {
+export function sameListedAttachment(listed: unknown, fresh: EmailAttachmentMeta): boolean {
   if (!listed || typeof listed !== "object") return false;
-  const row = listed as { filename?: unknown; contentType?: unknown; size?: unknown; isRfc822?: unknown };
+  const row = listed as { filename?: unknown; contentType?: unknown; size?: unknown; isRfc822?: unknown; listedBy?: unknown };
   const filename = typeof row.filename === "string" ? row.filename : null;
   if (filename !== fresh.filename) return false;
   if (String(row.contentType ?? "").toLowerCase() !== fresh.contentType) return false;
   if (Boolean(row.isRfc822) !== fresh.isRfc822) return false;
-  return !sizeComparable || Number(row.size) === fresh.size;
+  return row.listedBy === GRAPH_LISTED || Number(row.size) === fresh.size;
 }
 
 /** `RE: FW: Re: Panther` → `Panther`. Covers the English, German and French prefixes Outlook writes. */
