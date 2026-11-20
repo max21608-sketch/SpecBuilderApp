@@ -51,8 +51,10 @@ repo, with the screenshots and walk scripts).
   hardening (AUTH_SECRET, cross-site writes, HSTS, `/api/health`, an error log
   line, create-user, the production chase email); next 15.5.29 and
   postal-mime 4.2.1 (production advisories 15 → 10, no critical).
-- **State.** `prod-ready` is `committed locally`: nothing pushed (GitHub is
-  read-only for Claude), no deployment, no migration. The four checks pass on
+- **State.** `prod-ready` was `committed locally` until the evening, when Max
+  pushed it to `origin/staging` (`ebbd762..72a69fe`; GitHub is read-only for
+  Claude). The staging deployment and CI on that SHA are not read by Claude;
+  nothing is on pilot; no migration. The four checks pass on
   it with the database tier required. Human acceptance is outstanding on every
   screen it touched.
 - **Decisions it leaves Max** (plan §5): who sees which client (no per-project
@@ -83,7 +85,7 @@ repo, with the screenshots and walk scripts).
     as CI runs it, and its `check` job in a bare environment. The overflow
     audit is clean on 31 pages. Every visible fix was re-checked on the
     production build.
-  - **Still committed locally only.**
+  - **Pushed by Max** to `origin/staging` at `72a69fe` the same evening.
 - **Another session** is reworking intake (`open-intake-2026-11-20.md`,
   branch `intake-2026-11-20`). It is built on `prod-ready` at `d160967`. Its
   stages that change the upload code wait for `prod-ready` to land.

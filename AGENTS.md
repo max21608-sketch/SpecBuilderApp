@@ -684,8 +684,9 @@ and a detailed plan (`docs/plans/production-readiness-2026-11-20.md`; the
 dated entry in `docs/plans/README.md`). The app was walked on the local stack
 as a NEW CLIENT with an invented pack, a revised bill, a 300-line bill and
 unknown headings; four fix branches were built by Opus coders and merged into
-**`prod-ready`, `committed locally` only — not pushed, not deployed, no
-migration.** What it changed that a later change could undo: a bill row with
+**`prod-ready`, pushed by Max to `origin/staging` at `72a69fe` on
+2026-11-20 — the staging deployment and CI on that SHA are not read by Claude;
+not on pilot; no migration.** What it changed that a later change could undo: a bill row with
 only a heading's text, or a finish code with no quantity under an item, is a
 SUGGESTION a person accepts, never a decision (`docs/load-bearing/bills.md`);
 an unlabelled or x-less size line is placed only where every figure carries
@@ -714,8 +715,9 @@ tier required (5,386 tests); CI's db-tier job was rehearsed on a fresh
 database. Production itself does not exist; the decisions that come first are
 Max's (plan §5). Human acceptance is outstanding on every screen it touched.
 Another session's `open-intake-2026-11-20.md` (branch `intake-2026-11-20`,
-built on `prod-ready`) amends the "Explicitly excluded" list below once
-`prod-ready` lands; until then this file belongs to this session.
+built on `prod-ready`) amends the "Explicitly excluded" list below now that
+`prod-ready` has landed on `origin/staging`; from `72a69fe` on, this file
+belongs to that session.
 
 **Explicitly excluded, so it is not built speculatively:** feeding preamble
 notes into later model calls; a BWS *import* file carrying job numbers; images
@@ -733,7 +735,7 @@ diary and the README):
   design; the gate model's assumptions (`docs/plans/matrix-assumptions.md`,
   Max standing in for him since 2026-09-17); the level guess rules; the
   question-to-BWS-field mapping; Q4/Q6/Q7/Q8 from the Ronnie Scott's plan.
-- **Max:** the production-readiness decisions D1–D12 (`docs/plans/production-readiness-2026-11-20.md` §5 — who sees which client, BWS import at launch, company accounts and a spend limit, backups, retention, the production branch and domain, residency, decimal quantities, pilot data, mail, CSP, which document describes a finish); pushing `prod-ready`; reading the first CI run on the review build (pushed 2026-11-18);
+- **Max:** the production-readiness decisions D1–D12 (`docs/plans/production-readiness-2026-11-20.md` §5 — who sees which client, BWS import at launch, company accounts and a spend limit, backups, retention, the production branch and domain, residency, decimal quantities, pilot data, mail, CSP, which document describes a finish); reading CI and the staging deployment on `72a69fe` (the production-readiness build, pushed 2026-11-20) before pilot; reading the first CI run on the review build (pushed 2026-11-18);
   whether a preamble note's retire belongs in the change trail; deleting the
   65 merged local branches; `origin/production` (delete or record); whether to enforce the full
   CSP after the browser walk; reclaiming pilot's audit-log space; a chased

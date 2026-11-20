@@ -10,8 +10,11 @@ database tier required); THE REHEARSAL RE-RUN ON ITS PRODUCTION BUILD; NOTHING
 PUSHED.** Claude cannot push (GitHub is read-only for Claude under the
 organisation's policy) and cannot create production (Neon, Vercel and the
 Blob store are consoles only Max holds). Everything below that says "Max" is
-a step only Max can take. Every branch below is `committed locally` in the
-six terms of `house/deployment.md` — nothing has left this machine.
+a step only Max can take. Every branch below was `committed locally` in the
+six terms of `house/deployment.md` while this plan was written. **Since
+2026-11-20 evening `prod-ready` is `pushed` to `origin/staging` at `72a69fe`,
+by Max**; the staging deployment and CI on that SHA are not read by Claude,
+and nothing is on pilot.
 
 ---
 
@@ -293,8 +296,8 @@ revert the merge's second-parent changes in a new commit; never rewrite
 
 **How it reaches production.** Everything above is merged on `prod-ready`
 (it took the place of the `prod-int` this section first planned), and it
-fast-forwards `origin/staging`. Max pushes it to `staging`. From there the
-existing route: CI green on the SHA (both jobs), staging deployment
+fast-forwards `origin/staging`. Max pushed it to `staging` on 2026-11-20
+(`ebbd762..72a69fe`). From there the existing route: CI green on the SHA (both jobs), staging deployment
 verified, pilot promoted through `docs/environments.md` *Promoting to pilot*,
 Matthew and Claudia use it on pilot, and production is created from a SHA that
 pilot has run.
