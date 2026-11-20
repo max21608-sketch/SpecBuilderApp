@@ -74,6 +74,7 @@ import { sql as defaultSql } from "@/lib/db";
 import type { SqlLike } from "@/lib/record-atoms";
 import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
 import { CHANGE_SET_KIND_LABELS, type ChangeSetKind } from "@/lib/change-sets";
+import { readStoredPart, type SourcePart } from "@/lib/source-part";
 
 /** What a document IS, in the words a chip carries. */
 export type RecordDocumentKind = "bill" | DocumentKind | "evidence";
@@ -88,6 +89,14 @@ export type RecordDocument = {
   /** The stored file's id, or `run:<id>` for a run that kept no file. */
   key: string;
   filename: string | null;
+  /**
+   * Which part of that file the row's read was for (open intake), null for
+   * the whole file. Each read of part of a file is registered with its OWN
+   * attachment, so two parts of one PDF are two rows here, never one row with
+   * one kind — that grouping by attachment is unchanged. Optional in the
+   * type so a caller building a row by hand need not say "the whole file".
+   */
+  sourcePart?: SourcePart | null;
   /** An email's subject, which says far more than `message.eml` does. */
   subject: string | null;
   kind: RecordDocumentKind;
@@ -124,6 +133,8 @@ export type RunFact = {
   attachmentId: string | null;
   filename: string | null;
   contentType: string | null;
+  /** Which part of the file this read is for; null (or absent) for the whole file. */
+  sourcePart?: SourcePart | null;
   /** The email_messages row an email run belongs to, where there is one. */
   messageId: string | null;
   messageSubject: string | null;
@@ -347,6 +358,7 @@ export function assembleRecordDocuments(facts: RecordDocumentFacts): RecordDocum
     documents.push({
       key: draft.key,
       filename,
+      sourcePart: primary?.sourcePart ?? null,
       subject: draft.runs.find((run) => run.messageSubject)?.messageSubject ?? null,
       kind,
       kindLabel: kindLabel(kind),
@@ -474,7 +486,7 @@ export async function loadRecordDocuments(
     runIds.length === 0
       ? Promise.resolve([])
       : db`
-          select ir.id, ir.source_kind, ir.document_kind, ir.created_at, ir.attachment_id,
+          select ir.id, ir.source_kind, ir.document_kind, ir.created_at, ir.attachment_id, ir.source_part,
                  at.filename, at.content_type,
                  em.id as message_id, em.subject as message_subject
             from intake_runs ir
@@ -501,6 +513,7 @@ export async function loadRecordDocuments(
     attachmentId: text(row.attachment_id),
     filename: text(row.filename),
     contentType: text(row.content_type),
+    sourcePart: readStoredPart(row.source_part),
     messageId: text(row.message_id),
     messageSubject: text(row.message_subject),
   }));

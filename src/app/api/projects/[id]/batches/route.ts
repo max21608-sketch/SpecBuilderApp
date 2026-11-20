@@ -86,6 +86,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
                        -- the press, that opening its review reads them.
                        'structureRead', (r.model_metadata->'structureRead'->'sheets') is not null,
                        'filename', a.filename,
+                       -- Which part of that file this read is for (open
+                       -- intake); null for the whole file. Stored in its
+                       -- canonical form by the registration, so passed as is.
+                       'sourcePart', r.source_part,
                        'createdAt', r.created_at,
                        'pendingReview', jsonb_array_length(
                             jsonb_path_query_array(coalesce(r.parsed, '{}'::jsonb),

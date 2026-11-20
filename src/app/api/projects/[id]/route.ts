@@ -24,6 +24,7 @@ import { billDescriptionsReadAtConfirm } from "@/lib/bill-specifications";
 import { finishCodePrefixProblem, normaliseFinishCodePrefix } from "@/lib/finishes";
 import { loadUnlinkedFinishCodes } from "@/lib/finish-unlinked";
 import { requireUuid, requireWriter } from "@/lib/route-guards";
+import { readStoredPart } from "@/lib/source-part";
 
 const EMAIL = /^[^\s,;<>@]+@[^\s,;<>@]+\.[^\s,;<>@]+$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -144,6 +145,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
            -- every one of those runs reading "Unnamed file". The staged JSON
            -- recorded the name it was given; fall back to it.
            coalesce(a.filename, r.parsed->>'filename') as filename,
+           -- Which part of that file this read is for (open intake); null for
+           -- the whole file. Returned as sourcePart, below.
+           r.source_part,
            (r.attachment_id is not null) as source_preserved,
            -- Whether a model has read this bill's columns yet (any-bill Step 2).
            ((r.model_metadata->'structureRead'->'sheets') is not null) as structure_read,
@@ -213,7 +217,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     `;
     for (const row of staged) if (billDescriptionsReadAtConfirm(row.parsed)) readAtConfirm.add(String(row.id));
   }
-  for (const doc of documents) doc.descriptions_read = readAtConfirm.has(String(doc.id));
+  for (const doc of documents) {
+    doc.descriptions_read = readAtConfirm.has(String(doc.id));
+    doc.sourcePart = readStoredPart(doc.source_part);
+    delete doc.source_part;
+  }
 
   // A document that could not be read is the one intake state where nothing
   // else happens until somebody presses Retry. Counted in TS over the rows

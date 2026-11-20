@@ -60,6 +60,7 @@ import {
   resolveFinishCode,
   type Finish,
 } from "@/lib/finishes";
+import { readStoredPart, type SourcePart } from "@/lib/source-part";
 
 export type ResolvedItem = {
   id: string;
@@ -758,6 +759,8 @@ export type ResolvedRun = {
   waitingForSlot: boolean;
   error: string | null;
   version: number;
+  /** Which part of the file this read is for (open intake); null for the whole file. */
+  sourcePart: SourcePart | null;
   staged: StagedDrawings | null;
   items: ResolvedItem[];
 };
@@ -767,7 +770,7 @@ export async function loadBatchDrawings(
   batchId: string,
 ): Promise<{ runs: ResolvedRun[]; records: ReturnType<typeof recordChoices> }> {
   const rows = await sql`
-    select r.id, r.status, r.error, r.version, r.parsed, a.filename,
+    select r.id, r.status, r.error, r.version, r.parsed, a.filename, r.source_part,
            -- Deferred by the in-flight cap, not by a person: the pair (no
            -- attempt, a live deadline) is written by nothing else, because
            -- openAttempt always writes both.
@@ -815,6 +818,7 @@ export async function loadBatchDrawings(
       waitingForSlot: Boolean(row.waiting_for_slot),
       error: row.error ? String(row.error) : null,
       version: Number(row.version),
+      sourcePart: readStoredPart(row.source_part),
       staged,
       items: staged ? resolveStagedRun(staged, context, fields, String(row.id)) : [],
     };

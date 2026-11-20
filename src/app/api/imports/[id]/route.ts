@@ -19,6 +19,7 @@
 // proposals.ts (every other specification document). The status codes, the
 // bodies and the DomainConflictError codes are the handlers' own, unchanged;
 // tests/db/intake-routes.test.ts is the contract.
+import { readStoredPart } from "@/lib/source-part";
 import { sql, json, type Row } from "@/lib/db";
 import { CLAIM_EXPIRY_SECONDS } from "@/lib/extraction-claim";
 import { getSessionUser } from "@/lib/session";
@@ -49,7 +50,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const rows = await sql`
     select r.id, r.project_id, r.status, r.parsed, r.error, r.version, r.confirmed_at,
            r.source_kind, r.document_kind, r.model, r.model_metadata,
-           r.attempt_id, r.claim_count, r.queued_at,
+           r.attempt_id, r.claim_count, r.queued_at, r.source_part,
            -- Whether the original is stored, so a bill that failed or needs
            -- its columns can offer a free re-read from it rather than a
            -- request for the file again.
@@ -88,7 +89,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // document's own screen start disagreeing about which documents are waiting.
   // ==========================================================================
   const waitingForSlot = row.status === "pending" && !row.attempt_id && Boolean(row.within_deadline);
-  const run: Row = { ...row, waitingForSlot };
+  // `sourcePart` beside the filename (open intake): which part of the file
+  // this read is for, null for the whole file. Every review below spreads
+  // `run` into its `import`, so this is the one place it is named.
+  const { source_part: sourcePart, ...columns } = row;
+  const run: Row = { ...columns, sourcePart: readStoredPart(sourcePart), waitingForSlot };
 
   if (run.source_kind === "spec_document" && run.document_kind === "shop_drawings") return getDrawingsReview(run);
 
