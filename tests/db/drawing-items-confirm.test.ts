@@ -348,4 +348,39 @@ describeIfDb("confirming an item the drawings read returned whole", () => {
     // The bill line is a heading: nothing lands on it.
     expect((await client.query(`select count(*)::int as n from record_attributes where record_id = $1`, [bill])).rows[0].n).toBe(0);
   });
+
+  it("answers a second press of a card the first press confirmed with Already confirmed, not targets changed", async () => {
+    // 2026-11-20: a press sent before the first one's answer arrived carries
+    // the item's old version, which the first confirm moved. It was refused as
+    // "targets changed while you were reviewing it", accusing the screen of a
+    // change that was the reviewer's own confirm.
+    const code = `__QA X-700-${Date.now()}`;
+    await phase("__QA REPRESS", code);
+    const runId = await stage(
+      {
+        documentNotes: null,
+        nonItemPages: [],
+        items: [item({ codes: [code], overall: { ...noOverall, width: fig("840", 1, "PLAN") } })],
+      },
+      "__QA x-700.pdf",
+    );
+    const staged = ((await client.query(`select parsed from intake_runs where id = $1`, [runId])).rows[0].parsed as StagedDrawings)
+      .items[0]!;
+    const body = JSON.stringify({
+      action: "confirm",
+      itemId: staged.id,
+      itemVersion: staged.version,
+      observations: staged.observations.filter((o) => o.reviewStatus === "pending").map((o) => ({ id: o.id, version: o.version })),
+    });
+    const press = () =>
+      confirmRoute(new Request("http://localhost/test", { method: "POST", headers: { "content-type": "application/json" }, body }), {
+        params: Promise.resolve({ id: runId }),
+      });
+
+    const first = await press();
+    expect(first.ok, JSON.stringify(await first.clone().json())).toBe(true);
+    const second = await press();
+    expect(second.status).toBe(409);
+    expect(await second.json()).toMatchObject({ code: "already_confirmed", error: "Already confirmed." });
+  });
 });

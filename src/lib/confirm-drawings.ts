@@ -1325,6 +1325,16 @@ export async function confirmDrawingItem(
   const run = await loadRun(txn, runId, expectedVersion);
   const item = findItem(run.staged, itemId);
   if (item.version !== itemVersion) {
+    // A SECOND PRESS ON A CARD THE FIRST ONE CONFIRMED (2026-11-20). Confirming
+    // moves the item's version, so a press sent before the first one's answer
+    // arrives is stale by construction — and "targets changed" told the
+    // reviewer something had moved under them, when what moved was their own
+    // confirm. Every spec this press named is already applied: say that.
+    const named = new Set(refs.map((ref) => ref.id));
+    const pressed = item.observations.filter((observation) => named.has(observation.id));
+    if (pressed.length > 0 && pressed.every((observation) => observation.reviewStatus === "applied")) {
+      throw new DomainConflictError("already_confirmed", "Already confirmed.");
+    }
     throw new DomainConflictError(
       "item_version_stale",
       "This item's targets changed while you were reviewing it. Reload before confirming.",

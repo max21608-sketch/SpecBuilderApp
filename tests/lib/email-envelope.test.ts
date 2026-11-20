@@ -1,7 +1,13 @@
 // Parsing an email. Synthetic fixtures only — real client mail never enters
 // this repo, the same rule as every other document.
 import { describe, expect, it } from "vitest";
-import { buildEmailModelText, parseEnvelope, readAttachment, stripReplyPrefixes } from "@/lib/email-envelope";
+import {
+  buildEmailModelText,
+  parseEnvelope,
+  readAttachment,
+  sameListedAttachment,
+  stripReplyPrefixes,
+} from "@/lib/email-envelope";
 
 function eml(headers: string, body: string): Buffer {
   return Buffer.from(`${headers.trim()}\r\n\r\n${body}`, "utf8");
@@ -261,5 +267,173 @@ describe("an email carrying attachments", () => {
     expect(text).toContain("Sizes are in the attached sheet");
     expect(text).not.toContain("%PDF");
     expect(text).not.toContain(pdfBytes.toString("base64"));
+  });
+});
+
+// ============================================================================
+// WHAT POSTAL-MIME 4 CHANGED (2026-11-20, 3.0.0 -> 4.2.1 for GHSA-f2hq-32vh-53cc)
+//
+// Every `.eml` this app holds is parsed by postal-mime, so the upgrade was read
+// against a synthetic corpus under both versions before it landed. These pin
+// the differences that reach what a person sees or what the model is sent.
+// Invented messages only.
+// ============================================================================
+describe("postal-mime 4", () => {
+  const forward = [
+    "From: Client <client@x.test>",
+    "To: d@designers.test",
+    "Subject: the original",
+    "",
+    "The seat height is 450mm.",
+    "",
+  ].join("\r\n");
+
+  it("hands back an attached calendar invite's bytes, which arrive as a Uint8Array", async () => {
+    // Read as 0 bytes and refused for download until this change: postal-mime
+    // decodes `text/calendar` itself, and only ArrayBuffer and string were read.
+    const invite = eml(
+      `From: a@b.test
+To: c@d.test
+Subject: site visit
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="C"`,
+      [
+        "--C",
+        "Content-Type: text/plain",
+        "",
+        "Invite attached.",
+        "--C",
+        "Content-Type: text/calendar; method=request; charset=utf-8",
+        'Content-Disposition: attachment; filename="visit.ics"',
+        "",
+        "BEGIN:VCALENDAR",
+        "END:VCALENDAR",
+        "--C--",
+        "",
+      ].join("\r\n"),
+    );
+    const envelope = await parseEnvelope(invite);
+    expect(envelope.attachments[0]?.filename).toBe("visit.ics");
+    expect(envelope.attachments[0]?.size).toBeGreaterThan(0);
+    const found = await readAttachment(invite, 0);
+    expect(found?.bytes.toString("utf8")).toContain("BEGIN:VCALENDAR");
+    expect(found?.bytes.byteLength).toBe(envelope.attachments[0]?.size);
+  });
+
+  it("hands back an attached forward byte for byte, line endings included", async () => {
+    // 3.0.0 rewrote the CRLFs of a 7bit part to LF, so the .eml a person
+    // downloaded was not the one that was sent.
+    const message = eml(
+      `From: a@b.test
+To: c@d.test
+Subject: FW: spec
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="F"`,
+      [
+        "--F",
+        "Content-Type: text/plain",
+        "",
+        "Attached.",
+        "--F",
+        'Content-Type: message/rfc822; name="orig.eml"',
+        'Content-Disposition: attachment; filename="orig.eml"',
+        "",
+        forward,
+        "--F--",
+        "",
+      ].join("\r\n"),
+    );
+    const found = await readAttachment(message, 0);
+    expect(found?.meta.isRfc822).toBe(true);
+    expect(found?.bytes.toString("utf8")).toBe(forward);
+  });
+
+  it("lists a base64-encoded forward with no disposition as a forwarded message, and keeps its text out of the read", async () => {
+    // 3.0.0 decoded it and rendered it INTO the body, so the model read it;
+    // 4.1.4 keeps an encoded message/rfc822 part as an attachment (RFC 2046
+    // allows only 7bit, 8bit or binary there). It is listed as a forward, which
+    // the screen says is not an intake document, and a person decides.
+    const message = eml(
+      `From: a@b.test
+To: c@d.test
+Subject: FW: spec
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="G"`,
+      [
+        "--G",
+        "Content-Type: text/plain",
+        "",
+        "Below.",
+        "--G",
+        "Content-Type: message/rfc822",
+        "Content-Transfer-Encoding: base64",
+        "",
+        Buffer.from(forward, "utf8").toString("base64"),
+        "--G--",
+        "",
+      ].join("\r\n"),
+    );
+    const envelope = await parseEnvelope(message);
+    expect(envelope.attachments).toHaveLength(1);
+    expect(envelope.attachments[0]?.isRfc822).toBe(true);
+    const { text } = buildEmailModelText(envelope);
+    expect(text).toContain("Below.");
+    expect(text).not.toContain("450mm");
+  });
+
+  it("still renders an unencoded forward with no disposition into the body", async () => {
+    // The common shape, unchanged: the forwarded text reaches the model, marked
+    // as quoted history.
+    const message = eml(
+      `From: a@b.test
+To: c@d.test
+Subject: FW: spec
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="H"`,
+      ["--H", "Content-Type: text/plain", "", "See below.", "--H", "Content-Type: message/rfc822", "", forward, "--H--", ""].join(
+        "\r\n",
+      ),
+    );
+    const envelope = await parseEnvelope(message);
+    expect(envelope.attachments).toHaveLength(0);
+    expect(buildEmailModelText(envelope).text).toContain("The seat height is 450mm.");
+  });
+
+  it("reads 8-bit text with no charset as windows-1252 rather than as replacement characters", async () => {
+    const message = Buffer.concat([
+      Buffer.from("From: a@b.test\r\nTo: c@d.test\r\nSubject: fabric\r\nContent-Type: text/plain\r\nContent-Transfer-Encoding: 8bit\r\n\r\n", "utf8"),
+      // "Café – 10" in windows-1252: é is 0xE9, the en dash 0x96.
+      Buffer.from([0x43, 0x61, 0x66, 0xe9, 0x20, 0x96, 0x20, 0x31, 0x30, 0x0d, 0x0a]),
+    ]);
+    expect((await parseEnvelope(message)).textBody).toContain("Café – 10");
+  });
+});
+
+// ============================================================================
+// THE FILE SENT IS THE FILE CLICKED (2026-11-20). The download route compares
+// what a fresh parse holds at an index with what registration LISTED there.
+// The route's own refusal is proven in tests/db/email-attachment-route.test.ts.
+// ============================================================================
+describe("sameListedAttachment", () => {
+  const fresh = { filename: "X-100 sizes.pdf", contentType: "application/pdf", size: 28, isRfc822: false };
+
+  it("agrees with the entry registration wrote for the same file", () => {
+    expect(sameListedAttachment({ ...fresh }, fresh, { sizeComparable: true })).toBe(true);
+  });
+
+  it("refuses a different name, type or kind at the same index", () => {
+    expect(sameListedAttachment({ ...fresh, filename: "forwarded.eml" }, fresh, { sizeComparable: true })).toBe(false);
+    expect(sameListedAttachment({ ...fresh, filename: null }, fresh, { sizeComparable: true })).toBe(false);
+    expect(sameListedAttachment({ ...fresh, contentType: "message/rfc822" }, fresh, { sizeComparable: true })).toBe(false);
+    expect(sameListedAttachment({ ...fresh, isRfc822: true }, fresh, { sizeComparable: true })).toBe(false);
+    expect(sameListedAttachment(undefined, fresh, { sizeComparable: true })).toBe(false);
+  });
+
+  it("compares the size only where this parser wrote the list", () => {
+    // An upload's list is parseEnvelope's own, so a different count is a
+    // different reading. A Graph arrival lists Graph's count, which is not
+    // known to be the decoded bytes, so it cannot be held to it.
+    expect(sameListedAttachment({ ...fresh, size: 0 }, fresh, { sizeComparable: true })).toBe(false);
+    expect(sameListedAttachment({ ...fresh, size: 4096 }, fresh, { sizeComparable: false })).toBe(true);
   });
 });

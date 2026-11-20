@@ -98,8 +98,28 @@ const FORWARD_HEADERS = [
   "x-forwarded-to",
 ];
 
+/**
+ * A header's values, found by its NAME EXACTLY AS WRITTEN, case aside — never
+ * trimmed (2026-11-20).
+ *
+ * A field name is printable ASCII with no space and no colon (RFC 5322 §2.2),
+ * so `X-MS-Exchange-Organization-AutoForwarded : true` is not that header: it
+ * is the obsolete `Name : value` shape, and no Exchange stamp is written that
+ * way. Trimming read it as the stamp, and the stamp is the evidence that
+ * spends money unwatched. Whether Exchange's header firewall strips a spelling
+ * that is not the header's name is unknown, so the sender may get it through;
+ * matching the name exactly means it no longer counts once it has. postal-mime
+ * 4 keeps the whitespace before the colon in its key (`"…autoforwarded "`),
+ * which is what makes the spelling visible here at all. Case IS folded:
+ * field names are case-insensitive, Graph's `internetMessageHeaders` keeps the
+ * case they were written in (`MIME-Version`, `x-custom-header-group-name` in
+ * its own documentation) and postal-mime lowercases. The same rule covers the
+ * Bcc stamp and the forwarding headers, which all come through here.
+ */
 function headerValues(envelope: EmailEnvelope, name: string): string[] {
-  return envelope.headers.filter((header) => fold(header.name) === name).map((header) => header.value);
+  return envelope.headers
+    .filter((header) => (header.name ?? "").toLowerCase() === name)
+    .map((header) => header.value);
 }
 
 function autoForwarded(envelope: EmailEnvelope): boolean {

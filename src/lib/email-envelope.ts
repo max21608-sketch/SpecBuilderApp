@@ -108,7 +108,32 @@ function isoDate(value: unknown): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-/** Parses a stored `.eml`. Never throws on a malformed part — a half-read message is still worth reviewing. */
+/**
+ * One attachment's bytes, in whichever of the three shapes postal-mime hands
+ * them over: `ArrayBuffer | Uint8Array | string`.
+ *
+ * A part postal-mime decodes as text itself comes back as a Uint8Array — a
+ * calendar invite (`text/calendar`, `application/ics`) does — and until the
+ * move to postal-mime 4 (2026-11-20) only the other two shapes were read, so
+ * an attached invite was listed at 0 bytes and its download refused. A string
+ * appears only under `attachmentEncoding: "base64"`, which this app never
+ * asks for; it is decoded as base64 for completeness, never as text.
+ */
+function attachmentBytes(content: unknown): Buffer | null {
+  if (content instanceof ArrayBuffer) return Buffer.from(content);
+  if (ArrayBuffer.isView(content)) return Buffer.from(content.buffer, content.byteOffset, content.byteLength);
+  if (typeof content === "string") return Buffer.from(content, "base64");
+  return null;
+}
+
+/**
+ * Parses a stored `.eml`. Never throws on a malformed part — a half-read
+ * message is still worth reviewing. It DOES throw, with a `code`, when a
+ * message passes one of postal-mime's own bounds (nesting depth, header size,
+ * part count, forwarded addresses): those bound a hostile message, and the
+ * three paths that register mail (`email-ingest.ts`, `mail-ingest.ts`,
+ * `intake-source.ts`) catch it and record the failure.
+ */
 export async function parseEnvelope(bytes: Buffer | Uint8Array): Promise<EmailEnvelope> {
   const parsed = await PostalMime.parse(bytes);
 
@@ -143,12 +168,7 @@ export async function parseEnvelope(bytes: Buffer | Uint8Array): Promise<EmailEn
       return {
         filename: attachment.filename ? String(attachment.filename) : null,
         contentType,
-        size:
-          attachment.content instanceof ArrayBuffer
-            ? attachment.content.byteLength
-            : typeof attachment.content === "string"
-              ? attachment.content.length
-              : 0,
+        size: attachmentBytes(attachment.content)?.byteLength ?? 0,
         isRfc822: contentType.startsWith("message/rfc822"),
       };
     }),
@@ -168,7 +188,9 @@ export async function parseEnvelope(bytes: Buffer | Uint8Array): Promise<EmailEn
  * says what a message carries and is what the screen renders; if the route
  * counted the metadata and then re-parsed to fetch, the two could disagree
  * about which file is number three, and a person would download the wrong
- * document believing it was the one they clicked.
+ * document believing it was the one they clicked. The stored list is still a
+ * different parse from this one, made at registration, which is why the route
+ * also checks the two agree (`sameListedAttachment`).
  *
  * Returns null for an index the message does not have, and for an attachment
  * whose content this cannot make bytes of. NOTHING IS DECODED FURTHER: a .zip
@@ -190,15 +212,45 @@ export async function readAttachment(
   // a jsonb column. `parseEnvelope`'s own comment says the bytes never enter
   // the staged JSON, and this keeps that true.
   const parsed = await PostalMime.parse(bytes);
-  const content = (parsed.attachments ?? [])[index]?.content;
-  const body =
-    content instanceof ArrayBuffer
-      ? Buffer.from(content)
-      : typeof content === "string"
-        ? Buffer.from(content, "base64")
-        : null;
+  const body = attachmentBytes((parsed.attachments ?? [])[index]?.content);
   if (!body) return null;
   return { meta, bytes: body };
+}
+
+/**
+ * Is the attachment a fresh parse found at an index the one the screen LISTED
+ * at that index, when the email was registered?
+ *
+ * `readAttachment` keeps the list and the bytes on one parse, but the list a
+ * person clicks is not that parse: it is `email_messages.attachments_meta`,
+ * written once at registration. A parser that reads the same bytes differently
+ * later moves the index under the click. postal-mime 4 (2026-11-20) does: a
+ * base64 forward with no disposition was rendered into the body by 3.0.0 and is
+ * an attachment now, so every file after it moved down one and "Download" on
+ * the PDF would have sent the forward. So the route compares before it sends,
+ * and a disagreement is refused rather than served.
+ *
+ * Name, content type and the forwarded-message flag must always agree. The
+ * byte count is compared only where this parser wrote the list
+ * (`sizeComparable`, an upload): a Graph arrival lists what GRAPH says about
+ * each attachment (`mail-ingest.ts`), and Graph's `size` is its own count, not
+ * known to equal the decoded bytes. A strict comparison costs something too,
+ * and it is the safe direction: an invite or a forward registered under 3.0.0
+ * was listed at a different size (0 bytes; line endings rewritten) and is now
+ * refused here, and the whole `.eml` is the way to it.
+ */
+export function sameListedAttachment(
+  listed: unknown,
+  fresh: EmailAttachmentMeta,
+  { sizeComparable }: { sizeComparable: boolean },
+): boolean {
+  if (!listed || typeof listed !== "object") return false;
+  const row = listed as { filename?: unknown; contentType?: unknown; size?: unknown; isRfc822?: unknown };
+  const filename = typeof row.filename === "string" ? row.filename : null;
+  if (filename !== fresh.filename) return false;
+  if (String(row.contentType ?? "").toLowerCase() !== fresh.contentType) return false;
+  if (Boolean(row.isRfc822) !== fresh.isRfc822) return false;
+  return !sizeComparable || Number(row.size) === fresh.size;
 }
 
 /** `RE: FW: Re: Panther` → `Panther`. Covers the English, German and French prefixes Outlook writes. */

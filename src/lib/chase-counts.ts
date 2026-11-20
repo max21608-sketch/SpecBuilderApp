@@ -177,7 +177,10 @@ export function summariseGateRows<Q extends GateQuestion>(
 }
 
 /**
- * One muted line under the actions, or null where there is nothing to explain.
+ * Why the record's numbers differ, as one sentence, or null where there is
+ * nothing to explain. Since 2026-11-20 the record header shows its clauses
+ * behind "Why" (`chaseCountParts`), not as a line on the page: printed beside
+ * the button, it read as the screen apologising for its own button.
  *
  * Null is the common case and is correct: a screen whose numbers agree must
  * not carry a sentence saying so, or the sentence becomes furniture and the
@@ -188,12 +191,11 @@ export function summariseGateRows<Q extends GateQuestion>(
  * than one being hidden, because a disagreement between them is a finding and
  * not a rounding.
  */
-export function describeChaseCounts({
-  buckets,
-  toChase,
-  toQuote = null,
-  projectWide = null,
-}: {
+export function describeChaseCounts(input: ChaseCountInput): string | null {
+  return chaseCountParts(input)?.join(" · ") ?? null;
+}
+
+export type ChaseCountInput = {
   /** The TGQ gate's rows, bucketed. Null where Matthew's matrix does not reach the category. */
   buckets: ChaseBuckets | null;
   /** Outstanding item-TGQ `spec_field` QUESTIONS (`inChaseAsk`). Null where nothing is tiered. */
@@ -202,7 +204,19 @@ export function describeChaseCounts({
   toQuote?: number | null;
   /** Project-wide TGQ questions on this item, answered once on the project. */
   projectWide?: number | null;
-}): string | null {
+};
+
+/**
+ * The same sentence as its clauses, for a screen that lists them (the record
+ * header's "Why", 2026-11-20). `describeChaseCounts` is these joined, so the
+ * list and the sentence cannot say different things.
+ */
+export function chaseCountParts({
+  buckets,
+  toChase,
+  toQuote = null,
+  projectWide = null,
+}: ChaseCountInput): string[] | null {
   // NOTHING TIERED: there is no second measure to set the first against, and a
   // lone figure explains nothing.
   if (toChase === null) return null;
@@ -220,7 +234,7 @@ export function describeChaseCounts({
     const parts = [`${toQuote} TGQ`, `${toChase} to chase`];
     if (readiness > 0) parts.push(`${readiness} you record here`);
     if (pw > 0) parts.push(projectClause(pw));
-    return parts.join(" · ");
+    return parts;
   }
 
   const { toAnswer, chase, details, readiness, slots, project } = buckets;
@@ -234,5 +248,5 @@ export function describeChaseCounts({
   if (readiness > 0) parts.push(`${readiness} you record here`);
   if (slots > 0) parts.push(`${slots} counted as separate slots`);
   if (project > 0) parts.push(projectClause(project));
-  return parts.join(" · ");
+  return parts;
 }

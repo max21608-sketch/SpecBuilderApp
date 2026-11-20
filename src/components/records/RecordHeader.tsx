@@ -9,7 +9,7 @@
 // The TAB BAR is the page's and arrives as `tabs`: its counts come from the
 // tabs' own data, and which tab is chosen is the page's URL state.
 import { quantityNotGiven } from "@/lib/printed-number";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import Link from "next/link";
 import { ITEM_LEVEL_LABELS, normaliseItemLevel, type ItemLevel } from "@/lib/spec-vocab";
 import { variantName } from "@/lib/record-variants";
@@ -19,6 +19,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import Chip from "@/components/ui/Chip";
 import SuggestButton from "@/components/ui/SuggestButton";
 import RecordTitle from "@/components/records/RecordTitle";
+import { TONE } from "@/components/ui/tone";
 import type { Payload, SpecRecord } from "@/components/records/record-payload";
 
 export default function RecordHeader({
@@ -32,7 +33,7 @@ export default function RecordHeader({
   setLevel,
   readiness,
   chaseHref,
-  chaseCounts,
+  chaseWhy,
   onAddSpec,
   tabs,
 }: {
@@ -46,14 +47,19 @@ export default function RecordHeader({
   savingLevel: boolean;
   /** Accepting the suggested level: the page's write, which the details' select also makes. */
   setLevel: (next: string) => Promise<void>;
-  readiness: Pick<Payload["quoteReadiness"], "toChase">;
+  readiness: Pick<Payload["quoteReadiness"], "toChase" | "toQuote" | "projectWide">;
   chaseHref: string;
-  /** What the record's counts mean, in words, under the Chase button. Null where there is nothing to explain. */
-  chaseCounts: string | null;
+  /**
+   * Why the record's counts differ, clause by clause (`chaseCountParts`).
+   * Shown behind "Why", never on the page. Null where there is nothing to
+   * explain, and then the header carries no counts line at all.
+   */
+  chaseWhy: string[] | null;
   /** Add a spec by hand: the page opens the Specs tab with the form showing. */
   onAddSpec: () => void;
   tabs: React.ReactNode;
 }) {
+  const [why, setWhy] = useState(false);
   // ---- the header's subtitle, which is a row of places to go ---------------
   //
   // Everything in it either is a link or is a chip saying what is not set.
@@ -189,14 +195,51 @@ export default function RecordHeader({
           {/* THE BUTTON COUNTS WHAT IT WILL ASK. `toQuote` includes the
               readiness rows we answer ourselves; the chase screen never
               selects those, so a button naming that figure lands on a screen
-              ticking fewer. The muted line under it says which is which. */}
+              ticking fewer. "Why" under it says which is which. */}
           {readiness.toChase !== null && readiness.toChase > 0 && (
             <Link href={chaseHref} className={buttonClass("primary", "sm")}>
               Chase the {readiness.toChase}
             </Link>
           )}
-          {chaseCounts && (
-            <span className="basis-full text-right text-xs text-neutral-500">{chaseCounts}</span>
+          {/* THE COUNTS A PERSON ACTS ON, IN THE CARD'S OWN WORDS, AND THE
+              RECONCILIATION ONE CLICK AWAY (2026-11-20). The whole sentence
+              used to sit here — "10 to answer at TGQ · 2 to chase · the button
+              says 3 (differs — see the rows) · …" — beside "Chase the 3" and a
+              Quote readiness card saying 8 TGQ: a line apologising for its own
+              button. The visible figures are now the card's (`toQuote`,
+              `projectWide`, the same fields it prints), so the header, the
+              card and the button agree; the clauses are unchanged, and listed
+              under "Why". Only where there is something to explain. */}
+          {chaseWhy && (
+            <span className="basis-full text-right text-xs text-neutral-500">
+              {readiness.toQuote !== null && (
+                <>
+                  <span className={`font-semibold tabular-nums ${TONE.danger.text}`}>{readiness.toQuote}</span> TGQ
+                  {" · "}
+                </>
+              )}
+              {(readiness.projectWide ?? 0) > 0 && (
+                <>
+                  <span className="tabular-nums">{readiness.projectWide}</span> project-wide
+                  {" · "}
+                </>
+              )}
+              <button
+                type="button"
+                aria-expanded={why}
+                onClick={() => setWhy((value) => !value)}
+                className="underline decoration-dotted hover:text-neutral-800"
+              >
+                {why ? "Hide why" : "Why"}
+              </button>
+            </span>
+          )}
+          {chaseWhy && why && (
+            <ul aria-label="Why these counts differ" className="basis-full text-right text-xs text-neutral-500">
+              {chaseWhy.map((part) => (
+                <li key={part}>{part}</li>
+              ))}
+            </ul>
           )}
         </>
       }

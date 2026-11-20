@@ -18,6 +18,13 @@
 // opens no attempt and publishes nothing, which is the point of it being a
 // read. The .eml is four lines of invented multipart.
 //
+// THE LIST A PERSON CLICKS IS THE ONE STORED AT REGISTRATION (2026-11-20).
+// Each email run has its `email_messages` row with the `attachments_meta` the
+// screen renders, and one of them holds what postal-mime 3.0.0 recorded for a
+// message 4.2.1 reads differently: a base64 forward with no disposition, which
+// 3.0.0 rendered into the body and 4.2.1 lists first, so index 0 is the PDF on
+// the screen and the forward in a fresh parse.
+//
 // Rows are prefixed `__QA ` and deleted FK-safe.
 // ============================================================================
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -32,7 +39,7 @@ const signedIn = vi.hoisted(() => ({
   value: null as null | { id: string; email: string; name: string; role: string },
 }));
 
-const store = vi.hoisted(() => ({ bytes: new Uint8Array() }));
+const store = vi.hoisted(() => ({ files: new Map<string, Uint8Array>() }));
 
 vi.mock("@/lib/blob-source", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/blob-source")>();
@@ -42,7 +49,7 @@ vi.mock("@/lib/blob-source", async (importOriginal) => {
     // stands in for is the store, which a test environment has none of.
     readTrustedBlob: async (pathname: string, projectId: string) => {
       actual.assertProjectScopedPathname(pathname, projectId);
-      const bytes = Buffer.from(store.bytes);
+      const bytes = Buffer.from(store.files.get(pathname) ?? new Uint8Array());
       return { bytes, contentType: "message/rfc822", size: bytes.byteLength, pathname };
     },
   };
@@ -80,14 +87,58 @@ function eml(): Buffer {
   );
 }
 
+/**
+ * The same sheet, after a forward that is base64 with no Content-Disposition.
+ * postal-mime 3.0.0 rendered that forward into the body and listed ONE
+ * attachment, the sheet; 4.2.1 lists the forward first. Invented throughout.
+ */
+function emlWithEncodedForward(): Buffer {
+  const forward = ["From: __qa-client@example.test", "Subject: __QA the original", "", "The seat height is 450mm.", ""].join(
+    "\r\n",
+  );
+  return Buffer.from(
+    [
+      "From: Jane Doe <jane@designers.test>",
+      "To: Project Panther <p17726@benwhistler.test>",
+      "Subject: __QA FW: X-100 - sizes attached",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/mixed; boundary="B2"',
+      "",
+      "--B2",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "See below, and the sheet.",
+      "--B2",
+      "Content-Type: message/rfc822",
+      "Content-Transfer-Encoding: base64",
+      "",
+      Buffer.from(forward, "utf8").toString("base64"),
+      "--B2",
+      'Content-Type: application/pdf; name="__QA X-100 sizes.pdf"',
+      'Content-Disposition: attachment; filename="__QA X-100 sizes.pdf"',
+      "Content-Transfer-Encoding: base64",
+      "",
+      sheet.toString("base64"),
+      "--B2--",
+      "",
+    ].join("\r\n"),
+    "utf8",
+  );
+}
+
+/** What registration stored for the sheet: `parseEnvelope`'s own entry. */
+const sheetListed = { filename: "__QA X-100 sizes.pdf", contentType: "application/pdf", size: sheet.byteLength, isRfc822: false };
+
 describeIfDb("the email attachment route", () => {
   const client = new pg.Client({ connectionString: databaseUrl });
   let projectId = "";
   let emailRunId = "";
   let pdfRunId = "";
+  let movedRunId = "";
+  let unlinkedRunId = "";
+  const mailbox = `__qa-attachments-${qaNumber("P90044")}@example.test`.replace(/\s+/g, "-");
 
   beforeAll(async () => {
-    store.bytes = new Uint8Array(eml());
     signedIn.value = {
       id: "00000000-0000-0000-0000-000000000001",
       email: "__qa@example.test",
@@ -102,11 +153,13 @@ describeIfDb("the email attachment route", () => {
       )
     ).rows[0].id;
 
-    const make = async (kind: string, filename: string, contentType: string) => {
+    const make = async (kind: string, slug: string, filename: string, contentType: string, bytes?: Buffer) => {
+      const storagePath = `projects/${projectId}/uploads/__qa-${slug}`;
+      if (bytes) store.files.set(storagePath, new Uint8Array(bytes));
       const attachment = await client.query(
         `insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
          values ('email_messages', gen_random_uuid(), 'mime', $1, $2, $3, 2048, 'qa') returning id`,
-        [`projects/${projectId}/uploads/__qa-${kind}`, filename, contentType],
+        [storagePath, filename, contentType],
       );
       const run = await client.query(
         `insert into intake_runs (project_id, attachment_id, source_kind, document_kind, status, created_by, updated_by)
@@ -115,11 +168,29 @@ describeIfDb("the email attachment route", () => {
       );
       return String(run.rows[0].id);
     };
-    emailRunId = await make("email", "__QA reply.eml", "message/rfc822");
-    pdfRunId = await make("shop_drawings", "__QA S-100.pdf", "application/pdf");
+    // The message row the screen lists the attachments from, as registration
+    // writes it for an upload.
+    const message = (runId: string, listed: unknown[]) =>
+      client.query(
+        `insert into email_messages (mailbox, origin, subject, routing_status, project_id, intake_run_id,
+                                     assigned_by, assigned_at, assignment_kind, has_attachments, attachments_meta,
+                                     created_by, updated_by)
+         values ($1, 'upload', '__QA X-100 - sizes attached', 'assigned', $2, $3,
+                 'qa', now(), 'manual', true, $4::jsonb, 'qa', 'qa')`,
+        [mailbox, projectId, runId, JSON.stringify(listed)],
+      );
+    emailRunId = await make("email", "reply", "__QA reply.eml", "message/rfc822", eml());
+    await message(emailRunId, [sheetListed]);
+    pdfRunId = await make("shop_drawings", "s100", "__QA S-100.pdf", "application/pdf");
+    movedRunId = await make("email", "moved", "__QA forward.eml", "message/rfc822", emlWithEncodedForward());
+    // What postal-mime 3.0.0 recorded for that message: the sheet alone, at 0.
+    await message(movedRunId, [sheetListed]);
+    // An email run whose message was taken off this project: no row joins it.
+    unlinkedRunId = await make("email", "unlinked", "__QA unlinked.eml", "message/rfc822", eml());
   });
 
   afterAll(async () => {
+    await client.query(`delete from email_messages where mailbox = $1`, [mailbox]);
     await client.query(`delete from intake_runs where project_id = $1`, [projectId]);
     await client.query(`delete from attachments where storage_path like $1`, [`projects/${projectId}/%`]);
     await client.query(`delete from projects where id = $1`, [projectId]);
@@ -184,5 +255,27 @@ describeIfDb("the email attachment route", () => {
         role: "admin",
       };
     }
+  });
+
+  it("refuses an attachment that reads differently now from the list the screen showed, rather than send another file", async () => {
+    // Index 0 on the screen is the sheet; in a fresh parse it is the forward.
+    // Sending what the fresh parse holds at 0 would save the forwarded email
+    // under the name of the sheet the person clicked.
+    const { GET } = await import("@/app/api/imports/[id]/attachments/[index]/route");
+    const response = await GET(request(), params(movedRunId, "0"));
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as { ok: boolean; code: string; error: string };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("attachment_changed");
+    expect(body.error).toContain("open the .eml");
+    // The index past the stored list is refused before anything is read.
+    expect((await GET(request(), params(movedRunId, "1"))).status).toBe(404);
+  });
+
+  it("answers for an email only through the message the screen listed it from", async () => {
+    const { GET } = await import("@/app/api/imports/[id]/attachments/[index]/route");
+    const response = await GET(request(), params(unlinkedRunId, "0"));
+    expect(response.status).toBe(404);
+    expect(((await response.json()) as { code: string }).code).toBe("email_not_on_document");
   });
 });

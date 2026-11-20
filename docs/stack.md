@@ -104,7 +104,7 @@ down stops someone assuming a safety net that is not there.
   `Id` and no `Job Number`, and leaves BWS-owned vocabularies blank. Somebody
   reads it; nothing uploads it.
 
-## Known gap: one dependency advisory, accepted 2026-09-14
+## Known gap: dependency advisories, accepted 2026-09-14 and 2026-11-20
 
 `exceljs` (the .xlsx writer behind the BWS export) depends on a `uuid` version
 carrying a moderate advisory: a missing buffer bounds check in v3/v5/v6 when the
@@ -113,6 +113,71 @@ caller supplies a `buf` argument. exceljs never exposes that argument, and
 deliberately and recorded here rather than carried silently. The other eight
 `npm audit` findings are the pre-existing dev toolchain (vitest, vite, postcss,
 esbuild) and reach no deployed code.
+
+**Before production, 2026-11-20.** `npm audit --omit=dev` read 15 advisories
+(1 critical, 10 high). next went to 15.5.29, postal-mime to 4.2.1, and
+`npm audit fix` without `--force` took undici, sharp, brace-expansion and
+source-map-js. What is left is below, one paragraph a package, each with what
+it would take to change the decision. "Fix available via --force" is never the
+reason to take one: every remaining fix npm offers is a major, and two of them
+are downgrades.
+
+`zod` (3.25.76, the request validation in 63 files; high, GHSA-mrhx-c7xc-m3w5,
+fixed in 4.6.6). An array schema collects an issue object for every failing
+element with no cap, so a large enough array exhausts memory. A request reaches
+a schema here only through a route the middleware has let through, which means
+a signed-in user, apart from two public routes: the login body has no array in
+it, and the Graph notification route answers 404 while mail ingestion is off and
+otherwise refuses any body over 256 KB before parsing it. A signed-in body is
+bounded by Vercel's 4.5 MB request ceiling, so the worst case is a colleague
+exhausting their own function instance. The second copy, zod 4.1.11 inside
+`@vercel/cli-config`, validates the Vercel CLI's own config file on a
+developer's machine and never sees a request. The fix is zod 4, a rewrite of
+every schema's error handling and messages. Revisit if a public route ever
+parses a body with an array schema, or when zod 3 gets a patched release.
+
+`@vercel/blob` (2.8.0; high, the same zod advisory, through `@vercel/oidc` and
+`@vercel/cli-config`). The zod copy is the CLI-config one above: `@vercel/oidc`
+reads the developer's CLI auth file to refresh a token locally, which no
+request reaches. `npm audit fix` also offered 2.9.0, which keeps the same zod
+and so fixes nothing; it was put back, because the private client-direct upload
+is not a library to move for no gain. npm's `--force` fix is 2.4.0, a
+downgrade. Revisit when a `@vercel/cli-config` release depends on zod 4.6.6 or
+later, and take the blob release that carries it.
+
+`exceljs` / `uuid` (exceljs 4.4.0, uuid 8.3.2; moderate, GHSA-w5hq-g745-h8pq).
+Re-read on this date and unchanged from the paragraph above: exceljs calls
+`uuid` in one file, `v4()` with no buffer, and the advisory is v3/v5/v6 with a
+caller's buffer. npm's fix is now exceljs 3.4.0. Revisit if this app calls
+`uuid` itself, or when an exceljs release moves to uuid 11.1.1 or later.
+
+`@vercel/queue` (0.4.0, pinned; moderate, GHSA-g3hv-75wg-m249 in its own
+minimatch 10.2.6). The advisory is a glob PATTERN that amplifies; the queue
+client matches source files against the `functions` patterns of this repo's
+own `vercel.json`, in its local-development route mapping. Nobody outside
+writes a pattern. npm's fix is 0.1.1, a downgrade of a beta API whose callback
+shape `src/lib/queue-callback.ts` is written against. Revisit when a 0.x
+release depends on minimatch 11.0.1 or later.
+
+`postcss` inside next (8.4.31, pinned exactly by next 15.5.29; high,
+GHSA-6g55-p6wh-862q and three more: a `sourceMappingURL` comment in the CSS
+being processed reads a file, and `</style>` survives stringify). next calls
+that copy at BUILD time, on this repo's own stylesheets and Tailwind output;
+the one runtime user is the AMP optimiser, and this app has no AMP page. No
+request's CSS is ever processed. npm's fix is next 16. Revisit if anything
+processes CSS a user supplied, or when a 15.x release moves the pin.
+
+**What next 15.5.29 changed that a later reader could trip on.** A route
+handler's own `content-length` is no longer sent: Node's `sendResponse` drops
+`content-length`, `content-encoding` and `transfer-encoding` from every
+handler response (the forwarded-fetch fix), so the six routes that set it
+(`/api/email-messages/[id]/mime`, `/api/records/[id]/image`,
+`/api/imports/[id]/source`, `/api/imports/[id]/attachments/[index]`,
+`/api/imports/[id]/row-image`, `/api/change-sets/[id]/evidence`) now go out
+chunked, with `content-range` still on a 206. A download shows no total size.
+pdfjs is unaffected because `src/lib/pdf-crop.ts` already turns range requests
+off. A test that calls a handler directly still sees the header, because the
+strip happens in the server, not the handler.
 
 ## What runs on a schedule
 

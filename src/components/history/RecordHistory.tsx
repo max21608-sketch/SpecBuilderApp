@@ -65,9 +65,13 @@ type ComparePayload = {
   unchanged?: { key: string; label: string; value: string | null }[];
 };
 
-/** A timestamp, not a `date` column — so `Date` is safe here and only here. */
+/**
+ * A timestamp, not a `date` column — so `Date` is safe here and only here.
+ * en-GB, as the inbox and the Documents tab print one, never the browser's own
+ * locale, which made History the one screen in US order (2026-11-20).
+ */
 function when(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
+  return new Date(iso).toLocaleString("en-GB", {
     day: "numeric",
     month: "short",
     hour: "2-digit",
@@ -76,7 +80,7 @@ function when(iso: string): string {
 }
 
 function day(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
 /** One line of the diff grid: what it is, what it was, what it now is. */
