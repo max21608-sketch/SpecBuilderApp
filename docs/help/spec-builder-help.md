@@ -588,7 +588,8 @@ Things that look wrong and are not:
   test sites the draft is addressed to you on purpose so nothing reaches a
   client by accident. Address it yourself before sending.
 - *An item shows nothing outstanding but is obviously unfinished* → it has no
-  category, so it has no questions. Give it one.
+  category, so it has no questions. Its dot on the phase table is grey ("No
+  category — nothing to measure it against yet"), not green. Give it one.
 - *TGQ numbers on two screens differ* → one counts questions, the other counts
   items with something outstanding. Hover the number for what it counts.
 - *"Product code — Nowhere to record it"* on the Gates tab → known: the
