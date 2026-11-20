@@ -237,10 +237,17 @@ PILOT v1.11, project *P16717 — ronnie-scotts-lbpco*, the bill review of
 `RONNIE SCOTTS ST4 Procurement Schedule (converted).xlsx`. Timestamps are into
 the recording, and each one marks a frame that was looked at.
 
-### `W3400 x D650 x H900mm SH450` reads W and D with no unit — OPEN (seen by C2's walk, local stack)
+### `W3400 x D650 x H900mm SH450` reads W and D with no unit — FIXED 2026-11-20 (`46e1cbf`, on `prod-bill`, not yet on staging)
 
 When a size line ends with `SH450` after the unit, W and D come out unitless.
-Seen on an invented bill during the C2 walk. Not diagnosed.
+Seen on an invented bill during the C2 walk. **Cause:** the one combined-line
+reader (`parseCombinedDimensions`) split figures only on `x`, so `H900mm SH450`
+was one unreadable part. **Fixed:** figures that EACH carry a slot letter may be
+separated by spaces as well as `x` (`Overall: W 850 D 900 H 780 mm` too); a bare
+figure, an unknown word or a lone figure still leaves the line a note. Measured
+the same day: 0 changes on every real bill and all 58 staged drawing runs; the
+invented `QA-BN-01` now composes `W3400 x D650 x H900 x SH450mm`. Found by the
+production-readiness walk (`docs/plans/production-readiness-2026-11-20.md`).
 
 ### The pack screen calls a waiting transcribed bill "Ready to review" — FIXED 2026-11-16 (`aa0a314`: "Needs transcribing")
 
