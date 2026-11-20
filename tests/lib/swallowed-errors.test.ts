@@ -121,6 +121,11 @@ describe("the lower-severity siblings", () => {
   it("the classify route logs registers it could not load", () => {
     const text = source("imports/classify/route.ts");
     expect(text).not.toMatch(/\.catch\(\(\)\s*=>\s*null\)/);
-    expect(text.match(/\.catch\(registersUnread\)/g)).toHaveLength(2);
+    // One logged load, used by both places that read a PDF bill (prod-ready
+    // review F4 moved the two loads into `billReadingOptions`): neither may
+    // load the registers on its own, unlogged.
+    expect(text.match(/\.catch\(registersUnread\)/g)).toHaveLength(1);
+    expect(text.match(/await billReadingOptions\(\)/g)).toHaveLength(2);
+    expect(text.match(/loadBoqReadingRegisters\(/g)).toHaveLength(1);
   });
 });
