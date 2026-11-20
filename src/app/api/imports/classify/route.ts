@@ -61,6 +61,12 @@ function registersUnread(cause: unknown): null {
   return null;
 }
 
+/** The saved headings the PDF-bill reader uses, or none where they could not be loaded. */
+async function billReadingOptions(): Promise<NonNullable<Parameters<typeof readPdfBill>[1]>> {
+  const registers = await loadBoqReadingRegisters(sql).catch(registersUnread);
+  return registers ? { aliases: registers.aliases } : {};
+}
+
 /**
  * The HTTP status a failed look answers with. The body is what the screen
  * reads — `ok: false`, the code, the sentence and `charged` — and the status is
@@ -296,7 +302,19 @@ export async function POST(request: Request): Promise<Response> {
   // question. The name still settles nothing (`document-name-guess.ts`); a
   // model answer the name contradicts settles nothing either. Held with both
   // readings, the model's beside the name's, and nothing registered or read.
+  //
+  // WHAT CODE MAKES OF A PDF THE MODEL CALLS A BILL IS READ FIRST (prod-ready
+  // review F4, 2026-11-20). The hold returned before it, so a PDF named as a
+  // schedule that the model read, certain, as a bill code cannot put back was
+  // offered "Bill of quantities" one click away with no word that choosing it
+  // means the model transcribes it — one charged read. The held answer now
+  // carries the same `pdfBill` the unheld one does; a bill code refuses
+  // outright carries none, and its registration says why if it is chosen.
   // ============================================================================
+  const modelBillRead =
+    result.decision?.importType === "boq" && source.type === "pdf"
+      ? await readPdfBill(blob.bytes, await billReadingOptions())
+      : null;
   const disagreement = nameModelDisagreement(guessKindFromName(input.filename), result);
   if (disagreement && result.decision) {
     return json(
@@ -307,6 +325,13 @@ export async function POST(request: Request): Promise<Response> {
         unsupported: null,
         held: disagreement,
         modelDecision: result.decision,
+        pdfBill: !modelBillRead
+          ? null
+          : modelBillRead.ok
+            ? { lines: modelBillRead.rows.length, pages: modelBillRead.pageCount }
+            : isTranscribable(modelBillRead.code)
+              ? transcribeNote(modelBillRead.code, countPdfPages(blob.bytes))
+              : null,
         titleText: result.titleText,
         evidence: result.evidence,
         certain: result.certain,
@@ -318,9 +343,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   let pdfBill: { lines: number; pages: number; transcribe?: true; reason?: string } | null = null;
-  if (result.decision?.importType === "boq" && source.type === "pdf") {
-    const registers = await loadBoqReadingRegisters(sql).catch(registersUnread);
-    const read = await readPdfBill(blob.bytes, registers ? { aliases: registers.aliases } : {});
+  if (modelBillRead) {
+    const read = modelBillRead;
     // CODE COULD NOT PUT ITS TEXT BACK INTO A TABLE: the model transcribes it
     // (C2), every line marked. Filed as a bill; the row says so and that the
     // transcription is one charged read.
@@ -363,8 +387,7 @@ export async function POST(request: Request): Promise<Response> {
     // wrong question. So it is HELD with one sentence naming the next step,
     // the model's reading beside it, and nothing is registered or charged.
     // ==========================================================================
-    const registers = await loadBoqReadingRegisters(sql).catch(registersUnread);
-    const read = await readPdfBill(blob.bytes, registers ? { aliases: registers.aliases } : {});
+    const read = await readPdfBill(blob.bytes, await billReadingOptions());
     if (read.ok) {
       return json(
         {

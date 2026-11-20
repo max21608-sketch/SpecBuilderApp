@@ -175,6 +175,13 @@ type Queued = {
    */
   duplicate: boolean;
   /**
+   * THE RUN AN EMAIL'S REGISTRATION MADE, for the email's own review page
+   * (F1, 2026-11-20). An email joins no pack — `assignMessage` files its read
+   * with `batch_id` null — so a press that uploaded only emails has no pack to
+   * go to, and goes here instead, where the Documents tab's "Emails" row links.
+   */
+  emailRunId: string | null;
+  /**
    * A PDF long enough that one read may not finish (`WARN_PDF_PAGES`). The
    * upload still proceeds; this is said on the row, in amber, and is not
    * `note`, which the tally reads as "waiting for a slot".
@@ -201,8 +208,55 @@ type Queued = {
   pages: number | null;
 };
 
+/**
+ * The model's evidence, and what a PDF bill's text read as.
+ *
+ * A PDF BILL CODE COULD NOT READ says, before it is registered, that the model
+ * will transcribe it and that it is charged (C2): the statement of the charge
+ * belongs on the row, as it does for every document read on registration —
+ * the row that files it, and since F4 (2026-11-20) the row that offers it.
+ */
+function withPdfBill(
+  evidence: string | null,
+  pdfBill: { lines: number; pages: number; transcribe?: true; reason?: string } | null,
+): string | null {
+  if (pdfBill?.transcribe) {
+    return `${evidence ?? ""} ${pdfBill.reason ?? ""} The model will transcribe it when you open the review${pdfBill.pages ? ` (${pdfBill.pages} page${pdfBill.pages === 1 ? "" : "s"})` : ""} — one charged read — and mark every line for you to check against its page.`
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  if (pdfBill) {
+    return `${evidence ?? ""} Its text reads as a table: ${pdfBill.lines} line${pdfBill.lines === 1 ? "" : "s"} on ${pdfBill.pages} page${pdfBill.pages === 1 ? "" : "s"}.`.trim();
+  }
+  return evidence;
+}
+
 /** What will be used for a file: what somebody chose, else what was read. */
 const kindOf = (item: Queued) => item.choice || item.suggested;
+
+/**
+ * HELD BECAUSE THE NAME AND THE MODEL DISAGREE (K1), and nobody has said which.
+ *
+ * ITS BOX SHOWS WHAT THE PRESS COUNTS (prod-ready F6, 2026-11-20): nothing.
+ * It showed the name's kind, in amber, while the press read "Read the 0 you
+ * have named" — the person saw their answer already in the box and was stuck,
+ * because only the suggestion could record it (choosing the option a select
+ * already shows fires no change). So the box is empty until somebody chooses,
+ * in the box or by either suggestion; neither side is picked for them.
+ */
+const disputed = (item: Queued) => item.status === "needs-kind" && Boolean(item.alternative) && !item.choice;
+
+/** The kind the row's box shows. */
+const shownKind = (item: Queued) => (disputed(item) ? "" : kindOf(item));
+
+/**
+ * What the row says under its box: the model's evidence where its reading of a
+ * disputed file is the one chosen — in the box or by the suggestion — so a
+ * bill the model will transcribe says what that costs when the press spends
+ * it (F4); the name's, or the model's unheld reading, otherwise.
+ */
+const shownEvidence = (item: Queued) =>
+  item.alternative && item.choice === item.alternative ? (item.alternativeEvidence ?? item.evidence) : item.evidence;
 
 /**
  * The kind the press may act on WITHOUT looking at the document.
@@ -232,7 +286,7 @@ function uploadTally(queue: Queued[]) {
   return queue.reduce(
     (acc, item) => {
       if (item.pathname) acc.stored += 1;
-      if (item.status !== "refused" && kindOf(item)) acc.identified += 1;
+      if (item.status !== "refused" && shownKind(item)) acc.identified += 1;
       if (item.status === "registering" || (item.status === "done" && !item.note && !item.duplicate)) acc.beingRead += 1;
       // Registered, and its read is queued behind the pack's in-flight cap. It
       // starts on its own and needs nobody, which is why it is not in the
@@ -322,6 +376,7 @@ export default function IntakeBatchUpload({
         alternativeEvidence: null,
         note: null,
         duplicate: false,
+        emailRunId: null,
         warning: null,
         tooLarge: false,
         failure: null,
@@ -405,13 +460,21 @@ export default function IntakeBatchUpload({
    * here, a press that registers nothing creates nothing: not an upload that
    * fails to store, and not a file held for a kind. Returns null, with the
    * banner set, when the pack itself could not be made.
+   *
+   * AND NOT AN EMAIL (F1, 2026-11-20). An email's read is filed with no pack
+   * (`assignMessage`, `batch_id` null: it counts against the project's
+   * batch-less slots), so a pack made for one held nothing, the batches list
+   * hid it, and the redirect to it said "That pack is not on this project".
+   * The press never calls this for an email, and the label counts only the
+   * files that can be in the pack.
    */
   async function ensureBatch(): Promise<string | null> {
     if (batchId.current) return batchId.current;
+    const files = queue.filter((item) => kindOf(item) !== "email").length;
     const batch = await apiFetch<{ batch: { id: string } }>(`/api/projects/${projectId}/batches`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ label: `${queue.length} document${queue.length === 1 ? "" : "s"}` }),
+      body: JSON.stringify({ label: `${files} document${files === 1 ? "" : "s"}` }),
     });
     if (!batch.ok) {
       setError(batch.error);
@@ -530,15 +593,7 @@ export default function IntakeBatchUpload({
           // the lines are put back by code at registration, and the count is
           // the first thing to check against the PDF.
           const pdfBill = asked.data.decision ? (asked.data.pdfBill ?? null) : null;
-          // A PDF BILL CODE COULD NOT READ says, before it is registered, that
-          // the model will transcribe it and that it is charged (C2): the
-          // statement of the charge belongs on this row, as it does for every
-          // document read on registration.
-          const evidence = pdfBill?.transcribe
-            ? `${asked.data.evidence ?? ""} ${pdfBill.reason ?? ""} The model will transcribe it when you open the review${pdfBill.pages ? ` (${pdfBill.pages} page${pdfBill.pages === 1 ? "" : "s"})` : ""} — one charged read — and mark every line for you to check against its page.`.replace(/\s+/g, " ").trim()
-            : pdfBill
-              ? `${asked.data.evidence ?? ""} Its text reads as a table: ${pdfBill.lines} line${pdfBill.lines === 1 ? "" : "s"} on ${pdfBill.pages} page${pdfBill.pages === 1 ? "" : "s"}.`.trim()
-              : (asked.data.evidence ?? null);
+          const evidence = withPdfBill(asked.data.evidence ?? null, pdfBill);
           update(item.key, {
             sentToModel: item.sentToModel || asked.data.charged !== false,
             largeDocument: asked.data.largeDocument === true,
@@ -546,12 +601,15 @@ export default function IntakeBatchUpload({
           // THE NAME AND THE MODEL DISAGREE (K1): held, with the name's
           // suggestion kept in the box and the model's offered beside it. A
           // person chooses; nothing is registered or read until they do.
+          //
+          // AND THE MODEL'S READING CARRIES ITS COST (F4): a bill the model
+          // will transcribe says so beside the offer, as the unheld row does.
           if (asked.data.held && asked.data.modelDecision) {
             update(item.key, {
               status: "needs-kind",
               held: asked.data.held,
               alternative: choiceFor(asked.data.modelDecision),
-              alternativeEvidence: asked.data.evidence ?? null,
+              alternativeEvidence: withPdfBill(asked.data.evidence ?? null, asked.data.pdfBill ?? null),
             });
             continue;
           }
@@ -606,8 +664,11 @@ export default function IntakeBatchUpload({
           continue;
         }
 
-        const id = await ensureBatch();
-        if (!id) return;
+        // AN EMAIL IS REGISTERED WITH NO PACK (F1): its read is filed with none
+        // whatever is sent, so asking for one only made an empty pack.
+        const email = entry.documentKind === "email";
+        const id = email ? null : await ensureBatch();
+        if (!email && !id) return;
 
         update(item.key, { status: "registering", failure: null, held: null });
         const res = await apiFetch<{
@@ -621,7 +682,7 @@ export default function IntakeBatchUpload({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             projectId,
-            batchId: id,
+            ...(id ? { batchId: id } : {}),
             importType: entry.importType,
             documentKind: entry.documentKind,
             pathname,
@@ -665,6 +726,7 @@ export default function IntakeBatchUpload({
           progress: 100,
           error: autoRead && !autoRead.dispatched && !waiting ? (autoRead.error ?? "Stored, but not queued for reading.") : null,
           note: waiting ? (autoRead.note ?? null) : null,
+          emailRunId: email ? (res.data.importId ?? null) : null,
         });
       }
 
@@ -677,14 +739,22 @@ export default function IntakeBatchUpload({
       // files that had each failed with a reason vanished together and read as
       // "one mass fail". A press that leaves anything held only asks the
       // parent to refresh.
+      //
+      // WITH NO PACK, AN EMAIL'S OWN REVIEW (F1). A press of emails only made
+      // no pack: one email goes to its review page, where the Documents tab's
+      // "Emails" row links; several close the panel over that Documents card,
+      // whose "Emails" group lists them. With a pack, the pack, as always —
+      // the emails beside it are under "Emails" too.
       setQueue((current) => {
         const id = batchId.current;
         const waiting = current.some((row) => row.status === "needs-kind" || row.status === "failed" || row.duplicate);
+        const emails = current.filter((row) => row.emailRunId);
         if (waiting) {
           queueMicrotask(() => onRegistered?.());
         } else {
           queueMicrotask(() => onUploaded?.());
           if (id) window.location.href = `/dashboard/projects/${projectId}/intake/${id}`;
+          else if (emails.length === 1) window.location.href = `/dashboard/imports/${emails[0]!.emailRunId}`;
         }
         return current;
       });
@@ -699,7 +769,11 @@ export default function IntakeBatchUpload({
   // whose kind a person has said, or whose document has already been read, is
   // not asked about again — so a pack whose suggestions were all accepted costs
   // nothing to identify, and the sentence has to be able to say so.
-  const toIdentify = pending.filter((item) => !settledKind(item)).length;
+  //
+  // NOR A FILE HELD FOR A PERSON (F4, 2026-11-20): the press skips one whose
+  // box nobody has answered — "Try identifying again" is its own press — so
+  // counting it promised a call the press does not make.
+  const toIdentify = pending.filter((item) => !settledKind(item) && item.status !== "needs-kind").length;
   const namedFromFilename = queue.filter((item) => item.suggestedFrom === "name" && !item.choice).length;
   const tally = uploadTally(queue);
   const showTally = busy || queue.some((item) => item.pathname);
@@ -805,9 +879,9 @@ export default function IntakeBatchUpload({
             )}
             {toIdentify === 0 ? (
               <>
-                One press: each file is stored and read. Every file already has a kind, so there is nothing to spend on
-                working that out — just a full charged read for every specification document, and a bill of quantities
-                is read by code and costs nothing.
+                One press: each file is stored and read. Nothing is left for the press to identify, so there is nothing
+                to spend on working that out — just a full charged read for every specification document, and a bill
+                of quantities is read by code and costs nothing.
               </>
             ) : (
               <>
@@ -927,14 +1001,14 @@ export default function IntakeBatchUpload({
 
                 <select
                   aria-label={`Kind of ${item.file.name}`}
-                  value={kindOf(item)}
+                  value={shownKind(item)}
                   onChange={(event) => update(item.key, { choice: event.target.value })}
                   disabled={busy || item.status === "done"}
                   className={`border rounded px-2 py-1 text-sm text-neutral-900 ${
                     unchecked ? "border-amber-400 bg-amber-50" : "border-neutral-300"
                   }`}
                 >
-                  <option value="">What is this?</option>
+                  <option value="">{disputed(item) ? "— say which —" : "What is this?"}</option>
                   {CHOICES.map((choice) => (
                     <option key={choice.value} value={choice.value}>
                       {choice.label}
@@ -989,7 +1063,7 @@ export default function IntakeBatchUpload({
                 ) : (
                   // WHAT IT WAS READ FROM, so a filed answer can still be
                   // checked against the file rather than taken on trust.
-                  item.evidence && <p className="w-full text-xs text-neutral-500">{item.evidence}</p>
+                  shownEvidence(item) && <p className="w-full text-xs text-neutral-500">{shownEvidence(item)}</p>
                 )}
                 {/* THE MODEL'S READING, where it contradicts the name's (K1):
                     one click, as the name's is, and neither filed. */}

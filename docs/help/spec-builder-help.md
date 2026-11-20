@@ -232,8 +232,11 @@ Project → "Documents" tab → "Add documents" → drop the files or "Choose fi
   Other specification document. Files it cannot identify say "Not identified"
   — choose the kind by hand. Where the file's name and its contents disagree
   ("The name says Bill of quantities; the model reads an FF&E schedule —
-  which is it?"), both are offered as buttons on its row: press the right one,
-  then press again. Nothing is read until you do.
+  which is it?"), its box reads "— say which —" and both kinds are offered as
+  buttons on its row: choose the kind in the box or press the right
+  suggestion, then press "Read the 1 you have named". Nothing is read until
+  you do. If the model's reading is a bill it must transcribe, the row says
+  so: one charged read.
 - **Nothing is read and nothing is charged until you press "Start intake
   (N)".** A bill from a spreadsheet is read by code and is free. Every other
   kind is a charged read.
@@ -396,6 +399,9 @@ against it.
   configuration".
 - The same item listed twice (another suite, another phase): "Link a twin
   line".
+- An email read before two lines were linked says "… is on 2 lines of …,
+  linked as twins since this was read — Re-match (free)". Press "Re-match" at
+  the top of that email's review (it costs nothing): the spec goes on each line.
 
 ### 5.11 Phases: add one, or remove a wrong one
 - **A sheet that should not be a phase, before the bill is confirmed:** on the

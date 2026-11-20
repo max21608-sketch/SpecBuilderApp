@@ -79,6 +79,39 @@ describe("a file whose name and contents disagree", () => {
     expect(apiFetch.mock.calls.filter((call) => String(call[0]).includes("/classify"))).toHaveLength(1);
   });
 
+  // The prod-ready review, 2026-11-20 (F4): a held row was still counted as one
+  // of "N small calls to identify" on the next press, which skips it.
+  it("is not counted as a call the next press will make", async () => {
+    mount();
+    expect(screen.getByText(/one small call to identify it/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /Start intake/ }));
+    await screen.findByText(HELD);
+
+    expect(screen.queryByText(/small calls? to identify/)).toBeNull();
+    expect(screen.getByText(/Nothing is left for the press to identify/)).toBeTruthy();
+  });
+
+  // THE BOX SHOWS WHAT THE APP COUNTS (prod-ready F6, 2026-11-20). Seen on the
+  // production build: the held row's box already read "Bill of quantities
+  // (creates the records)" — the name's guess — while the press said "Read
+  // the 0 you have named", disabled, and only the chip could unstick it.
+  it("leaves the box empty while held, so choosing in it counts", async () => {
+    mount();
+    await userEvent.click(screen.getByRole("button", { name: /Start intake/ }));
+    await screen.findByText(HELD);
+
+    const box = screen.getByRole("combobox", { name: `Kind of ${NAME}` }) as HTMLSelectElement;
+    expect(box.value).toBe("");
+    expect((box.selectedOptions[0]?.textContent ?? "").trim()).toBe("— say which —");
+    expect(screen.getByRole("button", { name: /Read the 0 you have named/ })).toBeDisabled();
+
+    await userEvent.selectOptions(box, "boq");
+    expect(box.value).toBe("boq");
+    await userEvent.click(screen.getByRole("button", { name: /Read the 1 you have named/ }));
+    await waitFor(() => expect(registered()).toHaveLength(1));
+    expect(registered()[0]).toMatchObject({ importType: "boq", documentKind: null, filename: NAME });
+  });
+
   it("files the model's reading when that is the one chosen", async () => {
     mount();
     await userEvent.click(screen.getByRole("button", { name: /Start intake/ }));
@@ -86,5 +119,70 @@ describe("a file whose name and contents disagree", () => {
     await userEvent.click(screen.getByRole("button", { name: /Read the 1 you have named/ }));
     await waitFor(() => expect(registered()).toHaveLength(1));
     expect(registered()[0]).toMatchObject({ importType: "spec_document", documentKind: "ffe_schedule" });
+  });
+});
+
+// ============================================================================
+// THE MODEL'S READING IS A BILL CODE CANNOT READ (prod-ready review F4,
+// 2026-11-20). The route held the file before its PDF-bill checks ran, so the
+// row offered "Bill of quantities" one click away and never said that
+// choosing it means the model transcribes it — one charged read. The unheld
+// path has always said so on the row; the held one now does too, and keeps
+// saying it once the bill is chosen, because that is when the press spends.
+// ============================================================================
+describe("a held PDF the model reads as a bill to be transcribed", () => {
+  const PDF = "Guest rooms FF&E schedule.pdf";
+  const SAYS = "The name says FF&E schedule; the model reads a bill of quantities — which is it?";
+  const COST = /The model will transcribe it when you open the review \(12 pages\) — one charged read — and mark every line/;
+
+  beforeEach(() => {
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/batches")) return { ok: true, status: 200, data: { batch: { id: "b1" } } };
+      if (url.includes("/classify")) {
+        return {
+          ok: true,
+          status: 200,
+          data: {
+            decision: null,
+            held: SAYS,
+            modelDecision: { importType: "boq", documentKind: null },
+            pdfBill: { lines: 0, pages: 12, transcribe: true, reason: "This PDF's text has no quantity column a program could find." },
+            evidence: "headed BILL OF QUANTITIES",
+            charged: true,
+          },
+        };
+      }
+      if (url === "/api/imports") return { ok: true, status: 201, data: { importId: "i1", autoRead: { dispatched: true } } };
+      return { ok: false, status: 500, error: `unexpected ${url}`, data: null };
+    });
+  });
+
+  it("says on the row that choosing the bill is one charged transcription, before and after it is chosen", async () => {
+    const view = render(<IntakeBatchUpload projectId="p1" />);
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["x"], PDF, { type: "application/pdf" })] } });
+    await userEvent.click(screen.getByRole("button", { name: /Start intake/ }));
+    expect(await screen.findByText(SAYS)).toBeTruthy();
+
+    const bill = screen.getByRole("button", { name: "Bill of quantities" });
+    expect(bill.parentElement?.textContent).toContain("This PDF's text has no quantity column a program could find.");
+    expect(bill.parentElement?.textContent).toMatch(COST);
+
+    await userEvent.click(bill);
+    const row = screen.getByTitle(PDF).closest("li") as HTMLElement;
+    expect(row.textContent).toMatch(COST);
+  });
+
+  it("says the same when the bill is chosen in the box rather than by the suggestion (F6)", async () => {
+    const view = render(<IntakeBatchUpload projectId="p1" />);
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["x"], PDF, { type: "application/pdf" })] } });
+    await userEvent.click(screen.getByRole("button", { name: /Start intake/ }));
+    await screen.findByText(SAYS);
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: `Kind of ${PDF}` }), "boq");
+    const row = screen.getByTitle(PDF).closest("li") as HTMLElement;
+    expect(row.textContent).toMatch(COST);
+    expect(screen.getByRole("button", { name: /Read the 1 you have named/ })).not.toBeDisabled();
   });
 });

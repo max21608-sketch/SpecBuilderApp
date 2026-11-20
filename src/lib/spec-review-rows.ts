@@ -24,7 +24,7 @@
 // ============================================================================
 import { describeChange, type ChangeDescription } from "@/lib/spec-change";
 import { fieldDisplayName } from "@/lib/spec-field-label";
-import { proposalBlockers, type Blocker, type Proposal } from "@/lib/spec-document";
+import { proposalBlockers, type Blocker, type Proposal, type TwinLinked } from "@/lib/spec-document";
 
 export type SpecRowRun = {
   proposalId: string;
@@ -103,9 +103,11 @@ function rank(kind: ChangeDescription["kind"]): number {
  *
  * `all` is the whole staged set, not just the rows being grouped: blockers are
  * computed against it, because a duplicate-target clash is a fact about two
- * proposals and cannot be seen from one.
+ * proposals and cannot be seen from one. `records` is the screen's live
+ * registers, for the twin links an unplaced row's lines have gained since it
+ * was read (`twinsSinceRead`).
  */
-export function groupIntoSpecRows(proposals: Proposal[], all: Proposal[]): SpecRow[] {
+export function groupIntoSpecRows(proposals: Proposal[], all: Proposal[], records: readonly TwinLinked[] = []): SpecRow[] {
   const byObservation = new Map<number, Proposal[]>();
   for (const proposal of proposals) {
     const existing = byObservation.get(proposal.sourceOrdinal);
@@ -127,8 +129,8 @@ export function groupIntoSpecRows(proposals: Proposal[], all: Proposal[]): SpecR
       dimension: member.dimension
         ? { slot: member.dimension.slot, figure: member.dimension.figure, unit: member.dimension.unit }
         : null,
-      change: describeChange(member),
-      blockers: proposalBlockers(member, all),
+      change: describeChange(member, records),
+      blockers: proposalBlockers(member, all, records),
     }));
     // Run name, so the column reads in the same order on every row. A member
     // with no run sorts last: it is the one still asking a question.
@@ -150,7 +152,7 @@ export function groupIntoSpecRows(proposals: Proposal[], all: Proposal[]): SpecR
     const kinds = new Set(runs.map((run) => run.change.kind));
     const summary =
       [...runs].sort((a, b) => rank(a.change.kind) - rank(b.change.kind))[0]?.change ??
-      describeChange(first);
+      describeChange(first, records);
 
     rows.push({
       key: String(sourceOrdinal),

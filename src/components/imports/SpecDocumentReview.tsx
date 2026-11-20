@@ -40,6 +40,7 @@ import {
   isConfirmable,
   linesToChooseFrom,
   noCategorySentence,
+  twinsSinceRead,
   proposalBlockers,
   type Proposal,
   type RecordEntry,
@@ -152,6 +153,13 @@ export default function SpecDocumentReview({
   // One save in flight per proposal, chained: an older response can never be
   // applied after a newer one.
   const chains = useRef<Record<string, Promise<void>>>({});
+  // A BULK PRESS IN FLIGHT, taken BEFORE the first await (prod-ready review
+  // F5, 2026-11-20). "Confirm" awaited the unsaved edits' saves with the button
+  // still live, and `busy` is state, so a second press in that window sent
+  // every card again: the server refused the repeats and a red "0 answers
+  // written. Refused on …" followed a confirm that had succeeded. The drawings
+  // screens' `pressing` ref (807a5e4), here for Confirm and Ignore the rest.
+  const pressing = useRef(false);
 
   const waiting = run.status === "queued" || run.status === "parsing";
   // A deferred read starts on its own when a slot frees, so this screen polls
@@ -314,17 +322,28 @@ export default function SpecDocumentReview({
   // this email says were spread across two mental models and a reviewer had to
   // hold which was which. A spec that has not resolved is still a spec the
   // email states; it belongs in the same list, saying so in its own row.
+  //
+  // The registers' records carry the TWIN LINKS (0060), so a row staged as
+  // "choose which line" before its lines were linked says Re-match (free)
+  // instead (`twinsSinceRead`, prod-ready review F2).
   const rows = groupIntoSpecRows(
     [...sections.pending, ...sections.ambiguous, ...sections.unassigned],
     proposals,
+    data.registers.records,
   );
   // Rows with a member that found NO item. A code on two lines of a phase
-  // found two, and its row says "choose which" instead (E1, 2026-11-20).
+  // found two, and its row says "choose which" instead (E1, 2026-11-20) — or,
+  // where those lines are twins now, says Re-match (free) itself (F2).
   const notFound = rows.filter((row) =>
     row.runs.some((member) => {
       if (member.recordId) return false;
       const proposal = proposals.find((entry) => entry.id === member.proposalId);
-      return !(proposal && (linesToChooseFrom(proposal) || noCategorySentence(proposal)));
+      return !(
+        proposal &&
+        (linesToChooseFrom(proposal, data.registers.records) ||
+          twinsSinceRead(proposal, data.registers.records) ||
+          noCategorySentence(proposal))
+      );
     }),
   );
   // The record is STILL the unit of commit. This is the set of whole cards a
@@ -345,14 +364,16 @@ export default function SpecDocumentReview({
    * state, and a screen that said only "failed" would hide what landed.
    */
   async function confirmAll() {
-    for (const proposal of sections.pending) await flush(proposal);
+    if (pressing.current) return;
+    pressing.current = true;
+    setBusy("confirm:all");
 
     let written = 0;
     let refused: string | null = null;
     let attempted = 0;
 
-    setBusy("confirm:all");
     try {
+      for (const proposal of sections.pending) await flush(proposal);
       for (const group of commits) {
         attempted += 1;
         const res = await apiFetch(`/api/imports/${run.id}/confirm`, {
@@ -370,22 +391,24 @@ export default function SpecDocumentReview({
         }
         written += group.proposals.length;
       }
-    } finally {
-      setBusy(null);
-    }
 
-    // Reload FIRST, report after: this screen refreshes on every action and a
-    // successful load clears the banner, so setting it before the reload shows
-    // the message for a few milliseconds and then nothing at all.
-    await reload();
-    if (refused) {
-      const notAttempted = commits.length - attempted;
-      setError(
-        `${written} ${written === 1 ? "answer" : "answers"} written. Refused on ${refused}` +
-          (notAttempted > 0 ? ` ${notAttempted} ${notAttempted === 1 ? "record was" : "records were"} not attempted.` : ""),
-      );
-    } else {
-      setError(null);
+      // Reload FIRST, report after: this screen refreshes on every action and a
+      // successful load clears the banner, so setting it before the reload shows
+      // the message for a few milliseconds and then nothing at all. Inside the
+      // press, so the button is held until its answer is handled.
+      await reload();
+      if (refused) {
+        const notAttempted = commits.length - attempted;
+        setError(
+          `${written} ${written === 1 ? "answer" : "answers"} written. Refused on ${refused}` +
+            (notAttempted > 0 ? ` ${notAttempted} ${notAttempted === 1 ? "record was" : "records were"} not attempted.` : ""),
+        );
+      } else {
+        setError(null);
+      }
+    } finally {
+      pressing.current = false;
+      setBusy(null);
     }
   }
 
@@ -588,11 +611,19 @@ export default function SpecDocumentReview({
    * CONFIRM safe — a confirm writes answers and each one is a decision.
    */
   async function ignoreAll() {
-    for (const proposal of sections.pending) await flush(proposal);
-    await act("ignore:all", {
-      action: "ignore",
-      proposals: sections.pending.map((proposal) => ({ id: proposal.id, version: versionOf(proposal) })),
-    });
+    if (pressing.current) return;
+    pressing.current = true;
+    setBusy("ignore:all");
+    try {
+      for (const proposal of sections.pending) await flush(proposal);
+      await act("ignore:all", {
+        action: "ignore",
+        proposals: sections.pending.map((proposal) => ({ id: proposal.id, version: versionOf(proposal) })),
+      });
+    } finally {
+      pressing.current = false;
+      setBusy(null);
+    }
   }
 
   if (proposals.length === 0) {
@@ -878,7 +909,7 @@ function ProposalRow({
   onChange: (proposal: Proposal, changes: Record<string, unknown>) => void;
   onIgnore: (proposal: Proposal) => Promise<void>;
 }) {
-  const blockers = proposalBlockers(proposal, all);
+  const blockers = proposalBlockers(proposal, all, registers.records);
   const questions = registers.requirements.filter((row) => row.categoryId === record?.categoryId);
   const matchStatus = proposal.requirementId
     ? "confident"
@@ -1819,7 +1850,7 @@ function NoteRow({
 }) {
   const note = proposal.note;
   if (!note) return null;
-  const blockers = proposalBlockers(proposal, all);
+  const blockers = proposalBlockers(proposal, all, registers.records);
   const questions = record?.categoryId ? registers.requirements.filter((row) => row.categoryId === record.categoryId) : [];
 
   return (
