@@ -262,3 +262,40 @@ describe("a size part's slot, set on the review", () => {
     });
   });
 });
+
+// R1 (2026-11-20): an invented specifier's size line with no label.
+describe("an unlabelled size line on the review", () => {
+  it("shows its cell like a labelled size line, and says each figure was read from an unlabelled size line", () => {
+    const cell = "Desk chair\nDesk chair on four legs.\nW520 x D560 x H810mm";
+    const plan = planBillDescription(cell, { fields: FIELDS, hasFabricLine: false })!;
+    render(
+      <table>
+        <tbody>
+          <tr>
+            <td>
+              <BillDescriptionSummary plan={plan} open onToggle={() => undefined} />
+            </td>
+          </tr>
+          <BillDescriptionPanelRow plan={plan} raw={cell} colSpan={10} />
+        </tbody>
+      </table>,
+    );
+    expect(screen.getAllByText("W520 x D560 x H810mm").length).toBeGreaterThan(0);
+    const figures = screen.getByTestId("bill-figures");
+    expect(within(figures).getAllByText(/read from an unlabelled size line/)).toHaveLength(3);
+    expect(within(figures).getByText(/printed as W · read from an unlabelled size line/)).toBeInTheDocument();
+  });
+
+  it("marks nothing on a labelled size line", () => {
+    const cell = "Desk chair\nSizes (mm): W520 x D560 x H810";
+    const plan = planBillDescription(cell, { fields: FIELDS, hasFabricLine: false })!;
+    render(
+      <table>
+        <tbody>
+          <BillDescriptionPanelRow plan={plan} raw={cell} colSpan={10} />
+        </tbody>
+      </table>,
+    );
+    expect(screen.queryByText(/read from an unlabelled size line/)).toBeNull();
+  });
+});

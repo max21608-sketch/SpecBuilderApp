@@ -159,6 +159,27 @@ verbatim behind a toggle. Traps:
 - **A bill whose confirm read its descriptions refuses the charged read** on
   the server (409), because it would propose everything again.
 
+**An unlabelled line is a size only by its own letters** (2026-11-20, an
+invented specifier's bill, `withUnlabelledSizeLine`). A bill that writes the
+size on a line of its own with no label (`W2100 x D950 x H820mm, SH 440mm`,
+`Dia 450 x H550mm`) placed nothing: every item said "no size placed" and the
+size was a note. Such a line is now read as the overall size ONLY where every
+figure carries its own slot letter through `readDimension` (no figure placed
+by printed order, none bare beside a lettered one, nothing left over — `L` is
+not a slot), it prints at least two figures, and it is the line's ONLY size
+line: beside a labelled size line, a Dims column or a second such line it
+stays the note it was, because a line with no label has no claim to win "which
+size is the item's". The unit is the line's own or none (placed unconverted,
+bracketed). It is written under the label `Size`, the figure rows on the
+review say "read from an unlabelled size line", and the slot-change route
+reads the same line (`lineStatements`). The trap is widening it: `700 x 700 x
+H750mm` letters one figure, and reading the other two by position is the
+inference the dimension model refuses. Two lettered figures separated by a
+space and not `x` (`H760mm SH 420`) are not split by the combined-line reader,
+labelled or not, so such a line stays a note — a reader change, not made here.
+Measured: every real bill's description read and `boq:gap` byte-identical
+before and after.
+
 ### A seeded bill layout reads like a known heading, and may carry a row rule
 
 `db/seed/0013_boq_layouts.sql`, `db/migrations/0042_boq_layout_row_rules.sql`,

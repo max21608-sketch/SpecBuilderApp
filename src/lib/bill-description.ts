@@ -124,8 +124,13 @@ export type BillStatement = {
   label: string | null;
   /** What follows the label, trimmed; the whole line where there is no label. */
   value: string;
-  /** Where the label came from, when it was not this line's own. */
-  labelFrom: "heading" | "above" | "column" | null;
+  /**
+   * Where the label came from, when it was not this line's own. `unlabelled`
+   * is a line that printed NO label and is read as the overall size because
+   * every figure on it carries its own slot letter (`withUnlabelledSizeLine`);
+   * its `label` is then `UNLABELLED_SIZE_LABEL`, which the bill never printed.
+   */
+  labelFrom: "heading" | "above" | "column" | "unlabelled" | null;
   /**
    * A bill COLUMN of its own this statement is, rather than a line of the
    * description cell: its `label` is the column's heading. Absent on every
@@ -193,8 +198,78 @@ export function lineStatements(
   line: BillColumnCells & { itemDescriptionRaw?: string | null },
   headings: BillColumnHeadings = {},
 ): BillStatement[] | null {
-  const statements = [...(readBillDescription(line.itemDescriptionRaw)?.statements ?? []), ...columnStatements(line, headings)];
+  const statements = withUnlabelledSizeLine([
+    ...(readBillDescription(line.itemDescriptionRaw)?.statements ?? []),
+    ...columnStatements(line, headings),
+  ]);
   return statements.length > 0 ? statements : null;
+}
+
+// ---- an unlabelled size line ---------------------------------------------------
+
+/**
+ * The label an UNLABELLED size line is read with, and written under. The bill
+ * printed none; this is the app's word, as "Note" is for an unlabelled note.
+ */
+export const UNLABELLED_SIZE_LABEL = "Size";
+
+/** What the review and the dump say about such a line, wherever they say how a size was read. */
+export const UNLABELLED_SIZE_WHY = "Read from an unlabelled size line: every figure on it carries its own slot letter.";
+
+/**
+ * AN UNLABELLED LINE THAT IS A SIZE BY ITS OWN LETTERS (2026-11-20, the
+ * invented Harbour House bill, R1).
+ *
+ * A specifier writes the size as a line of its own with no label —
+ * `W2100 x D950 x H820mm, SH 440mm`, `Dia 450 x H550mm` — and every item said
+ * "no size placed", the size kept as a note. Read as the overall size ONLY
+ * where the line itself leaves nothing to guess, through the one reader
+ * (`readDimension`, `normaliseDimensionSlot`) and never a second parser:
+ *
+ *   * EVERY FIGURE CARRIES ITS OWN SLOT LETTER — W, D, H, SH, Dia (or a
+ *     vocabulary alias such as `OAH`). No figure placed by printed order
+ *     (`900 x 1200mm`), no figure with no letter beside a lettered one
+ *     (`700 x 700 x H750mm`), and nothing left over (`L 6400 x D650 …` — `L`
+ *     is not a slot): any of those and the line stays the note it was.
+ *   * AT LEAST TWO FIGURES. `H 450` alone on a line is as likely a clearance
+ *     or a component as the item's height.
+ *   * IT IS THE LINE'S ONLY SIZE LINE. Not beside a labelled size line, a
+ *     Dims column, or a second such line: which of two sizes is the item's is
+ *     the "one metric size line fills the slots" question, and a line with no
+ *     label has no claim to win it. Both stay as they were.
+ *   * THE UNIT IS THE LINE'S OWN, exactly as a labelled line's: printed, or
+ *     none — placed unconverted and bracketed. Never from a figure's size.
+ */
+function unlabelledSizeReading(value: string): DimensionReading | null {
+  const reading = readDimension(UNLABELLED_SIZE_LABEL, value);
+  if (!reading || reading.tbc || reading.qualifier || (reading.unlettered?.length ?? 0) > 0) return null;
+  if (reading.parts.length < 2) return null;
+  if (reading.parts.some((part) => part.slotSuggested || part.figure === null)) return null;
+  return reading;
+}
+
+/**
+ * The statements with their one unlabelled size line, if they have exactly
+ * one and no other size line, read as a size (`labelFrom: "unlabelled"`).
+ * Every other list is returned as it was — the same array, so a line without
+ * one reads byte for byte as before.
+ */
+export function withUnlabelledSizeLine(statements: BillStatement[]): BillStatement[] {
+  if (statements.some((statement) => sizeReadLabel(statement) !== null)) return statements;
+  const candidates = statements
+    .map((statement, index) => ({ statement, index }))
+    .filter(
+      ({ statement }) =>
+        statement.label === null &&
+        statement.labelFrom === null &&
+        !statement.column &&
+        unlabelledSizeReading(statement.value) !== null,
+    );
+  if (candidates.length !== 1) return statements;
+  const at = candidates[0]!.index;
+  return statements.map((statement, index) =>
+    index === at ? { ...statement, label: UNLABELLED_SIZE_LABEL, labelFrom: "unlabelled" as const } : statement,
+  );
 }
 
 /**
@@ -719,6 +794,12 @@ export type PlanFigure = Omit<LineFigure, "defaultSlot" | "statementIndex"> & {
   overridden: boolean;
   /** Its line's own label, where it has one — the column heading for a Dims cell. */
   label: string | null;
+  /**
+   * Its line printed no label and is read as the size by its own letters
+   * (`withUnlabelledSizeLine`). Present only then, so every other plan is
+   * byte for byte what it was.
+   */
+  unlabelledLine?: true;
 };
 
 /**
@@ -838,7 +919,7 @@ export function planBillDescription(
   const reading = readBillDescription(raw);
   const fromColumns = columns ? columnStatements(columns, columns.headings ?? {}) : [];
   if (!reading && fromColumns.length === 0) return null;
-  const statements = [...(reading?.statements ?? []), ...fromColumns];
+  const statements = withUnlabelledSizeLine([...(reading?.statements ?? []), ...fromColumns]);
   const name = reading?.name ?? singleLineName?.trim() ?? (typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "");
   const cautions: string[] = [];
   let depthWithoutWidth: string | null = null;
@@ -875,13 +956,15 @@ export function planBillDescription(
       }
       if (placed && placed.index === index) {
         const unit = placed.reading.unit ?? unitSetOnReview;
-        const converted = unitSetOnReview
+        const unlabelled = statement.labelFrom === "unlabelled" ? UNLABELLED_SIZE_WHY : null;
+        const unitWhy = unitSetOnReview
           ? `Unit set on review: the bill prints none, and the reviewer said ${unitSetOnReview}.`
           : placed.unitless
             ? "No unit is printed on this size or its label, so it is kept as printed and not converted — set the unit beside the size, or correct it on the record's Specs tab."
             : placed.metric
               ? null
               : "Converted from inches, exactly: the bill gives no metric size.";
+        const converted = [unlabelled, unitWhy].filter(Boolean).join(" ") || null;
         for (const part of placedParts(placed)) {
           const key = part.key;
           const slot = resolved.effective.get(key) ?? part.printed ?? "note";
@@ -1147,6 +1230,7 @@ export function planBillDescription(
       slot: resolved.effective.get(figure.key) ?? "note",
       overridden: resolved.applied.has(figure.key),
       label: statements[figure.statementIndex]?.label ?? null,
+      ...(statements[figure.statementIndex]?.labelFrom === "unlabelled" ? { unlabelledLine: true as const } : {}),
     })),
   };
 }

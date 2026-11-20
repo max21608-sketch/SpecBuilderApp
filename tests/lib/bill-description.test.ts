@@ -17,6 +17,9 @@ import {
   slotChangeFor,
   otherLineFigureKey,
   revisionDescriptionRefusal,
+  withUnlabelledSizeLine,
+  UNLABELLED_SIZE_LABEL,
+  UNLABELLED_SIZE_WHY,
   type PlannedAttribute,
 } from "@/lib/bill-description";
 import type { SpecFieldEntry } from "@/lib/drawing-document";
@@ -602,5 +605,71 @@ describe("a Dims cell of several lines", () => {
   it("leaves a one-line cell reading exactly as before", () => {
     expect(plan("W740 x D740 x H720 x SH420mm", "Dims")?.dimensionCell).toBe("W740 x D740 x H720 x SH420mm");
     expect(plan("W740 x D740 x H720 x SH420mm", "Dims")?.cautions).toEqual([]);
+  });
+});
+
+// ---- R1 (2026-11-20): an unlabelled size line, read by its own letters ----------
+//
+// The shapes are an invented specifier's (Harbour House, Northfield & Pike —
+// nothing here is client material): the size on a line of its own, with no
+// label. Before this every such item said "no size placed".
+describe("an unlabelled size line", () => {
+  it("is placed where every figure carries its own slot letter, and says how it was read", () => {
+    const result = plan("Three seat sofa\nThree seat sofa, fully upholstered.\nW2100 x D950 x H820mm, SH 440mm\nFabric: FAB-01");
+    expect(result.dimensionCell).toBe("W2100 x D950 x H820 x SH440mm");
+    expect(slots(result.attributes)).toEqual(["W 2100mm", "D 950mm", "H 820mm", "SH 440mm"]);
+    // Written under the app's own word, never as a note any more.
+    expect(result.attributes.filter((a) => a.slot).every((a) => a.label === UNLABELLED_SIZE_LABEL)).toBe(true);
+    expect(result.attributes.find((a) => a.slot)?.why).toBe(UNLABELLED_SIZE_WHY);
+    expect(notes(result.attributes)).toEqual(["Note: Three seat sofa, fully upholstered."]);
+    expect(result.figures?.every((figure) => figure.unlabelledLine === true)).toBe(true);
+    expect(result.cautions).toEqual([]);
+  });
+
+  it("reads a diameter, and a size with no unit is placed unconverted and bracketed, never given one", () => {
+    expect(plan("Side table\nDia 450 x H550mm").dimensionCell).toBe("Dia.450 x H550mm");
+    const unitless = plan("Ottoman\nRound ottoman.\nDia 600 x H420");
+    expect(slots(unitless.attributes)).toEqual(["DIA 600null", "H 420null"]);
+    expect(unitless.unitMissing).toBe(true);
+  });
+
+  it("stays a note where a figure has no letter, the letters give no slot, or there is one figure", () => {
+    for (const line of ["700 x 700 x H750mm", "900 x 1200mm", "L 6400 x D650 x H1100mm SH 450", "H 450mm"]) {
+      const result = plan(`Table\n${line}`);
+      expect(result.dimensionCell, line).toBe("");
+      expect(notes(result.attributes), line).toEqual([`Note: ${line}`]);
+      expect(result.figures ?? [], line).toEqual([]);
+    }
+  });
+
+  it("is not read beside a labelled size line, a Dims column, or a second such line", () => {
+    const labelled = plan("Desk\nW1200 x D550 x H750mm\nSizes (mm): W 1210 x D 560 x H 760");
+    expect(labelled.dimensionCell).toBe("W1210 x D560 x H760mm");
+    expect(notes(labelled.attributes)).toContain("Note: W1200 x D550 x H750mm");
+
+    const twice = plan("Desk\nW1200 x D550 x H750mm\nW47.2 x D21.7 x H29.5in");
+    expect(twice.dimensionCell).toBe("");
+
+    const withColumn = planBillDescription("Desk\nW1200 x D550 x H750mm", {
+      fields: FIELDS,
+      hasFabricLine: false,
+      columns: { dimensionsRaw: "W1210 x D560 x H760mm", headings: { dimensions: "Dims" } },
+    })!;
+    expect(withColumn.dimensionCell).toBe("W1210 x D560 x H760mm");
+    expect(notes(withColumn.attributes)).toContain("Note: W1200 x D550 x H750mm");
+  });
+
+  it("is the line the slot-change route reads, so a reviewer can change its slots", () => {
+    const statements = lineStatements({ itemDescriptionRaw: "Stool\nD 400 x H 420mm" })!;
+    expect(statements.find((statement) => statement.labelFrom === "unlabelled")?.value).toBe("D 400 x H 420mm");
+    const placed = placedSizeOf(statements);
+    expect(placed?.reading.parts.map((part) => part.slot)).toEqual(["D", "H"]);
+    const changed = planBillDescription("Stool\nD 400 x H 420mm", { fields: FIELDS, hasFabricLine: false, slotOverrides: { "D 400": "DIA" } })!;
+    expect(changed.dimensionCell).toBe("Dia.400 x H420mm");
+  });
+
+  it("leaves a cell with no such line exactly as it was", () => {
+    const statements = readBillDescription("Armchair\nCom: EXAMPLE CLOTH NAME\n12345-0001")!.statements;
+    expect(withUnlabelledSizeLine(statements)).toBe(statements);
   });
 });
