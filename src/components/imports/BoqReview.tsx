@@ -71,6 +71,12 @@ import { SheetColumns, StructureReadNotes, structurePending, useStructureRead } 
 import BillLineRow, { FamilyHeading, GroupGap, listOf, type BillLinePlace } from "@/components/imports/BillLineRow";
 import type { NextStep } from "@/lib/next-step";
 
+/** The index of the first sheet that is not dropped, or 0 where every sheet is (or there are none). */
+function firstLiveSheet(sheets: readonly { ignored?: boolean }[]): number {
+  const at = sheets.findIndex((sheet) => !sheet.ignored);
+  return at >= 0 ? at : 0;
+}
+
 /** A reason sentence joined into another, without its own full stop. */
 function asClause(text: string): string {
   return text.trim().replace(/[.!\s]+$/, "");
@@ -122,8 +128,14 @@ export default function BoqReview({
     confirm,
   } = boq;
   const { asking, structureError, askModel } = structure;
-  /** Which sheet is shown. A BOQ tab is a sub-quote, so a tab each. */
-  const [sheetTab, setSheetTab] = useState(0);
+  /**
+   * Which sheet is shown. A BOQ tab is a sub-quote, so a tab each. It OPENS
+   * ON THE FIRST SHEET THAT IS NOT DROPPED (2026-11-20, R5): a bill whose
+   * first tab is a cover page opened on that dropped cover, struck through,
+   * and the reviewer had to find the bill. Only the opening: a tab somebody
+   * drops while looking at it stays shown, with its way back on its panel.
+   */
+  const [sheetTab, setSheetTab] = useState(() => firstLiveSheet(data.import.parsed?.sheets ?? []));
   /**
    * Sheets whose Columns panel somebody opened with "Change columns". A sheet
    * nobody has mapped, and one a saved layout read that nobody has checked,
