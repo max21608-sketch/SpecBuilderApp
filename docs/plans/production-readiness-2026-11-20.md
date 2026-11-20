@@ -269,6 +269,21 @@ see `after-intake-2026-11-20.md`. Each is a defect by anyone's measure:
   (`after-intake` §9d). That is a deliberate rule, and changing it is Max's
   decision.
 
+**Swept in by accident (17:15).** Another session had left a merge of its
+branch `intake-2026-11-20` in progress in this worktree. A doc commit here
+(`a47710f`) concluded it, so `prod-ready` also carries two of that session's
+commits:
+- `e0cb0f8`, "the file check is Haiku 5.5" (Max's decision of the same day,
+  in the classify route and the upload panel);
+- `45bf924`, its plan `open-intake-2026-11-20.md`.
+
+The result is exactly a clean merge of the two sides; nothing on either side
+was lost. The four checks were re-run on the combined tip `8677936` and pass
+(5,388 tests, database tier required). `e0cb0f8` was not part of the
+pre-push review. Whether it ships in this push is Max's call. To take it out,
+revert the merge's second-parent changes in a new commit; never rewrite
+`prod-ready`, because the intake branch is built on it.
+
 **How it reaches production.** Everything above is merged on `prod-ready`
 (it took the place of the `prod-int` this section first planned), and it
 fast-forwards `origin/staging`. Max pushes it to `staging`. From there the
