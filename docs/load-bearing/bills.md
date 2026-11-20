@@ -153,6 +153,25 @@ verbatim behind a toggle. Traps:
 - **A description fabric claims no COM when the item has a fabric line**, and
   `Fabric: COM` never claims one: a second COM would ship a cloth that does
   not exist. Both are notes.
+- **One code in the description and on a finish line is ONE finish, of any
+  kind** (2026-11-20, R6, `finishLineCodes` in `planSheetDescriptions`). An
+  invented sofa said `Legs: MTL-01 brushed brass` and a person set the line
+  `MTL-01 / Finish: Brushed brass, lacquered` under it to "Finish for": the
+  confirm wrote Main metal finish from the description AND Metal Finish 2
+  from the line, the second linked to nothing (the description had filed
+  MTL-01 first as "brushed brass", so the line's words were a CONFLICT). The
+  fabric rule above only covered a fabric. Now a description statement whose
+  code (`normaliseFinishCode`) is carried by one of the item's own finish
+  lines (`fabricOwnCode` or its schedule code, over `finishLineTargets`, so
+  a line written to two items counts on both) is a note saying which row
+  carries it; the line is written once, in the first field of its kind, and
+  files the code. A code the item's lines do not carry is written as before.
+  The finish line's value keeps its own label word (`Finish: Brushed brass,
+  lacquered`): no finish-line path strips a leading label, so this does not
+  either — which means a library row described WITHOUT it (from a finishes
+  schedule) is still a CONFLICT for such a line. Measured over every staged
+  bill on the local stack and every real bill with its golden's kinds: only
+  the invented sofa moves; no real bill writes one code twice.
 - **An unlabelled line that starts with a code continues the label above it**
   (`Finish:` / `GR-TIM-10 …` / `GR-MTL-01 …`); a value listing codes is one
   statement per code, each keeping its own words.

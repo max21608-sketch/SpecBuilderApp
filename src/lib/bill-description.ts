@@ -98,7 +98,8 @@ import { readDimension, sizeLabel, sizeLineRefusal, type DimensionReading } from
 import { kindCode, leadingFinishCode, readFinishes, type FinishReading } from "@/lib/spec-finishes";
 import { calloutKindsNamed, classifyCallout, suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
 import { billFinishLineKind } from "@/lib/bill-finish-kind";
-import { finishLineTargets } from "@/lib/boq-row-kinds";
+import { fabricOwnCode, fabricScheduleCode, finishLineTargets } from "@/lib/boq-row-kinds";
+import { normaliseFinishCode } from "@/lib/finishes";
 import {
   DIMENSION_SLOT_LABELS,
   TBC_TOKENS,
@@ -897,6 +898,7 @@ export function planBillDescription(
   {
     fields,
     hasFabricLine,
+    finishLineCodes,
     slotOverrides,
     unitOverride,
     columns,
@@ -904,6 +906,13 @@ export function planBillDescription(
   }: {
     fields: SpecFieldEntry[];
     hasFabricLine: boolean;
+    /**
+     * The codes this item's own FINISH LINES carry (`normaliseFinishCode`),
+     * each with the row of the line carrying it — any kind, from
+     * `planSheetDescriptions`. A description statement naming one of them is
+     * that finish again, and is kept as a note (R6).
+     */
+    finishLineCodes?: ReadonlyMap<string, number> | null;
     /** A reviewer's slot changes, by part key (`StagedBoqLine.slotOverrides`). */
     slotOverrides?: Readonly<Record<string, unknown>> | null;
     /**
@@ -1151,6 +1160,23 @@ export function planBillDescription(
         );
         continue;
       }
+      // ONE CODE, ONE FINISH (2026-11-20, R6). The item's own finish line
+      // carries this code: it is written as the finish, in the field of its
+      // kind, and filed in the library under the code. Writing this statement
+      // too put one finish in two BWS fields — `Legs: MTL-01` in Main metal
+      // finish beside the line's "Finish: Brushed brass" in Metal Finish 2,
+      // the second linked to nothing. The fabric rule above, for every kind and
+      // wherever the line is not read as a fabric.
+      const lineRow = finish.codeRaw ? finishLineCodes?.get(normaliseFinishCode(finish.codeRaw)) : undefined;
+      if (lineRow !== undefined) {
+        attributes.push(
+          note(
+            piece,
+            `Row ${lineRow} is this item's own finish line for ${finish.codeRaw}, which is written as the finish: this names the same code, so it is kept as a note and fills no field — one finish, one field.`,
+          ),
+        );
+        continue;
+      }
       let specFieldId: string | null = null;
       let why: string | null = finish.noField;
       if (!finish.noField) {
@@ -1367,6 +1393,8 @@ type PlanLine = {
   itemDescriptionRaw?: string | null;
   dimensionsRaw?: string | null;
   finishRaw?: string | null;
+  /** The bill's own finish-code column (COM CODE), where the sheet has it. */
+  finishCode?: string | null;
   ignored?: boolean;
   rowKind?: string;
   rowKindSource?: string;
@@ -1400,12 +1428,27 @@ export function planSheetDescriptions(
       .filter((line) => billFinishLineKind(line).kind === "fabric")
       .flatMap((line) => finishLineTargets(targetLines, line).rows),
   );
+  // THE CODES EACH ITEM'S FINISH LINES CARRY, of any kind (R6): the line's own
+  // code (`fabricOwnCode`, the item's code taken off) and its schedule code.
+  const finishCodesByRow = new Map<number, Map<string, number>>();
+  for (const line of targetLines) {
+    if (line.rowKind !== "finish_for" || line.ignored || !line.finishFor) continue;
+    const own = fabricOwnCode({ code: line.code, finishFor: { code: line.finishFor.code ?? null } });
+    const codes = [own, fabricScheduleCode(line)].flatMap((code) => (code ? [normaliseFinishCode(code)] : []));
+    if (codes.length === 0) continue;
+    for (const row of finishLineTargets(targetLines, line).rows) {
+      const byCode = finishCodesByRow.get(row) ?? new Map<string, number>();
+      for (const code of codes) if (!byCode.has(code)) byCode.set(code, line.lineNo);
+      finishCodesByRow.set(row, byCode);
+    }
+  }
   const plans = new Map<number, BillDescriptionPlan>();
   for (const line of lines) {
     if (line.rowKind === "finish_for") continue;
     const plan = planBillDescription(line.itemDescriptionRaw, {
       fields,
       hasFabricLine: withFabric.has(line.lineNo),
+      finishLineCodes: finishCodesByRow.get(line.lineNo) ?? null,
       slotOverrides: line.slotOverrides ?? null,
       unitOverride: line.unitOverride ?? null,
       columns: { dimensionsRaw: line.dimensionsRaw, finishRaw: line.finishRaw, headings },
