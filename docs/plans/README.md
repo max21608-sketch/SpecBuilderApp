@@ -61,6 +61,32 @@ repo, with the screenshots and walk scripts).
   retention; the production branch and domain; data residency; decimal
   quantities; pilot data; mail; the CSP; and D12, which document's words
   describe a finish.
+- **Then "Review first" (Max).** Max reviewed before pushing, and the branch
+  was read again:
+  - **Code:** three reviewers read the 65 commits, one slice each. Twelve
+    defects survived. The worst three: "Set designer…" could deadlock and
+    lose the whole batch; `/api/health` said ok while sign-in was
+    misconfigured; an unlabelled `Dia 900 x H 25 top` placed a part's size
+    as the item's. A thirteenth (F6, a held file's box) came from the
+    300-line walk.
+  - **Fixes:** all thirteen are on `prod-fix-e` and `prod-fix-f`, each with a
+    test that fails without it (plan §4.2).
+  - **Usability** (Max: *"not just … issues with the code … missing
+    features … clunky … make suggestions"*, and *"the filling ourselves and
+    chase … needs a little more thought"*): the app was walked twice, once by
+    a reviewer who had never seen it. The suggestions are
+    `after-intake-2026-11-20.md`: none built except four small polish items
+    (`prod-fix-g`).
+  - **Merged and checked:** everything is merged into `prod-ready` at
+    `cef9a40`, and the four checks pass (5,386 tests, database tier
+    required). CI's `db-tier` job was rehearsed on a fresh database exactly
+    as CI runs it, and its `check` job in a bare environment. The overflow
+    audit is clean on 31 pages. Every visible fix was re-checked on the
+    production build.
+  - **Still committed locally only.**
+- **Another session** is reworking intake (`open-intake-2026-11-20.md`,
+  branch `intake-2026-11-20`). It is built on `prod-ready` at `d160967`. Its
+  stages that change the upload code wait for `prod-ready` to land.
 
 ## 2026-11-16 — The review build: six stages on `review-int`, on staging since 2026-11-18
 

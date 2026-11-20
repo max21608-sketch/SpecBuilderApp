@@ -696,10 +696,26 @@ existing phase waits for "revision or new phase" before Confirm; an email's
 confirm and its screen share ONE confirmable predicate; a file whose name and
 model reading disagree is held, unread; `AUTH_SECRET` must be 32+ characters
 in production; a cross-site write is refused in the middleware; `/api/health`
-is public and names the commit; next 15.5.29 and postal-mime 4.2.1. The four
-checks pass on `prod-ready` with the database tier required (5,333 tests).
-Production itself does not exist; the decisions that come first are Max's
-(plan §5). Human acceptance is outstanding on every screen it touched.
+is public and names the commit; next 15.5.29 and postal-mime 4.2.1. Max then
+chose "Review first": three independent reviewers read the branch and twelve
+defects (plus one from the 300-line walk) were fixed with tests (plan §4.2) —
+among them, "Set designer…" takes the project and then every record BY ID
+before its first line; `/api/health` answers 503 with the problem's code when
+the environment is wrong; sign-in refuses a cross-site post; an unlabelled
+size line with a part word after its figures stays a note; a revision's area
+is stated only by an area or sub-area column; an email joins no pack. Two
+usability walks (one by a reviewer who had never seen the app) produced
+`docs/plans/after-intake-2026-11-20.md` — SUGGESTIONS for the fill-in, the
+chase, the CAM hand-off and changing what is known, none built beyond four
+polish items (no developer voice on user screens, a grey dot for an
+uncategorised item, the chase signed by its creator, Upload the pack in one
+press). The four checks pass on `prod-ready` at `cef9a40` with the database
+tier required (5,386 tests); CI's db-tier job was rehearsed on a fresh
+database. Production itself does not exist; the decisions that come first are
+Max's (plan §5). Human acceptance is outstanding on every screen it touched.
+Another session's `open-intake-2026-11-20.md` (branch `intake-2026-11-20`,
+built on `prod-ready`) amends the "Explicitly excluded" list below once
+`prod-ready` lands; until then this file belongs to this session.
 
 **Explicitly excluded, so it is not built speculatively:** feeding preamble
 notes into later model calls; a BWS *import* file carrying job numbers; images
