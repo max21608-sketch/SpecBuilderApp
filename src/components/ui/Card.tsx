@@ -29,12 +29,17 @@ export default function Card({
   return (
     <section className={`mt-4 rounded-[10px] border border-neutral-200 bg-white ${className}`.trim()}>
       {title && (
-        <h2 className="flex items-center gap-2.5 border-b border-neutral-200 px-4 py-3 text-th font-bold uppercase tracking-wider text-neutral-500">
+        // WRAPS ONLY WHEN IT MUST (2026-11-20). A heading that fits is laid out
+        // exactly as before; one whose title chips and actions do not fit on one
+        // line — the bill review's six suggestion chips beside four "Accept all"
+        // buttons — wraps its actions under the title instead of pushing the
+        // whole page 19px wider than the window at 1440.
+        <h2 className="flex flex-wrap items-center gap-2.5 border-b border-neutral-200 px-4 py-3 text-th font-bold uppercase tracking-wider text-neutral-500">
           {title}
           {actions && (
             <>
               <span className="flex-1" />
-              <span className="flex items-center gap-2">{actions}</span>
+              <span className="flex min-w-0 flex-wrap items-center gap-2">{actions}</span>
             </>
           )}
         </h2>
