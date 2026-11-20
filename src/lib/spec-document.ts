@@ -266,6 +266,14 @@ export type Proposal = {
    */
   /** The record's label, for a dimension proposal, which carries no target. */
   recordLabel?: string | null;
+  /**
+   * THE ITEM WAS FOUND AND HAS NO CATEGORY, so no question can be matched and
+   * nothing is placed (prod-ready, 2026-11-20 — T20120's uncategorised lounge
+   * chairs read "Item not found"). The record the code resolved to, for the
+   * row to name and link: give it a category, then Re-match. Display only —
+   * it places nothing. Optional: staged JSON written before it reads as before.
+   */
+  uncategorised?: { recordId: string; label: string } | null;
   attributeTarget?: HeldTarget | null;
   /**
    * A statement no checklist question matched, KEPT AS A NOTE on the record
@@ -714,6 +722,16 @@ export function linesToChooseFrom(proposal: Proposal): string | null {
   const code = proposal.raw.refRaw?.trim() || "This code";
   const where = proposal.runName ? ` of ${proposal.runName}` : "";
   return `${code} is on ${proposal.recordCandidates.length} lines${where} — choose which`;
+}
+
+/**
+ * "T20120-002 has no category — give it one on the record, then Re-match": an
+ * unplaced row whose code DID find its item, which has no category and so no
+ * question to match. Null where the row is placed, or the item was not found.
+ */
+export function noCategorySentence(proposal: Proposal): string | null {
+  if (proposal.recordId || !proposal.uncategorised) return null;
+  return `${proposal.uncategorised.label} has no category — give it one on the record, then Re-match`;
 }
 
 /** The zone members that match no line, said on the row in words — never a blocker on its own. */
@@ -1203,6 +1221,8 @@ function buildProposal(
 ): Proposal {
   {
     const recordId = record && record.categoryId ? record.id : null;
+    // Found, and nothing to match against: said, never placed.
+    const uncategorised = record && !record.categoryId ? { recordId: record.id, label: record.label } : null;
 
     let requirementCandidatesOut: Candidate[] = [];
     let requirementId: string | null = null;
@@ -1247,6 +1267,7 @@ function buildProposal(
       recordCandidates,
       requirementCandidates: requirementCandidatesOut,
       recordId: recordId,
+      ...(uncategorised ? { uncategorised } : {}),
       requirementId: requirement ? requirement.id : null,
       target,
       proposedValue: suggestion.value,
@@ -1363,15 +1384,22 @@ export function rematchProposals(
       // value they now compare against — or the row would go on comparing
       // with a value the record no longer holds.
       const fresh = new Map(resolved.map((next) => [targetKey(next), next]));
+      // An unplaced row is told apart by the item its code found: two twins
+      // with no category share every other key.
+      const byItem = (proposal: Proposal) =>
+        `${targetKey(proposal)}#${proposal.recordCandidates.map((candidate) => candidate.id).join(",")}`;
+      const freshByItem = new Map(resolved.map((next) => [byItem(next), next]));
       let refreshed = false;
       for (const line of group) {
         const next = fresh.get(targetKey(line));
-        if (next && heldKey(next) !== heldKey(line)) {
-          lines.push({ ...line, attributeTarget: next.attributeTarget ?? null });
-          refreshed = true;
-        } else {
-          lines.push(line);
-        }
+        let kept = line;
+        if (next && heldKey(next) !== heldKey(line)) kept = { ...kept, attributeTarget: next.attributeTarget ?? null };
+        // WHY IT IS NOT PLACED, refreshed like the held value (display only,
+        // so a run staged before the field gains it at a free Re-match).
+        const said = freshByItem.get(byItem(line))?.uncategorised ?? null;
+        if ((said?.recordId ?? null) !== (line.uncategorised?.recordId ?? null)) kept = { ...kept, uncategorised: said };
+        if (kept !== line) refreshed = true;
+        lines.push(kept);
       }
       if (refreshed) rematched += 1;
       continue;
@@ -1736,12 +1764,15 @@ export function proposalBlockers(proposal: Proposal, all: Proposal[]): Blocker[]
     // that is already chosen, and the question — the thing they actually have
     // to pick — reads as one of two equal problems.
     const lines = linesToChooseFrom(proposal);
+    const noCategory = noCategorySentence(proposal);
     blockers.push(
       proposal.recordId
         ? { code: "unassigned", message: "Choose which question this answers." }
         : lines
           ? { code: "unassigned", message: `${lines} line this is for.` }
-          : { code: "unassigned", message: "Choose which record and question this belongs to." },
+          : noCategory
+            ? { code: "no_category", message: `${noCategory}.` }
+            : { code: "unassigned", message: "Choose which record and question this belongs to." },
     );
     return blockers;
   }

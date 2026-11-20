@@ -183,6 +183,16 @@ Six things are load-bearing:
   2026-11-20): the code lands on each, by the drawings' predicate, and two
   lines that are NOT linked say "… is on 2 lines of … — choose which" rather
   than "Item not found" (`specs-and-finishes.md`, the twin section).
+- **An item found with NO CATEGORY is not "Item not found"** (prod-ready
+  follow-up, 2026-11-20). T20120's "HH-CH-02 lounge chair: no swivel." landed
+  on both twin lounge chairs, which had no category, so no question could be
+  matched and `buildProposal` placed nothing — correctly — and the row said
+  "Item not found · Choose which record and question this belongs to". The
+  proposal now stages `uncategorised` (the record it found, optional; a run
+  staged before it reads as before and gains it at a free Re-match), and the
+  label, the blocker (`no_category`) and the row say "T20120-002 has no
+  category — give it one on the record, then Re-match", the label a link to
+  the record, one line per twin. When a record is placed is unchanged.
 - **"Item not found" and "question not matched" are different jobs.**
   Collapsing them produced a row that contradicted itself — *3 runs* in the
   Applies to column beside *Not yet placed*. Once the fan-out lands, the item is
