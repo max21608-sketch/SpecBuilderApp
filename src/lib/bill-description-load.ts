@@ -9,7 +9,9 @@ import type { SqlLike } from "@/lib/record-atoms";
 import { specFieldEntries, type SpecFieldEntry } from "@/lib/drawing-document";
 import { BILL_SPECS_REQUEST_PREFIX } from "@/lib/bill-rows";
 import { isDimensionSlot } from "@/lib/spec-vocab";
-import type { HeldAttributes } from "@/lib/bill-description";
+import type { HeldAttributes, HeldSpecs } from "@/lib/bill-description";
+import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
+import type { AttributeState, AttributeUnit, DimensionSlot } from "@/lib/spec-vocab";
 import { heldBillFinishKind } from "@/lib/bill-finish-kind";
 
 /** The BWS field register, as the finish slots are resolved against it. */
@@ -54,6 +56,58 @@ export async function loadHeldAttributes(exec: SqlLike, recordIds: string[]): Pr
     if (row.spec_field_id !== null && row.spec_field_id !== undefined && row.attr_group !== "dimension") {
       entry.fieldIds.push(String(row.spec_field_id));
     }
+  }
+  return held;
+}
+
+/**
+ * What each carried record HOLDS NOW, for the review to say what a held-back
+ * description states differently (RV2, `revisionDescriptionDifferences`): its
+ * dimension cell, composed by the one composer over its active dimension
+ * rows, and each finish field's code and value. Read only by the review GET;
+ * the confirm still decides by `loadHeldAttributes`.
+ */
+export async function loadHeldSpecs(exec: SqlLike, recordIds: string[]): Promise<Map<string, HeldSpecs>> {
+  const held = new Map<string, HeldSpecs>();
+  if (recordIds.length === 0) return held;
+  const rows = await exec`
+    select record_id, attr_group, dimension_slot, value, unit, state, spec_field_id, material_code, sort_order
+    from record_attributes
+    where record_id = any(${recordIds}::uuid[]) and status = 'active'
+    order by record_id, sort_order, created_at
+  `;
+  const dimensions = new Map<string, DimensionRow[]>();
+  const fields = new Map<string, Map<string, { materialCode: string | null; value: string | null }>>();
+  for (const row of rows) {
+    const id = String(row.record_id);
+    const slot = row.dimension_slot === null || row.dimension_slot === undefined ? null : String(row.dimension_slot);
+    if (row.attr_group === "dimension" && isDimensionSlot(slot)) {
+      const list = dimensions.get(id) ?? [];
+      list.push({
+        slot: slot as DimensionSlot,
+        value: row.value === null || row.value === undefined ? null : String(row.value),
+        unit: (row.unit ?? null) as AttributeUnit | null,
+        state: String(row.state) as AttributeState,
+        sortOrder: list.length,
+      });
+      dimensions.set(id, list);
+    } else if (row.spec_field_id !== null && row.spec_field_id !== undefined) {
+      const byField = fields.get(id) ?? new Map();
+      if (!byField.has(String(row.spec_field_id))) {
+        byField.set(String(row.spec_field_id), {
+          materialCode: row.material_code ? String(row.material_code) : null,
+          value: row.value === null || row.value === undefined ? null : String(row.value),
+        });
+      }
+      fields.set(id, byField);
+    }
+  }
+  for (const id of recordIds) {
+    const list = dimensions.get(id) ?? [];
+    held.set(id, {
+      dimensionCell: list.length > 0 ? composeDimensionCell(list).text : "",
+      fields: fields.get(id) ?? new Map(),
+    });
   }
   return held;
 }

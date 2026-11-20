@@ -16,6 +16,7 @@ import {
   resolveSlotOverrides,
   slotChangeFor,
   otherLineFigureKey,
+  revisionDescriptionDifferences,
   revisionDescriptionRefusal,
   withUnlabelledSizeLine,
   UNLABELLED_SIZE_LABEL,
@@ -694,5 +695,37 @@ describe("a size line whose lettered figures are separated by spaces", () => {
     const result = plan("Table\nOverall: W 850 900 H 780 mm");
     expect(result.dimensionCell).toBe("");
     expect(notes(result.attributes)).toEqual(["Overall: W 850 900 H 780 mm"]);
+  });
+});
+
+// RV2 (2026-11-20): what a held-back description states differently, invented.
+describe("revisionDescriptionDifferences", () => {
+  const revised = plan("Desk chair\nW540 x D560 x H810mm\nFrame: ZZ-WD-02\nFabric: ZZ-FAB-03");
+  const timber = revised.attributes.find((attribute) => attribute.materialCode === "ZZ-WD-02")!.specFieldId!;
+  const fabric = revised.attributes.find((attribute) => attribute.materialCode === "ZZ-FAB-03")!.specFieldId!;
+
+  it("names the size and a finish the record holds differently, and nothing the record holds the same", () => {
+    const held = {
+      dimensionCell: "W520 x D560 x H810mm",
+      fields: new Map([
+        [timber, { materialCode: "ZZ-WD-01", value: "ZZ-WD-01" }],
+        [fabric, { materialCode: "zz-fab-03", value: "ZZ-FAB-03 example boucle" }],
+      ]),
+    };
+    expect(revisionDescriptionDifferences(revised, held)).toEqual([
+      { what: "size", revision: "W540 x D560 x H810mm", record: "W520 x D560 x H810mm" },
+      { what: "Timber finish 1", revision: "ZZ-WD-02", record: "ZZ-WD-01" },
+    ]);
+  });
+
+  it("says nothing where nothing differs, and names a field the record does not hold", () => {
+    const same = { dimensionCell: "W540 x D560 x H810mm", fields: new Map([[timber, { materialCode: "ZZ-WD-02", value: "ZZ-WD-02" }], [fabric, { materialCode: "ZZ-FAB-03", value: null }]]) };
+    expect(revisionDescriptionDifferences(revised, same)).toEqual([]);
+    const empty = { dimensionCell: "", fields: new Map() };
+    expect(revisionDescriptionDifferences(revised, empty).map((difference) => [difference.what, difference.record])).toEqual([
+      ["size", "no size"],
+      ["Timber finish 1", "nothing"],
+      ["COM 1", "nothing"],
+    ]);
   });
 });

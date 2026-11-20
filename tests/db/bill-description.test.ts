@@ -156,7 +156,21 @@ describeIfDb("a bill's description cells, read at confirm", () => {
     const response = await GET(new Request("http://localhost/test"), params(runId));
     expect(response.status).toBe(200);
     return (await response.json()) as {
-      descriptions: Record<string, Record<string, { name: string; dimensionCell: string; revisionRefusal: string | null; attributes: unknown[] }>>;
+      descriptions: Record<
+        string,
+        Record<
+          string,
+          {
+            name: string;
+            dimensionCell: string;
+            revisionRefusal: string | null;
+            attributes: unknown[];
+            revisionHeldBy?: string;
+            revisionRecordId?: string;
+            revisionDifferences?: { what: string; revision: string; record: string }[];
+          }
+        >
+      >;
       descriptionsRead: boolean;
     };
   };
@@ -293,7 +307,8 @@ describeIfDb("a bill's description cells, read at confirm", () => {
           rowKindSource: "bill",
           finishFor: { row: 2, code: "ZZ-FUR-01" },
         }),
-        line(2, 4, "ZZ-FUR-02", SIDE_TABLE, replaces(table)),
+        // RV2: the revised side table is 420 across where the record holds 400.
+        line(2, 4, "ZZ-FUR-02", SIDE_TABLE.replace("DIA 400", "DIA 420"), replaces(table)),
         // The lounge chair's revised cell now states a size, and its record holds nothing.
         line(3, 5, "ZZ-FUR-03", "Lounge chair\r\nSizes (mm): W 700 x D 800 x H 750", replaces(chair)),
       ],
@@ -303,6 +318,13 @@ describeIfDb("a bill's description cells, read at confirm", () => {
     const shown = await review(revision);
     expect(shown.descriptions["0"]?.["0"]?.revisionRefusal).toMatch(/already holds specifications from a bill/);
     expect(shown.descriptions["0"]?.["3"]?.revisionRefusal).toBeNull();
+    // RV2/RV4: held back because the record holds a bill's specs (said once per
+    // tab), and the row names only what differs — nothing for the unchanged bench.
+    expect(shown.descriptions["0"]?.["0"]).toMatchObject({ revisionHeldBy: "bill", revisionRecordId: bench.id, revisionDifferences: [] });
+    expect(shown.descriptions["0"]?.["2"]?.revisionDifferences).toEqual([
+      { what: "size", revision: "Dia.420 x H550mm", record: "Dia.400 x H550mm" },
+    ]);
+    expect(shown.descriptions["0"]?.["3"]?.revisionHeldBy).toBeUndefined();
 
     const response = await confirm(revision);
     expect(response.status).toBe(200);

@@ -737,6 +737,11 @@ export default function BoqReview({
           // note below says so rather than only describing a multi-line cell.
           const fromColumns = Object.values(descriptions).filter((plan) => (plan.columnCells ?? []).length > 0).length;
           const fromCells = Object.values(descriptions).filter((plan) => plan.statements.some((statement) => !statement.column)).length;
+          // CARRIED LINES WHOSE DESCRIPTION IS HELD BACK because the record
+          // already holds a bill's specifications (RV4): said once, here, and
+          // each row says only what differs (RV2).
+          const heldByBill = Object.values(descriptions).filter((plan) => plan.revisionHeldBy === "bill");
+          const heldDiffering = heldByBill.filter((plan) => (plan.revisionDifferences ?? []).length > 0).length;
           // The lines whose size prints no unit and nobody has set one yet —
           // exactly what "set them all" writes, so its count is what it does.
           const unitless = live.filter((line) => {
@@ -818,6 +823,16 @@ export default function BoqReview({
                     </>
                   )}
                   Check what is shown under each line; amber is what needs a look.
+                </Note>
+              )}
+              {!sheet.ignored && !sheet.needsColumns && run.status === "parsed" && heldByBill.length > 0 && (
+                <Note tone="warn" title="Nothing from these descriptions is written over what the records hold.">
+                  {heldByBill.length} line{heldByBill.length === 1 ? " continues a record" : "s continue records"} that
+                  already hold{heldByBill.length === 1 ? "s" : ""} specifications from a bill, so a revision writes nothing
+                  from {heldByBill.length === 1 ? "its description" : "their descriptions"}.{" "}
+                  {heldDiffering > 0
+                    ? `${heldDiffering} ${heldDiffering === 1 ? "states" : "state"} a different size or finish — the line says what, beside what the record holds; correct it on the record's Specs tab.`
+                    : "None states a different size or finish."}
                 </Note>
               )}
               {!sheet.ignored && !sheet.needsColumns && run.status === "parsed" && (

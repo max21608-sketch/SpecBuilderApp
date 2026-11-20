@@ -227,9 +227,10 @@ describe("a finish line the confirm will refuse says so where it is (audit 1.5)"
   });
 });
 
-// RV3 (2026-11-20). Two lines carrying one code, told apart by their area,
-// are offered their records as suggestions.
-describe("a revision's twin lines", () => {
+// RV3 and RV4 (2026-11-20). Two lines carrying one code, told apart by their
+// area, are offered their records as suggestions; and the sentence a held-back
+// description used to print on every carried row is said once, above the table.
+describe("a revision's twin lines and held-back descriptions", () => {
   const typeA = record("rec-a", "ZZ001-002", { area: "Room Type A", codes: ["ZZ-CH-02"] });
   const typeB = record("rec-b", "ZZ001-011", { recordNo: 11, area: "Room Type B", codes: ["ZZ-CH-02"] });
   const twins = {
@@ -251,6 +252,37 @@ describe("a revision's twin lines", () => {
       { sheetIndex: 0, index: 0, replaces: { recordId: "rec-a", recordVersion: 5 }, version: 1 },
       { sheetIndex: 0, index: 1, replaces: { recordId: "rec-b", recordVersion: 5 }, version: 2 },
     ]);
+  });
+
+  it("says once that carried descriptions are held back, and how many state something different", async () => {
+    const held = (differences: unknown[]) => ({
+      name: "Item",
+      statements: [],
+      columnCells: [],
+      attributes: [],
+      dimensionCell: "W540 x D560 x H810mm",
+      dimensionCellShown: "W540 x D560 x H810mm",
+      dimensionFromImperial: false,
+      cautions: [],
+      depthWithoutWidth: null,
+      unitMissing: false,
+      unitSetOnReview: null,
+      revisionRefusal: "The record this line continues already holds specifications from a bill, so nothing from this description is written.",
+      revisionHeldBy: "bill",
+      revisionRecordId: "rec-a",
+      revisionDifferences: differences,
+    });
+    mount(
+      [{ ...line(0, "ZZ-CH-02"), area: "Room Type A" }, { ...line(1, "ZZ-CH-02"), area: "Room Type B" }],
+      twins,
+      {},
+      { 0: held([{ what: "size", revision: "W540 x D560 x H810mm", record: "W520 x D560 x H810mm" }]), 1: held([]) },
+    );
+    expect(await screen.findByText("Nothing from these descriptions is written over what the records hold.")).toBeInTheDocument();
+    expect(screen.getByText(/2 lines continue records that already hold specifications from a bill/)).toBeInTheDocument();
+    expect(screen.getByText(/1 states a different size or finish/)).toBeInTheDocument();
+    expect(screen.getAllByTestId("revision-difference")).toHaveLength(1);
+    expect(screen.queryByText(/so nothing from this description is written\./)).toBeNull();
   });
 });
 

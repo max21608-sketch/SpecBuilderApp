@@ -200,6 +200,20 @@ verbatim behind a toggle. Traps:
   statement per code, each keeping its own words.
 - **A revision writes nothing onto a carried record** that already holds a
   bill's description specs or whose slot/field is occupied, and says so.
+  **Since 2026-11-20 (RV2, RV4) it says WHAT DIFFERS, once per tab.** The
+  same sentence used to print on every carried row (14 times on one tab)
+  and hid the one row that mattered: HH-CH-03's revised `W540 x D560 x
+  H810mm` beside the record's `W520 …`. A held-back line now carries
+  `revisionHeldBy` (`bill`, or `other` for a slot or field another document
+  fills — that reason still prints on its row) and
+  `revisionDescriptionDifferences`: the composed size against the record's
+  own composed cell (`loadHeldSpecs`, the one composer, so like is compared
+  with like) and each finish field the description fills, by client code —
+  the same code is the same finish whatever its words. The tab says once
+  that nothing is written and how many state something different; the row
+  says only "Rev says …; the record holds … — correct it on the Specs tab".
+  An unchanged description says nothing. What is written is unchanged: the
+  confirm still decides by `loadHeldAttributes` and writes nothing.
 - **A bill whose confirm read its descriptions refuses the charged read** on
   the server (409), because it would propose everything again.
 
