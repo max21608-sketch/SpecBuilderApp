@@ -40,6 +40,7 @@ import {
   isConfirmable,
   linesToChooseFrom,
   noCategorySentence,
+  twinsSinceRead,
   proposalBlockers,
   type Proposal,
   type RecordEntry,
@@ -314,17 +315,28 @@ export default function SpecDocumentReview({
   // this email says were spread across two mental models and a reviewer had to
   // hold which was which. A spec that has not resolved is still a spec the
   // email states; it belongs in the same list, saying so in its own row.
+  //
+  // The registers' records carry the TWIN LINKS (0060), so a row staged as
+  // "choose which line" before its lines were linked says Re-match (free)
+  // instead (`twinsSinceRead`, prod-ready review F2).
   const rows = groupIntoSpecRows(
     [...sections.pending, ...sections.ambiguous, ...sections.unassigned],
     proposals,
+    data.registers.records,
   );
   // Rows with a member that found NO item. A code on two lines of a phase
-  // found two, and its row says "choose which" instead (E1, 2026-11-20).
+  // found two, and its row says "choose which" instead (E1, 2026-11-20) — or,
+  // where those lines are twins now, says Re-match (free) itself (F2).
   const notFound = rows.filter((row) =>
     row.runs.some((member) => {
       if (member.recordId) return false;
       const proposal = proposals.find((entry) => entry.id === member.proposalId);
-      return !(proposal && (linesToChooseFrom(proposal) || noCategorySentence(proposal)));
+      return !(
+        proposal &&
+        (linesToChooseFrom(proposal, data.registers.records) ||
+          twinsSinceRead(proposal, data.registers.records) ||
+          noCategorySentence(proposal))
+      );
     }),
   );
   // The record is STILL the unit of commit. This is the set of whole cards a
@@ -878,7 +890,7 @@ function ProposalRow({
   onChange: (proposal: Proposal, changes: Record<string, unknown>) => void;
   onIgnore: (proposal: Proposal) => Promise<void>;
 }) {
-  const blockers = proposalBlockers(proposal, all);
+  const blockers = proposalBlockers(proposal, all, registers.records);
   const questions = registers.requirements.filter((row) => row.categoryId === record?.categoryId);
   const matchStatus = proposal.requirementId
     ? "confident"
@@ -1819,7 +1831,7 @@ function NoteRow({
 }) {
   const note = proposal.note;
   if (!note) return null;
-  const blockers = proposalBlockers(proposal, all);
+  const blockers = proposalBlockers(proposal, all, registers.records);
   const questions = record?.categoryId ? registers.requirements.filter((row) => row.categoryId === record.categoryId) : [];
 
   return (

@@ -717,11 +717,45 @@ function landOnTwins(runs: RunGroup[]): { runs: RunGroup[]; note: string | null 
  * for anything else, including a bill row whose printed ref names another item
  * (that row says so itself).
  */
-export function linesToChooseFrom(proposal: Proposal): string | null {
-  if (proposal.recordId || proposal.rowMatch || proposal.recordCandidates.length < 2) return null;
+export function linesToChooseFrom(proposal: Proposal, records: readonly TwinLinked[] = []): string | null {
+  if (!betweenLines(proposal) || candidatesAreTwins(proposal, records)) return null;
   const code = proposal.raw.refRaw?.trim() || "This code";
   const where = proposal.runName ? ` of ${proposal.runName}` : "";
   return `${code} is on ${proposal.recordCandidates.length} lines${where} — choose which`;
+}
+
+/** A line as the twin predicate reads it: its id and the lines linked to it (0060). */
+export type TwinLinked = Pick<RecordEntry, "id" | "twinIds">;
+
+/** Unplaced, not addressed by a bill row, and offered two or more lines of one phase. */
+function betweenLines(proposal: Proposal): boolean {
+  return !proposal.recordId && !proposal.rowMatch && proposal.recordCandidates.length >= 2;
+}
+
+/**
+ * Whether the lines a row offers are, NOW, one item: every pair linked as
+ * twins in `records` (the screen's live registers), by the predicate a fresh
+ * read lands on twins by (`everyPairTwinned`). No records, no twins.
+ */
+function candidatesAreTwins(proposal: Proposal, records: readonly TwinLinked[]): boolean {
+  if (records.length === 0) return false;
+  const byId = new Map(records.map((record) => [record.id, record]));
+  return everyPairTwinned(proposal.recordCandidates.map((candidate) => byId.get(candidate.id) ?? { id: candidate.id }));
+}
+
+/**
+ * "HH-CH-02 is on 2 lines of Guest Rooms, linked as twins since this was read
+ * — Re-match (free)" (prod-ready review F2, 2026-11-20). A row staged as the
+ * person's question BEFORE its lines were linked: a fresh read would land on
+ * each line, and so does a Re-match, which costs nothing — where choosing one
+ * line, as `linesToChooseFrom` used to ask, left the twin without the spec.
+ * Null for anything else.
+ */
+export function twinsSinceRead(proposal: Proposal, records: readonly TwinLinked[] = []): string | null {
+  if (!betweenLines(proposal) || !candidatesAreTwins(proposal, records)) return null;
+  const code = proposal.raw.refRaw?.trim() || "This code";
+  const where = proposal.runName ? ` of ${proposal.runName}` : "";
+  return `${code} is on ${proposal.recordCandidates.length} lines${where}, linked as twins since this was read — Re-match (free)`;
 }
 
 /**
@@ -1629,8 +1663,13 @@ export type Blocker = { code: string; message: string };
  * Everything standing between one proposal and being committed. Computed from
  * the CURRENT set, every time, because half of these depend on what the other
  * proposals are currently pointing at.
+ *
+ * `records` is the screen's live registers, read only for the twin links an
+ * unplaced row's lines have gained since it was read (`twinsSinceRead`). A
+ * caller without them — the confirm, which never commits an unplaced row —
+ * reads that row as it was staged.
  */
-export function proposalBlockers(proposal: Proposal, all: Proposal[]): Blocker[] {
+export function proposalBlockers(proposal: Proposal, all: Proposal[], records: readonly TwinLinked[] = []): Blocker[] {
   const blockers: Blocker[] = [];
   if (proposal.reviewStatus !== "pending") return blockers;
 
@@ -1763,16 +1802,19 @@ export function proposalBlockers(proposal: Proposal, all: Proposal[]): Blocker[]
     // "choose which record and question" sends a reviewer looking for a record
     // that is already chosen, and the question — the thing they actually have
     // to pick — reads as one of two equal problems.
-    const lines = linesToChooseFrom(proposal);
+    const lines = linesToChooseFrom(proposal, records);
+    const twins = twinsSinceRead(proposal, records);
     const noCategory = noCategorySentence(proposal);
     blockers.push(
       proposal.recordId
         ? { code: "unassigned", message: "Choose which question this answers." }
         : lines
           ? { code: "unassigned", message: `${lines} line this is for.` }
-          : noCategory
-            ? { code: "no_category", message: `${noCategory}.` }
-            : { code: "unassigned", message: "Choose which record and question this belongs to." },
+          : twins
+            ? { code: "unassigned", message: `${twins} to put it on each line.` }
+            : noCategory
+              ? { code: "no_category", message: `${noCategory}.` }
+              : { code: "unassigned", message: "Choose which record and question this belongs to." },
     );
     return blockers;
   }

@@ -396,6 +396,9 @@ against it.
   configuration".
 - The same item listed twice (another suite, another phase): "Link a twin
   line".
+- An email read before two lines were linked says "… is on 2 lines of …,
+  linked as twins since this was read — Re-match (free)". Press "Re-match" at
+  the top of that email's review (it costs nothing): the spec goes on each line.
 
 ### 5.11 Phases: add one, or remove a wrong one
 - **A sheet that should not be a phase, before the bill is confirmed:** on the
