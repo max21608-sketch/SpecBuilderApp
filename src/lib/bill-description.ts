@@ -316,7 +316,7 @@ function cellLines(raw: string): string[] {
  * the value. A line whose first colon has nothing in front of it is not
  * labelled.
  */
-function splitLabel(line: string): { label: string; value: string } | null {
+export function splitLabel(line: string): { label: string; value: string } | null {
   const at = line.indexOf(":");
   if (at <= 0) return null;
   const label = line.slice(0, at).trim();

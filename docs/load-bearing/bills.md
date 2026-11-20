@@ -166,12 +166,35 @@ verbatim behind a toggle. Traps:
   a line written to two items counts on both) is a note saying which row
   carries it; the line is written once, in the first field of its kind, and
   files the code. A code the item's lines do not carry is written as before.
-  The finish line's value keeps its own label word (`Finish: Brushed brass,
-  lacquered`): no finish-line path strips a leading label, so this does not
-  either — which means a library row described WITHOUT it (from a finishes
-  schedule) is still a CONFLICT for such a line. Measured over every staged
+  Since R8 (next bullet) the line's value has its finish label read off, so
+  where the library's words agree it links. Measured over every staged
   bill on the local stack and every real bill with its golden's kinds: only
   the invented sofa moves; no real bill writes one code twice.
+- **A finish line's description is a statement, and its finish label is not
+  the finish** (2026-11-20, R8, `finishLineStatement` in
+  `bill-fabric-filing.ts`). After R6 the invented sofa's one metal finish was
+  stored as "Finish: Brushed brass, lacquered" — the label word in the BWS
+  cell and the quote, and a CONFLICT against the library's "Brushed brass,
+  lacquered", so it linked nothing and the Finishes tab called the code
+  unresolved. A finish line's words are now read through the description
+  reader's own `splitLabel`: where the label is ONE of the words that already
+  say a line is a finish (`isFinishLineWord`, the bracket rule's list:
+  Finish, Fabric, Leather, COM, Trim …) and something follows it, the value
+  written, compared with the library and offered to the placeholder test is
+  what follows (`fabricLineValue`), and the review says "writes “…”". Three
+  things are deliberately NOT changed, each a trap: the line's KIND is read
+  from its whole words (an uncoded "Fabric: Example boucle" is a fabric by
+  its label); the stored attribute's LABEL stays the kind word
+  (`billFinishShape`), because that label is how `heldBillFinishKind` tells
+  a finish line's row from a description's on a revision — storing "Finish"
+  there would make a held metal look like description text; and a revision
+  of a record a confirm before this stored with the label on reads that
+  spelling as the same finish (`storedBefore`), never as one dropped. Any
+  other label ("Fabric @ Stool Collection & Pattern Ref: …") and a label with
+  nothing after it are unchanged. Measured: of 459 finish lines over every
+  staged bill on the local stack (Aman, Ronnie Scott's, Annabel's NY, Butler
+  ×2, Panther, invented), only the invented bill's three move; MTL-01 now
+  links, FAB-01 and FAB-02 still conflict because the library's words differ.
 - **An unlabelled line that starts with a code continues the label above it**
   (`Finish:` / `GR-TIM-10 …` / `GR-MTL-01 …`); a value listing codes is one
   statement per code, each keeping its own words.

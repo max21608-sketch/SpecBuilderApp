@@ -127,6 +127,11 @@ export function fabricCodeOf(code: string | null | undefined): string | null {
  */
 const FINISH_LINE_WORDS = new Set(["fabric", "fabrics", "com", "col", "leather", "textile", "trim", "trims", "finish", "finishes", "vinyl"]);
 
+/** One of those words, whole, case folded: `Finish`, `FABRIC`, `Leather` — never `Fabric @ Stool`. */
+export function isFinishLineWord(text: string | null | undefined): boolean {
+  return FINISH_LINE_WORDS.has((text ?? "").trim().toLowerCase());
+}
+
 type BracketLine = KindLine & { itemDescription?: string | null; finishCode?: string | null };
 
 /**

@@ -53,9 +53,10 @@ import {
   fabricLineState,
   fabricScheduleCode,
   finishLineTargets,
+  isFinishLineWord,
   type RowKindFields,
 } from "@/lib/boq-row-kinds";
-import { billItemName } from "@/lib/bill-description";
+import { billItemName, splitLabel } from "@/lib/bill-description";
 import {
   billFinishLineKind,
   billFinishLineWords,
@@ -166,16 +167,43 @@ function scheduleLineCloth(line: FabricLine): string {
 }
 
 /**
- * The words a fabric line writes as its spec — the description verbatim, or
- * "" where it has none (never its code). A line filed by a schedule code
- * writes its finish column's cloth instead, where it has one.
+ * A FINISH LINE'S DESCRIPTION IS A STATEMENT LIKE ANY DESCRIPTION LINE
+ * (2026-11-20, R8). `Finish: Brushed brass, lacquered` is the label the bill
+ * prints and the finish it names, and it is read through the description
+ * reader's own `splitLabel`: where the label is ONE of the words that already
+ * say a bill line is a finish (`isFinishLineWord` — Finish, Fabric, Leather,
+ * COM, Trim …, the bracket rule's list, not a new one) and something follows
+ * it, the value is what follows. Written whole, the label word reached the BWS
+ * cell and the quote, and against a library row describing the code as
+ * "Brushed brass, lacquered" it was a CONFLICT that linked nothing.
+ *
+ * Only the VALUE: the line's KIND is still read from its whole words
+ * (`billFinishLineKind` — "Fabric: Example cloth" is a fabric by its label),
+ * and the stored attribute keeps the KIND as its label (`billFinishShape`),
+ * because that label is how a later revision tells a finish line's row from a
+ * description's (`heldBillFinishKind`). A label with nothing after it, or any
+ * other label ("Fabric @ Stool Collection & Pattern Ref: …"), is unchanged.
+ */
+export function finishLineStatement(words: string): { label: string | null; value: string } {
+  const labelled = splitLabel(words.trim());
+  if (labelled && labelled.value !== "" && isFinishLineWord(labelled.label)) {
+    return { label: labelled.label, value: labelled.value };
+  }
+  return { label: null, value: words };
+}
+
+/**
+ * The words a fabric line writes as its spec — the description with a leading
+ * finish label read off (`finishLineStatement`), or "" where it has none
+ * (never its code). A line filed by a schedule code writes its finish
+ * column's cloth instead, where it has one.
  */
 export function fabricLineValue(line: FabricLine): string {
   if (filedByScheduleCode(line)) {
     const cloth = scheduleLineCloth(line);
     if (cloth !== "") return cloth;
   }
-  return billFinishLineWords(line);
+  return finishLineStatement(billFinishLineWords(line)).value;
 }
 
 /** A material word at the END of a placement ("POUFFE DEPTH FABRIC", "BAR STOOL @ LEATHER"). */
@@ -563,6 +591,12 @@ export function planBillFinishWrites(input: PlanInput): BillFinishPlan {
       const targets = finishLineTargets(sheet.lines, line);
       const written = fabricLineWrite(line, parent ? billItemName(parent) : null);
       const says = written.value ?? "";
+      // THE SAME LINE AS A CONFIRM BEFORE R8 STORED IT, label and all, where a
+      // label is read off now: a record carried from such a confirm holds that
+      // spelling, and it is the same finish — not one the revision dropped.
+      const wordsAsPrinted = billFinishLineWords(line);
+      const storedBefore =
+        !filedByScheduleCode(line) && finishLineStatement(wordsAsPrinted).label !== null ? wordsAsPrinted : null;
       const { kind } = billFinishLineKind(line);
 
       const onRows: BillFinishWrite["onRows"] = [];
@@ -572,9 +606,11 @@ export function planBillFinishWrites(input: PlanInput): BillFinishPlan {
           const byKind = statedByItem.get(row) ?? new Map();
           const stated = byKind.get(kind) ?? { values: new Set<string>(), firstLine: line.index };
           stated.values.add(says);
+          if (storedBefore !== null) stated.values.add(storedBefore);
           byKind.set(kind, stated);
           statedByItem.set(row, byKind);
-          if (input.heldFabric(item.replaces.recordId, kind).includes(says)) {
+          const heldNow = input.heldFabric(item.replaces.recordId, kind);
+          if (heldNow.includes(says) || (storedBefore !== null && heldNow.includes(storedBefore))) {
             onRows.push({ row, held: true, placement: null });
             continue;
           }
@@ -592,7 +628,8 @@ export function planBillFinishWrites(input: PlanInput): BillFinishPlan {
         filing = decideFabricFiling({
           materialCode: fabricMaterialCode(line),
           says,
-          words: line.itemDescription,
+          // The placeholder test reads the statement, its label read off (R8).
+          words: finishLineStatement(line.itemDescription).value,
           parentName: parent ? billItemName(parent) : null,
           library,
           byScheduleCode: filedByScheduleCode(line),
@@ -751,7 +788,9 @@ export function planBillFabrics(
       swatch: write.finishKey ? describeSwatch(swatches.get(write.finishKey), picture.candidate, picture.chosen) : null,
       askForShortCode: write.filing.outcome === "mint" && series === INTERNAL_FINISH_PREFIX,
       tbc: write.written.state === "tbc",
-      ...(byScheduleCode && write.written.value && write.written.value !== billFinishLineWords(line)
+      // WHAT IS WRITTEN, where it is not the words the row shows: a schedule
+      // code's cloth, or the line with its finish label read off (R8).
+      ...(write.written.value && write.written.value !== billFinishLineWords(line)
         ? { writes: { value: write.written.value, qualifier: write.written.qualifier ?? null } }
         : {}),
       ...(write.targets.sentence ? { forRows: { rows: write.targets.rows, sentence: write.targets.sentence } } : {}),
