@@ -21,6 +21,7 @@
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { insertSpecDocumentRun, type SpecRunRegistration } from "@/lib/spec-registration";
+import { readStoredPart } from "@/lib/source-part";
 
 export const FURNITURE_READ_PREFIX = "ffe-of:";
 
@@ -33,7 +34,7 @@ export async function registerTrackerFurniture(
   { finishesRunId, actor }: { finishesRunId: string; actor: string },
 ): Promise<SpecRunRegistration> {
   const rows = await txn`
-    select id, project_id, batch_id, source_kind, document_kind, attachment_id
+    select id, project_id, batch_id, source_kind, document_kind, attachment_id, source_part
     from intake_runs where id = ${finishesRunId}
     for update
   `;
@@ -61,5 +62,10 @@ export async function registerTrackerFurniture(
     // THE SAME STORED FILE, not a copy: a proposal is checked against the
     // pages the finishes were read from.
     attach: async () => String(run.attachment_id),
+    // THE SAME PART of that file (open intake). A schedule read from pages
+    // 30–44 of a pack has its furniture on those pages too; read without the
+    // part, the furniture read would take in the pack's drawings and bill as
+    // well, and stage them as schedule rows.
+    sourcePart: readStoredPart(run.source_part),
   });
 }

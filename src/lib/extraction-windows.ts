@@ -25,6 +25,7 @@
 // ============================================================================
 import { extractSpecDocument, type ExtractionFailure, type ExtractionResult } from "@/lib/anthropic";
 import type { DocumentSource } from "@/lib/intake-source";
+import type { SourcePart } from "@/lib/source-part";
 import type { DocumentKind } from "@/lib/spec-vocab";
 import type { BillRowIndex } from "@/lib/bill-rows";
 import type { RawProposal } from "@/lib/extraction-schema";
@@ -67,10 +68,26 @@ function sumUsage(usages: unknown[]): { input_tokens: number; output_tokens: num
 export async function readSpecDocument(
   source: DocumentSource,
   documentKind: DocumentKind,
-  options: { signal?: AbortSignal; billRows?: BillRowIndex | null } = {},
+  options: {
+    signal?: AbortSignal;
+    billRows?: BillRowIndex | null;
+    /**
+     * A part of a PDF (open intake): `partInstruction` and the part, passed to
+     * the one call. A part of a WORKBOOK needs neither — its other sheets were
+     * never put in `source` — so the windows below do not carry them.
+     */
+    instruction?: string | null;
+    part?: SourcePart | null;
+  } = {},
 ): Promise<{ result: ExtractionResult; windows: WindowCall[] | null }> {
   if (source.type !== "spreadsheet" || !source.sheets) {
-    return { result: await extractSpecDocument(source, documentKind, { signal: options.signal }), windows: null };
+    return {
+      result: await extractSpecDocument(source, documentKind, {
+        signal: options.signal,
+        ...(options.instruction ? { instruction: options.instruction, part: options.part ?? null } : {}),
+      }),
+      windows: null,
+    };
   }
 
   const bill = options.billRows ?? null;

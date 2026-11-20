@@ -21,6 +21,7 @@
 import { randomUUID } from "node:crypto";
 import type { TxnSql } from "@/lib/db-transaction";
 import type { DocumentKind } from "@/lib/spec-vocab";
+import type { SourcePart } from "@/lib/source-part";
 import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
 import { takeReadSlot, deferRead, WAITING_FOR_SLOT_MESSAGE } from "@/lib/extraction-slots";
 
@@ -42,6 +43,13 @@ export async function insertSpecDocumentRun(
     registrationRequestId: string | null;
     actor: string;
     attach: () => Promise<string>;
+    /**
+     * The part of the file this read is for (open intake), null or absent for
+     * the whole file. A replay returns the first run whatever part it names:
+     * each read has its OWN request id (the design's trap 3), so one id
+     * naming two parts is one press sent twice, not two reads.
+     */
+    sourcePart?: SourcePart | null;
   },
 ): Promise<SpecRunRegistration> {
   if (input.registrationRequestId) {
@@ -55,9 +63,10 @@ export async function insertSpecDocumentRun(
   const run = await txn`
     insert into intake_runs
       (project_id, attachment_id, batch_id, source_kind, document_kind, status,
-       registration_request_id, created_by, updated_by)
+       registration_request_id, source_part, created_by, updated_by)
     values (${input.projectId}, ${attachmentId}, ${input.batchId}, 'spec_document',
-            ${input.documentKind}, 'pending', ${input.registrationRequestId}, ${input.actor}, ${input.actor})
+            ${input.documentKind}, 'pending', ${input.registrationRequestId},
+            ${input.sourcePart ? JSON.stringify(input.sourcePart) : null}::jsonb, ${input.actor}, ${input.actor})
     returning id
   `;
   if (!run[0]) throw new Error("the import was not recorded");

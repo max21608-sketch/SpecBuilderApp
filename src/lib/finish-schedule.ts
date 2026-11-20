@@ -31,6 +31,7 @@ import {
 } from "@/lib/finishes";
 import { suggestFinishKind, type FinishKindSuggestion } from "@/lib/finish-kind-guess";
 import { usableBox } from "@/lib/drawing-document";
+import type { SourcePart } from "@/lib/source-part";
 
 // ============================================================================
 // VERSION 3 (2026-10-15) ADDS THE SWATCH THE PAGE PRINTS BESIDE A CODE.
@@ -93,6 +94,12 @@ export type StagedFinishSchedule = {
   schemaVersion: 2 | typeof FINISH_SCHEDULE_SCHEMA_VERSION;
   kind: "finishes_schedule";
   filename: string | null;
+  /**
+   * The part of the file this read was for (open intake), absent for the
+   * whole file — so every document staged before parts is unchanged. Its
+   * pages are the FILE's pages, as every page on this document is.
+   */
+  sourcePart?: SourcePart | null;
   documentNotes: string | null;
   entries: FinishScheduleEntry[];
 };

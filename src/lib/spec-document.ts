@@ -57,6 +57,7 @@ import { parseDimensionFigure } from "@/lib/dimensions";
 import { kindCode, readFinishes, type FinishReading } from "@/lib/spec-finishes";
 import { billRowTarget, type BillRowIndex } from "@/lib/bill-rows";
 import { alreadyRecorded, suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
+import type { SourcePart } from "@/lib/source-part";
 
 export const PROPOSAL_SCHEMA_VERSION = 1;
 
@@ -385,6 +386,12 @@ export type StagedSpecDocument = {
   lines: Proposal[];
   documentNotes: string | null;
   filename: string | null;
+  /**
+   * The part of the file this read was for (open intake), absent for the
+   * whole file — so every document staged before parts is unchanged. Its
+   * pages are the FILE's pages, as every page on this document is.
+   */
+  sourcePart?: SourcePart | null;
 };
 
 

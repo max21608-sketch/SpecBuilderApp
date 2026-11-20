@@ -89,6 +89,7 @@ import { describeDuplicate, recordMessageUnlessKnown } from "@/lib/email-ingest"
 import { assignMessage } from "@/lib/email-registration";
 import { withTransaction, transactionErrorResponse, type TxnSql } from "@/lib/db-transaction";
 import { MAX_MODEL_PDF_BYTES } from "@/lib/upload-limits";
+import { SourcePartSchema, normalisePart, partRefusal } from "@/lib/source-part";
 import {
   PDF_BILL_SHEET,
   pdfBillRefusal,
@@ -131,6 +132,10 @@ const Registration = z
     // The delivery this file arrived in. Optional: a single file uploaded on
     // its own is still a perfectly good import.
     batchId: UUID.optional(),
+    // The part of the file this read is for (open intake): some pages of a
+    // PDF or some sheets of a workbook. Absent for the whole file, which is
+    // every registration before parts and every file with one kind in it.
+    part: SourcePartSchema.optional(),
   })
   .strict();
 
@@ -156,6 +161,21 @@ export async function POST(request: Request): Promise<Response> {
     return json({ ok: false, error: issue?.message ?? "That upload is not valid.", field: issue?.path.join(".") }, 400);
   }
   const input = parsed.data;
+
+  // A part is refused in words before anything is read or recorded: what it
+  // may name depends only on the file's kind and the reader, and the page
+  // count is checked where the PDF's bytes are read (`registerSpecDocument`).
+  if (input.part) {
+    const normal = normalisePart(input.part);
+    if (!normal.ok) return json({ ok: false, error: normal.error, field: "part" }, 400);
+    const refused = partRefusal(normal.part, {
+      sourceKind: intakeSourceKind(input.filename, input.contentType),
+      documentKind: input.importType === "spec_document" ? input.documentKind : null,
+      pageCount: null,
+    });
+    if (refused) return json({ ok: false, error: refused, field: "part" }, 400);
+    input.part = normal.part;
+  }
 
   const project = await sql`select id from projects where id = ${input.projectId}`;
   if (!project[0]) return json({ ok: false, error: "No such project." }, 404);
@@ -370,6 +390,13 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
     }
     const scanned = scannedPdfRefusal("pdf", pdfHasTextLayer(pdf.bytes));
     if (scanned) return json({ ok: false, error: scanned, field: "filename" }, 400);
+    // Pages past the end are refused here, where the bytes are already in
+    // hand. An uncountable PDF proceeds (`countPdfPages`' abstention), and the
+    // read refuses then if the file really is shorter.
+    if (input.part) {
+      const refused = partRefusal(input.part, { sourceKind: kind, documentKind: input.documentKind, pageCount: countPdfPages(pdf.bytes) });
+      if (refused) return json({ ok: false, error: refused, field: "part" }, 400);
+    }
   }
 
   try {
@@ -384,6 +411,7 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
         documentKind: input.documentKind as DocumentKind,
         registrationRequestId: input.registrationRequestId ?? null,
         actor,
+        sourcePart: input.part ?? null,
         attach: async () => {
           const attachment = await txn`
             insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)

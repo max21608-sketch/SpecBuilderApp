@@ -82,6 +82,7 @@ import { OVERALL_SLOT } from "@/lib/extraction-schema";
 // The v1 to v3 read-time paths, called only for a run staged before version 4.
 import { applyViewGuesses, dedupeMeasured, variantLettersByItem } from "@/lib/drawing-legacy";
 import { naturalConfigurationOrder, normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variants";
+import type { SourcePart } from "@/lib/source-part";
 
 // ---- the staged shape ------------------------------------------------------
 
@@ -493,6 +494,14 @@ export type StagedDrawings = {
   schemaVersion: 1 | 2 | 3 | 4;
   kind: "shop_drawings";
   filename: string | null;
+  /**
+   * The part of the file this read was for (open intake), absent for the
+   * whole file. Where it is set the FILENAME NAMES THE FILE, NOT THIS PART:
+   * `ownDrawingNumber` and the mock-up rule then take nothing from it (the
+   * design's trap 7) — a pack called `…-MUR-…` would otherwise send every
+   * item in its drawings part to the mock-up phase.
+   */
+  sourcePart?: SourcePart | null;
   documentNotes: string | null;
   items: DrawingItem[];
   /** Versions 2 and 3. Absent on every version 1 run and every version 4 run. */
@@ -847,6 +856,19 @@ export function drawingNumberOf(filename: string | null | undefined): string | n
 }
 
 /**
+ * The filename where it names THIS document, or null (open intake; the
+ * design's trap 7). A read of part of a file is one document among several in
+ * it, and the file's name says nothing about which: a pack named
+ * `AM-ID-MUR-FUR-05 and specs.pdf` would make every item in its drawings part
+ * a mock-up and give each the same drawing number. So a staged read with a
+ * `sourcePart` takes neither from the filename; the page's own title block,
+ * which the model reads, still says both.
+ */
+export function ownFilename(staged: Pick<StagedDrawings, "filename"> & { sourcePart?: unknown }): string | null {
+  return staged.sourcePart ? null : staged.filename;
+}
+
+/**
  * One staged item, resolved the way the review screen AND the confirm resolve
  * it: its canonical code, every code its group gave it, and the document's own
  * number. One helper so the two callers cannot drift apart about which of
@@ -854,7 +876,7 @@ export function drawingNumberOf(filename: string | null | undefined): string | n
  * would be `targets_changed` for a reason nobody could see.
  */
 export function resolveStagedItem(
-  staged: Pick<StagedDrawings, "schemaVersion" | "codeGroups" | "filename">,
+  staged: Pick<StagedDrawings, "schemaVersion" | "codeGroups" | "filename" | "sourcePart">,
   item: Pick<DrawingItem, "itemCodeRaw"> & Partial<Pick<DrawingItem, "itemCodes">>,
   records: RecordEntry[],
 ): DrawingResolution {
@@ -868,7 +890,7 @@ export function resolveStagedItem(
     return readTwinLines(
       resolveDrawingTargets(item.itemCodeRaw, records, {
         codes: codes.length > 0 ? codes : item.itemCodeRaw ? [item.itemCodeRaw] : [],
-        drawingNumber: drawingNumberOf(staged.filename),
+        drawingNumber: drawingNumberOf(ownFilename(staged)),
       }),
       records,
     );
@@ -877,7 +899,7 @@ export function resolveStagedItem(
   return readTwinLines(
     resolveDrawingTargets(canonical, records, {
       codes: codesOfItem(staged, item.itemCodeRaw),
-      drawingNumber: drawingNumberOf(staged.filename),
+      drawingNumber: drawingNumberOf(ownFilename(staged)),
     }),
     records,
   );
@@ -1018,11 +1040,11 @@ const MUR_SEGMENT = /(^|[-_\s])MUR([-_\s.]|$)/i;
  * reviewer unticks a run whose spec genuinely differs").
  */
 export function resolveDrawingItem(
-  staged: Pick<StagedDrawings, "schemaVersion" | "codeGroups" | "filename">,
+  staged: Pick<StagedDrawings, "schemaVersion" | "codeGroups" | "filename" | "sourcePart">,
   item: Pick<DrawingItem, "itemCodeRaw">,
   records: RecordEntry[],
 ): DrawingResolution {
-  if (!isMockupDrawing(item, staged.filename)) return notOntoMockup(resolveStagedItem(staged, item, records));
+  if (!isMockupDrawing(item, ownFilename(staged))) return notOntoMockup(resolveStagedItem(staged, item, records));
   const evidence = (item as Pick<DrawingItem, "mockup">).mockup?.evidence?.trim() || null;
   const resolution = resolveStagedItem(
     staged,
