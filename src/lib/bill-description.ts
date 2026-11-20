@@ -1318,9 +1318,11 @@ function planColumnFinish(
     );
   }
   // One kind by its words, or — where the words name none — by the cell's own
-  // leading code, read exactly as a drawing's callout code is.
+  // leading code, read exactly as a drawing's callout code is. Through
+  // `classifyCallout` either way, so a PART word beside a code naming another
+  // kind (`MTL-02 FRAME`) reads as the code there and here alike (R4).
   const callout = classifyCallout({ labelRaw: null, valueRaw: value, materialCodeRaw: code ? kindCode(code) : null });
-  const kind = kinds[0] ?? (callout.kind === "hardware" ? null : callout.kind);
+  const kind = callout.kind === "hardware" ? (kinds[0] ?? null) : (callout.kind ?? kinds[0] ?? null);
   if (!kind) {
     return note(statement, "Names no fabric, timber or metal this app recognises, so it is kept as a note and fills no BWS field.");
   }

@@ -1608,6 +1608,7 @@ import {
   HARDWARE_WORDS,
   METAL_WORDS,
   TIMBER_CALLOUT_WORDS,
+  TIMBER_MATERIAL_WORDS,
 } from "@/lib/material-words";
 
 /** Re-exported from its old home, so no caller of this module changed. */
@@ -1700,24 +1701,34 @@ export function classifyCallout(input: {
   // 1. The words. Fabric first, then metal, then timber -- the order
   //    `suggestSpecField` has always used, so a "metal frame" is metal rather
   //    than timber on the strength of "frame".
-  const named = calloutKindsNamed(text)[0];
-  if (named) return reading(named, false, null);
-
-  // 2. The client's own finish code, normalised to its letters.
-  const code = normaliseName(input.materialCodeRaw ?? "").replace(/[^a-z]/g, "");
-  if (code) {
-    const match = CODE_PREFIXES.find((entry) => code.startsWith(entry.prefix));
-    if (match) {
-      return reading(match.kind, false, `the code ${String(input.materialCodeRaw).trim()} says so`);
+  const named = calloutKindsNamed(text);
+  const byCode = clientCodeKind(input.materialCodeRaw);
+  if (named[0]) {
+    // 1a. A PART WORD IS NOT A MATERIAL (2026-11-20, R4). `frame`, `leg`,
+    //     `legs` and `feet` are in the timber list as the part a timber is
+    //     usually on — evidence on a drawing whose caption names the part
+    //     over a value that says nothing else. Where they are the ONLY words
+    //     that fired and the client's own code names a DIFFERENT kind, the
+    //     code is the page saying what the part is made of: `Frame: MTL-02`
+    //     on a bar stool is the client's metal, and reading it as Main timber
+    //     finish put a metal in a timber field nothing downstream questions.
+    //     A MATERIAL word (oak, wood, brass, bronze, fabric…) still beats the
+    //     code, and a code naming timber changes nothing.
+    if (
+      named.length === 1 &&
+      named[0] === "timber" &&
+      !mentions(text, TIMBER_MATERIAL_WORDS) &&
+      byCode &&
+      byCode.kind !== "timber"
+    ) {
+      return reading(byCode.kind, false, `${byCode.reason} — “${partWordsIn(text).join("”, “")}” names the part, not what it is made of`);
     }
+    return reading(named[0], false, null);
   }
-  // 2b. A three-part project code says what it is in its MIDDLE group:
-  //     `GR-FAB-04`, where the `GR` is the floor. After the prefix test, so no
-  //     code that test already read changes its reading.
-  const projectKind = projectCodeKind(input.materialCodeRaw);
-  if (projectKind) {
-    return reading(projectKind, false, `the code ${String(input.materialCodeRaw).trim()} says so`);
-  }
+
+  // 2. The client's own finish code (`clientCodeKind`): its letters against
+  //    `CODE_PREFIXES`, then a three-part project code's middle group.
+  if (byCode) return reading(byCode.kind, false, byCode.reason);
 
   // 3. The caption names the item itself, and carries a specification.
   if (namesTheItem(label, input.itemNameRaw ?? null) && hasSubstance(value)) {
@@ -1729,6 +1740,30 @@ export function classifyCallout(input: {
   }
 
   return { kind: null, group: "other", guessed: false, reason: null };
+}
+
+/**
+ * WHAT THE CLIENT'S OWN CODE SAYS A CALLOUT IS — `classifyCallout`'s step 2,
+ * named so step 1a can ask it too, and unchanged: the code's letters against
+ * `CODE_PREFIXES` (`MTL-02` → metal, `WD-01` → timber; `CH` deliberately
+ * nothing), then — so no code that test already read changes its reading — a
+ * three-part project code's MIDDLE group (`GR-FAB-04`, the `GR` the floor).
+ */
+function clientCodeKind(materialCodeRaw: string | null | undefined): { kind: "fabric" | "timber" | "metal"; reason: string } | null {
+  const code = normaliseName(materialCodeRaw ?? "").replace(/[^a-z]/g, "");
+  if (code) {
+    const match = CODE_PREFIXES.find((entry) => code.startsWith(entry.prefix));
+    if (match) return { kind: match.kind, reason: `the code ${String(materialCodeRaw).trim()} says so` };
+  }
+  const projectKind = projectCodeKind(materialCodeRaw);
+  if (projectKind) return { kind: projectKind, reason: `the code ${String(materialCodeRaw).trim()} says so` };
+  return null;
+}
+
+/** The timber PART words a text names, folded — for the reason step 1a gives. */
+function partWordsIn(text: string): string[] {
+  const parts = new Set(normaliseName(text).split(" "));
+  return TIMBER_CALLOUT_WORDS.filter((word) => !(TIMBER_MATERIAL_WORDS as readonly string[]).includes(word) && parts.has(word));
 }
 
 /**

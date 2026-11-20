@@ -673,3 +673,11 @@ describe("an unlabelled size line", () => {
     expect(withUnlabelledSizeLine(statements)).toBe(statements);
   });
 });
+
+// R4 (2026-11-20): an invented bar stool's `Frame: MTL-02` is the client's metal.
+describe("a part word beside a client code, in a description", () => {
+  it("files `Frame: MTL-02` in the metal field, and `Frame: WD-02` in the timber one", () => {
+    expect(finishes(plan("Bar stool\nFrame: MTL-02").attributes)).toEqual(["MTL-02 → Main metal finish"]);
+    expect(finishes(plan("Dining chair\nFrame: WD-02").attributes)).toEqual(["WD-02 → Main timber finish"]);
+  });
+});
