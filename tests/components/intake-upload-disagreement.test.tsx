@@ -91,6 +91,27 @@ describe("a file whose name and contents disagree", () => {
     expect(screen.getByText(/Nothing is left for the press to identify/)).toBeTruthy();
   });
 
+  // THE BOX SHOWS WHAT THE APP COUNTS (prod-ready F6, 2026-11-20). Seen on the
+  // production build: the held row's box already read "Bill of quantities
+  // (creates the records)" — the name's guess — while the press said "Read
+  // the 0 you have named", disabled, and only the chip could unstick it.
+  it("leaves the box empty while held, so choosing in it counts", async () => {
+    mount();
+    await userEvent.click(screen.getByRole("button", { name: /Start intake/ }));
+    await screen.findByText(HELD);
+
+    const box = screen.getByRole("combobox", { name: `Kind of ${NAME}` }) as HTMLSelectElement;
+    expect(box.value).toBe("");
+    expect((box.selectedOptions[0]?.textContent ?? "").trim()).toBe("— say which —");
+    expect(screen.getByRole("button", { name: /Read the 0 you have named/ })).toBeDisabled();
+
+    await userEvent.selectOptions(box, "boq");
+    expect(box.value).toBe("boq");
+    await userEvent.click(screen.getByRole("button", { name: /Read the 1 you have named/ }));
+    await waitFor(() => expect(registered()).toHaveLength(1));
+    expect(registered()[0]).toMatchObject({ importType: "boq", documentKind: null, filename: NAME });
+  });
+
   it("files the model's reading when that is the one chosen", async () => {
     mount();
     await userEvent.click(screen.getByRole("button", { name: /Start intake/ }));
@@ -150,5 +171,18 @@ describe("a held PDF the model reads as a bill to be transcribed", () => {
     await userEvent.click(bill);
     const row = screen.getByTitle(PDF).closest("li") as HTMLElement;
     expect(row.textContent).toMatch(COST);
+  });
+
+  it("says the same when the bill is chosen in the box rather than by the suggestion (F6)", async () => {
+    const view = render(<IntakeBatchUpload projectId="p1" />);
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["x"], PDF, { type: "application/pdf" })] } });
+    await userEvent.click(screen.getByRole("button", { name: /Start intake/ }));
+    await screen.findByText(SAYS);
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: `Kind of ${PDF}` }), "boq");
+    const row = screen.getByTitle(PDF).closest("li") as HTMLElement;
+    expect(row.textContent).toMatch(COST);
+    expect(screen.getByRole("button", { name: /Read the 1 you have named/ })).not.toBeDisabled();
   });
 });

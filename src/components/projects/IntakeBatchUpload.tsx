@@ -235,6 +235,30 @@ function withPdfBill(
 const kindOf = (item: Queued) => item.choice || item.suggested;
 
 /**
+ * HELD BECAUSE THE NAME AND THE MODEL DISAGREE (K1), and nobody has said which.
+ *
+ * ITS BOX SHOWS WHAT THE PRESS COUNTS (prod-ready F6, 2026-11-20): nothing.
+ * It showed the name's kind, in amber, while the press read "Read the 0 you
+ * have named" — the person saw their answer already in the box and was stuck,
+ * because only the suggestion could record it (choosing the option a select
+ * already shows fires no change). So the box is empty until somebody chooses,
+ * in the box or by either suggestion; neither side is picked for them.
+ */
+const disputed = (item: Queued) => item.status === "needs-kind" && Boolean(item.alternative) && !item.choice;
+
+/** The kind the row's box shows. */
+const shownKind = (item: Queued) => (disputed(item) ? "" : kindOf(item));
+
+/**
+ * What the row says under its box: the model's evidence where its reading of a
+ * disputed file is the one chosen — in the box or by the suggestion — so a
+ * bill the model will transcribe says what that costs when the press spends
+ * it (F4); the name's, or the model's unheld reading, otherwise.
+ */
+const shownEvidence = (item: Queued) =>
+  item.alternative && item.choice === item.alternative ? (item.alternativeEvidence ?? item.evidence) : item.evidence;
+
+/**
  * The kind the press may act on WITHOUT looking at the document.
  *
  * A person's choice, or a reading of the document itself. A NAME GUESS IS
@@ -262,7 +286,7 @@ function uploadTally(queue: Queued[]) {
   return queue.reduce(
     (acc, item) => {
       if (item.pathname) acc.stored += 1;
-      if (item.status !== "refused" && kindOf(item)) acc.identified += 1;
+      if (item.status !== "refused" && shownKind(item)) acc.identified += 1;
       if (item.status === "registering" || (item.status === "done" && !item.note && !item.duplicate)) acc.beingRead += 1;
       // Registered, and its read is queued behind the pack's in-flight cap. It
       // starts on its own and needs nobody, which is why it is not in the
@@ -977,14 +1001,14 @@ export default function IntakeBatchUpload({
 
                 <select
                   aria-label={`Kind of ${item.file.name}`}
-                  value={kindOf(item)}
+                  value={shownKind(item)}
                   onChange={(event) => update(item.key, { choice: event.target.value })}
                   disabled={busy || item.status === "done"}
                   className={`border rounded px-2 py-1 text-sm text-neutral-900 ${
                     unchecked ? "border-amber-400 bg-amber-50" : "border-neutral-300"
                   }`}
                 >
-                  <option value="">What is this?</option>
+                  <option value="">{disputed(item) ? "— say which —" : "What is this?"}</option>
                   {CHOICES.map((choice) => (
                     <option key={choice.value} value={choice.value}>
                       {choice.label}
@@ -1039,7 +1063,7 @@ export default function IntakeBatchUpload({
                 ) : (
                   // WHAT IT WAS READ FROM, so a filed answer can still be
                   // checked against the file rather than taken on trust.
-                  item.evidence && <p className="w-full text-xs text-neutral-500">{item.evidence}</p>
+                  shownEvidence(item) && <p className="w-full text-xs text-neutral-500">{shownEvidence(item)}</p>
                 )}
                 {/* THE MODEL'S READING, where it contradicts the name's (K1):
                     one click, as the name's is, and neither filed. */}
@@ -1048,16 +1072,7 @@ export default function IntakeBatchUpload({
                     className="w-full"
                     value={shortLabel(item.alternative)}
                     evidence={item.alternativeEvidence ? `The model read: ${item.alternativeEvidence}` : "The model's reading"}
-                    // THE EVIDENCE MOVES WITH IT, so the line under the box
-                    // describes what was chosen — and a bill the model will
-                    // transcribe still says what that costs when the press
-                    // spends it (F4).
-                    onAccept={() =>
-                      update(item.key, {
-                        choice: item.alternative,
-                        ...(item.alternativeEvidence ? { evidence: item.alternativeEvidence } : {}),
-                      })
-                    }
+                    onAccept={() => update(item.key, { choice: item.alternative })}
                     disabled={busy}
                   />
                 )}
