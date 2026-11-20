@@ -395,6 +395,27 @@ columns are plainly there was a dead end because of the words above them. Max:
   (which now prints `suggested kinds` where a sheet has any): the real
   Annabel's NY bill is asked about 8 rows, every one a row its golden leaves
   out; no other real bill is asked anything.
+- **A finish line under its item is ASKED about too, and never across a
+  heading** (2026-11-20, the same bill and module). `FAB-01` / `Finish:
+  Kvadrat …` with no quantity, directly under `HH-SF-01`, staged as an Item.
+  The review offers "Finish for HH-SF-01?" where a line has no quantity AND
+  its code is a finish code by the readers the app already has
+  (`codeIsAFinishCode` — `CODE_PREFIXES` exactly on the leading letters,
+  `projectCodeKind`, the bill's `F-<KIND>-n`; never a prefix of the letters,
+  so `COMMODE-01` is not one) OR its description BEGINS with a finish label
+  (`Finish:`, `Fabric:`, `Timber:` …), and the nearest line above that is not
+  a finish line, another finish-shaped line or a blank is a LIVE item.
+  Accepting sets `finish_for` with that parent exactly as the Kind control
+  does; "Accept all N suggested finish lines" per tab. A section heading on
+  the way up — set, or itself suggested — stops the walk with no
+  suggestion: the finish under `BAR` belongs to nothing above it, and a
+  guess across a heading is the wrong item with nothing to flag it. The
+  bracket rule and a seeded layout's row rule still win: a bracketed code is
+  never asked about, and a line either rule gave a kind is never asked
+  again. Measured: on the real Annabel's NY bill, 54 suggestions, 54 on the
+  golden's item; Aman, Butler ×2, Panther and Ronnie Scott's are asked
+  nothing (their finish lines carry a bracket, a category, a quantity or no
+  finish-code shape — a miss a person still sets, never a wrong parent).
 - **A header printed again above a section is passed over and counted**
   (2026-11-16, audit C9). It used to stage as a record named "Description".
   A row is a reprint where at least two of the columns being read carry text

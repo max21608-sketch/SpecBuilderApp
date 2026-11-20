@@ -490,6 +490,11 @@ Other things users report on a bill, and what they are:
   row with nothing but a heading's text shows a dashed **"Section heading?"**
   with the reason beside it; press it, or "Accept all N suggested section
   headings" on the tab. The row's Kind changes it back.
+- *"A fabric (or finish) line became its own item"* → set the row's kind to
+  "Finish for…" and choose its item. A finish code with no quantity under an
+  item shows a dashed **"Finish for <the item>?"** with the reason; press it,
+  or "Accept all N suggested finish lines". It is never offered across a
+  section heading.
 - *"The codes are in the wrong column / every item has the same name"* → the
   columns are mapped wrongly. Columns panel.
 - *"A line says 'check against the PDF'"* → the app could not be sure it read

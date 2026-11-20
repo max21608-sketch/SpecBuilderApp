@@ -124,11 +124,19 @@ describe("a bill's kind suggestions", () => {
     expect(screen.getByRole("tab", { name: /Guest Rooms/ })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("asks about the heading, with its evidence, and nothing else", async () => {
+  it("asks about the heading and the three finish lines, with their evidence, and nothing else", async () => {
     mount();
     const offers = await screen.findAllByRole("button", { name: /^(Section heading|Finish for .+)$/ });
-    expect(offers.map((offer) => offer.textContent)).toEqual(["Section heading?"]);
+    expect(offers.map((offer) => offer.textContent)).toEqual([
+      "Section heading?",
+      "Finish for ZZ-SF-01?",
+      "Finish for ZZ-SF-01?",
+      "Finish for ZZ-SF-01?",
+    ]);
     expect(screen.getByText("text in the code column only — no quantity, unit or anything else on the row")).toBeInTheDocument();
+    expect(
+      screen.getByText("no quantity, the code FAB-01 is a finish code, and row 3 (ZZ-SF-01) is the item above"),
+    ).toBeInTheDocument();
   });
 
   it("accepts one as the Kind control would, at the document's version", async () => {
@@ -144,5 +152,18 @@ describe("a bill's kind suggestions", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Accept all 1 suggested section heading$/ }));
     await waitFor(() => expect(routes.patches).toHaveLength(1));
     expect(routes.patches[0]).toMatchObject({ sheetIndex: 1, rowKind: "section" });
+  });
+
+  it("accepts every finish line on the tab in one press, each naming its item", async () => {
+    const sheet = mount();
+    fireEvent.click(await screen.findByRole("button", { name: /Accept all 3 suggested finish lines/ }));
+    await waitFor(() => expect(routes.patches).toHaveLength(3));
+    const indexOf = (lineNo: number) => sheet.lines.find((line) => line.lineNo === lineNo)!.index;
+    expect(routes.patches).toEqual([
+      { sheetIndex: 1, index: indexOf(4), rowKind: "finish_for", finishForRow: 3, version: 3 },
+      { sheetIndex: 1, index: indexOf(5), rowKind: "finish_for", finishForRow: 3, version: 4 },
+      { sheetIndex: 1, index: indexOf(6), rowKind: "finish_for", finishForRow: 3, version: 5 },
+    ]);
+    expect(screen.getByRole("button", { name: /Accept all 1 suggested section heading$/ })).toBeInTheDocument();
   });
 });

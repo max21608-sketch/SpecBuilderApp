@@ -193,7 +193,42 @@ export function guessRowKinds<T extends GuessLine>(lines: readonly T[]): Map<num
     const reason = sectionShape(line);
     if (reason) out.set(line.lineNo, { kind: "section", reason });
   }
+  const finishShaped = new Set(ordered.filter((line) => open(line) && finishShape(line) !== null).map((line) => line.lineNo));
+
+  ordered.forEach((line, at) => {
+    if (!finishShaped.has(line.lineNo)) return;
+    const parent = itemAbove(ordered, at, out, finishShaped);
+    if (!parent) return;
+    out.set(line.lineNo, {
+      kind: "finish_for",
+      parent: { row: parent.lineNo, code: parent.code },
+      reason: `no quantity, ${finishShape(line)}, and row ${parent.lineNo} (${parent.code ?? "no code"}) is the item above`,
+    });
+  });
   return out;
+}
+
+/**
+ * The item a finish-shaped line sits under: walking up past finish lines
+ * (set, or finish-shaped), and blank rows; stopping — with no parent — at a
+ * section or subtotal (set, or a suggested section), at an ignored line, and
+ * at anything else that is not a live item.
+ */
+function itemAbove<T extends GuessLine>(
+  ordered: readonly T[],
+  at: number,
+  guesses: ReadonlyMap<number, RowKindGuess>,
+  finishShaped: ReadonlySet<number>,
+): T | null {
+  for (let k = at - 1; k >= 0; k -= 1) {
+    const above = ordered[k] as T;
+    if (above.rowKind === "finish_for" || finishShaped.has(above.lineNo)) continue;
+    if (above.rowKind === "blank" || (!above.rowKind && text(above.code) === "" && firstLine(above) === "")) continue;
+    if (above.ignored) return null;
+    if (guesses.get(above.lineNo)?.kind === "section") return null;
+    return (above.rowKind ?? "item") === "item" ? above : null;
+  }
+  return null;
 }
 
 /**

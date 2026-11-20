@@ -727,7 +727,7 @@ export default function BoqReview({
           // function the rows read (`linesToAcceptAs`).
           const kindGuesses = run.status === "parsed" ? guessRowKinds(sheet.lines) : new Map<number, never>();
           const sectionsToAccept = linesToAcceptAs(sheet.lines, kindGuesses, "section");
-
+          const finishesToAccept = linesToAcceptAs(sheet.lines, kindGuesses, "finish_for");
           // Row, Kind, Client ref, Item, Area, Qty, Designer, (Against the
           // phase), Category, Level, Include.
           const columns = reconciliation ? 11 : 10;
@@ -859,13 +859,18 @@ export default function BoqReview({
                           {sectionsToAccept.length} may be {sectionsToAccept.length === 1 ? "a section heading" : "section headings"}
                         </Chip>
                       )}
-
+                      {finishesToAccept.length > 0 && (
+                        <Chip tone="info">
+                          {finishesToAccept.length} may be {finishesToAccept.length === 1 ? "a finish line" : "finish lines"}
+                        </Chip>
+                      )}
                     </>
                   }
                   actions={
                     run.status === "parsed" &&
                     (notFurniture.length > 0 ||
                       sectionsToAccept.length > 0 ||
+                      finishesToAccept.length > 0 ||
                       suggested.length > 0 ||
                       suggestedCategories.length > 0 ||
                       twinsToAccept.length > 0) ? (
@@ -898,7 +903,23 @@ export default function BoqReview({
                             }
                           />
                         )}
-
+                        {finishesToAccept.length > 0 && (
+                          <SuggestButton
+                            value={`Accept all ${finishesToAccept.length} suggested finish line${finishesToAccept.length === 1 ? "" : "s"}`}
+                            evidence="each row names its item and why · its Kind puts one back"
+                            busy={busy}
+                            onAccept={() =>
+                              void acceptKinds(
+                                sheetIndex,
+                                finishesToAccept.map(({ line, guess }) => ({
+                                  index: line.index,
+                                  rowKind: "finish_for" as const,
+                                  finishForRow: guess.kind === "finish_for" ? guess.parent.row : null,
+                                })),
+                              )
+                            }
+                          />
+                        )}
                         {/* Category before level: the category decides
                             which questions the record has at all. */}
                         {suggestedCategories.length > 0 && (
