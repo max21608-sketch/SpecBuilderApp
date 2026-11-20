@@ -4,8 +4,9 @@ Asked for by Max on 2026-11-20: "get this app production ready in a few days …
 come up with a very detailed plan, having tested, having gone through the app …
 take screenshots … sanity checking everything … you need to replace me."
 
-**Status (2026-11-20, afternoon): TESTED; FIXES BUILT ON FOUR BRANCHES, TWO OF
-THEM MERGED INTO `prod-ready` AND CHECKED ON A PRODUCTION BUILD; NOTHING
+**Status (2026-11-20, late afternoon): TESTED; ALL FOUR FIX BRANCHES MERGED
+INTO `prod-ready`; THE FOUR CHECKS GREEN ON THE WHOLE INTEGRATION (5,333 tests,
+database tier required); THE REHEARSAL RE-RUN ON ITS PRODUCTION BUILD; NOTHING
 PUSHED.** Claude cannot push (GitHub is read-only for Claude under the
 organisation's policy) and cannot create production (Neon, Vercel and the
 Blob store are consoles only Max holds). Everything below that says "Max" is
@@ -105,7 +106,7 @@ D = data wrong or lost · U = a person misled or stuck · C = cosmetic or fricti
 | K1 | A bill with no price columns — even named "… Bill of Quantities.xlsx" — is filed by the model as an FF&E schedule and read at a charge: 1,500 proposals, no records, no question asked. The box showed "Bill of quantities" and the press overrode it | D | `prod-flows` K1 — a disagreement between the name and the model holds the file for a person |
 | B8 | A size written without `x` (`Overall: W 850 D 900 H 780 mm`, `H760mm SH 420`) places nothing — the same reader as found-in-use's `SH450` | D | `prod-bill` R9 (0 changes on every real bill and all 58 staged drawing runs) |
 | B9 | A finish line's own label ("Finish: Brushed brass…") reached the BWS cell and the quote | D | `prod-bill` R8 |
-| B10 | Library rows a bill creates carry no description, so the BWS cell is "MTL-01 TBC" with no words (MTL-01's words lost through R6; the fabric codes' never filled) | D | `prod-bill` R10, in progress |
+| B10 | Library rows a bill creates carry no description, so the BWS cell is "MTL-01 TBC" with no words (MTL-01's words lost through R6; the fabric codes' never filled) | D | `prod-bill` R10 (on the real Aman bill: MTL-01 "Antique Bronze", TIM-03 "SMOKED STAINED OAK VENEER"; placeholders stay empty) |
 | B7 | A decimal quantity (`6.4` lm banquette) is "not given": `spec_records.qty` is an integer | D | **decision** D8 |
 
 ### 3.2 A person misled or stuck
@@ -139,7 +140,7 @@ D = data wrong or lost · U = a person misled or stuck · C = cosmetic or fricti
 | S4 | `create-user` took any password on the command line, had no way to deactivate | should | `prod-harden` H5 |
 | S1 | The production chase email had never run; it sent empty `x-intended-*` headers | should | `prod-harden` H6 (test + fix) |
 | S3 | `npm audit`: `next` 15.5.25 has a critical and a high advisory fixed in 15.5.29; `postal-mime` 3.0.0 (every uploaded .eml) has a high one; `zod`'s needs zod 4 | should | `prod-deps`: next 15.5.29, the transitive fixes, postal-mime 4.2.1 (which also fixed calendar invites downloading as 0 bytes). Production audit 15 → 10, no critical; zod, the blob chain and Next's own postcss written up in `docs/stack.md` as accepted, with what would change it |
-| S11 | After the parser upgrade an email attachment download could serve a different file than the one listed; a sender could fake Exchange's AutoForwarded stamp with `Name : value` | should | `prod-deps` F1, F2, in progress |
+| S11 | After the parser upgrade an email attachment download could serve a different file than the one listed; a sender could fake Exchange's AutoForwarded stamp with `Name : value` | should | `prod-deps` F1, F2 |
 | B1-sec | No per-project access: every account sees every client's NDA material | blocker | **decision** D1 |
 | S7 | Nothing bounds a person's model spend and nothing records it | should | **console** D3 (a spend limit) |
 | S9 | Blob store region unverified; Anthropic data residency not written down | should | **decision** D7 |
@@ -169,9 +170,43 @@ stack at the end. None touches a migration.
 | Branch | Items | State |
 |---|---|---|
 | `prod-harden` | H1–H7, U1–U5 | done, 5,205 tests; **merged into `prod-ready`**; health, HSTS, cross-site refusal, add-project, Set designer, chase link and Emails group checked on the production build |
-| `prod-bill` | R1–R9, R10 in progress, with a before/after regression run of every real bill and staged run on this machine | R1–R9 done, 5,168 tests; **merged into `prod-ready`**; checked on a fresh project on the production build (and one layout regression it caused fixed in `63030a9`) |
-| `prod-flows` | E0, RV0, E1, K1, I1, E2/E3, F4, F1–F3, V1 | E0, RV0, E1, K1, I1 committed; the rest in progress |
-| `prod-deps` | next 15.5.29, `npm audit fix`, postal-mime 4.2.1, the accepted advisories written up; F1/F2 | the four done, 5,125 tests; F1/F2 in progress. Changes `package-lock.json`, so it is verified in a worktree with its own `node_modules` |
+| `prod-bill` | R1–R10 and the revision polish RV2–RV5, with a before/after regression run of every real bill and staged run on this machine | done, 5,182 tests; **merged into `prod-ready`**; checked on a fresh project on the production build (and one layout regression it caused fixed in `63030a9`) |
+| `prod-flows` | E0, RV0, E1, K1, I1, E2/E3, F4, F1–F3 (V1 not built — §7) | done, 5,159 tests; **merged into `prod-ready`** (two conflicts resolved by hand: the bill route's imports and the help file's revision paragraph) |
+| `prod-deps` | next 15.5.29, `npm audit fix`, postal-mime 4.2.1, the accepted advisories written up; the attachment download match and exact header names; the record header, one confirm per press, en-GB History | done, 5,147 tests; **merged into `prod-ready`**, which now has its own `node_modules` from the merged lockfile |
+
+### 4.1 The rehearsal again, on the merged production build
+
+A fresh project (`T20120`), the same invented pack, every screen, scripted with
+a pass/fail per finding (`~/dev/localstack/pw/prod-60-final-rehearsal.mjs`,
+`prod-63-final-continue.mjs`; log `~/dev/localstack/final-continue.log`):
+add project opens it · the bill opens on a real tab · headings and finish
+lines suggested · sizes placed · Confirm creates exactly 29 records · the
+preamble and schedule confirms are visible without scrolling and end in a done
+state · both drawing cards W2100 x D950 x H820 x SH440mm and W780 x D820 x H760
+x SH420mm · a double press never says "targets changed" · the email header says
+it was uploaded · the email confirms (7 applied, no reload loop) · Set designer
+on a whole phase · the chase `.eml` downloads · all outputs download · Rev B is
+offered as a revision and Confirm waits for the decision — **all pass.**
+
+Found by the re-run and dealt with the same afternoon:
+
+- **An email already on another project** sent the person to an empty pack
+  page ("That pack is not on this project") and lost the server's sentence.
+  Fixed in `prod-ready` (`a867ca7`, with a test that fails without it): the
+  panel stays open with "This email is already in the inbox as …, on T20111.
+  Nothing was recorded or read again."
+- **A statement about an item with no category** says "Item not found" though
+  the item was found (its question cannot be matched without a category).
+  Sent back to `prod-flows`.
+- **The model read differs run to run**: on the second read of the same spec
+  sheet it flagged the lounge chair's height as uncertain and held the card
+  ("Check the height — then press Mark checked"). That is the design working
+  and the reason a person reviews every card.
+- **A finishes schedule now conflicts with the bill's own words** for codes
+  the bill described (FAB-01 "Kvadrat Hallingdal 65, col. 130 — to sofas"
+  against the schedule's "Hallingdal 65, colour 130"), because R10 gives the
+  library the bill's words first. The conflict rule predates today (WD-02 did
+  it this morning); R10 makes it more frequent. **Decision D12.**
 
 **How they reach production.** Merge the three into one integration branch
 (`prod-int`), run the four checks with the database tier required and the
@@ -252,6 +287,15 @@ list under Max in `docs/plans/README.md`).
 (`MAIL_INGESTION_MODE=disabled`); people save replies as `.eml` and upload
 them, which works (once E0 lands).
 
+**D12 — Which document's words describe a finish.** A finishes schedule
+exists to say what each code IS; a bill line's words are a passing mention.
+Today the library keeps whichever arrived first and every later disagreement
+is a person's decision. *Recommendation:* record where a library description
+came from (one column), let a finishes schedule replace words that came from a
+bill (never words a person typed or confirmed), and keep the conflict for
+everything else. This is your pending "source-document version precedence"
+decision in its smallest form.
+
 **D11 — CSP.** *Recommendation:* keep the full policy report-only for the
 first week of production and enforce it after one walk of every screen shows
 no violation in the console.
@@ -301,6 +345,11 @@ enquiry with Max watching, the uptime check and the spend alert armed.
   linked twins by area; R1 the record header line; W2 the double-press
   wording; V1 if it did not fit; the US-style dates on History; one finish
   "— TBC" separator.
+- A view-only account sees every write button enabled (the server refuses,
+  403 in words). No screen receives the user's role today; about twenty record
+  components and the phase table would need it (Coder C's measured shape).
+- A pack's header counts a duplicate email it did not register ("6 documents"
+  over five rows).
 - Per-project access if D1 says "later".
 - A cost view over `model_metadata` (every read already stores its usage).
 - The bill review's six separate "Accept all …" buttons per tab could be one
