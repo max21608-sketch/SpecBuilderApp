@@ -366,7 +366,11 @@ the short version and the traps, mirroring *Creating the pilot environment*.
   `NEW_USER_PASSWORD`. Rehearsed on an empty local database on 2026-11-20: 60
   migrations, 13 seed files, one admin.
 - **Proof without signing in:** `GET /api/health` answers
-  `{"ok":true,"commit":"<sha>"}` (public since 2026-11-20); signed in,
+  `{"ok":true,"commit":"<sha>"}` (public since 2026-11-20) only when the
+  environment pair and `AUTH_SECRET` pass the same check every page makes AND
+  the database answers; otherwise 503 with `"problem":"session_secret_misconfigured"`
+  or `"environment_misconfigured"` (the code only, never a value), or `{"ok":false}`
+  when the database does not answer; signed in,
   `/api/auth/me` reports `production`/`production`; production shows no chip
   and no title marker.
 

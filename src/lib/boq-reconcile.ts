@@ -238,13 +238,22 @@ export function effectiveArea(line: {
 /** The record columns a paired line writes from the bill. */
 export type BillStatedField = "itemDescription" | "qty" | "productReference" | "designer" | "area" | "boqCategory" | "qtyUnit";
 
-/** The bill roles each record column is read from (`effectiveArea` composes the area from three). */
+/**
+ * The bill roles that STATE each record column on a revision. The area is
+ * stated by an area or sub-area column only (pre-push review E7): with only a
+ * category mapped, `effectiveArea` falls back to the category's text, and a
+ * Rev B with a Category column and no Area column wrote "Seating" over Rev A's
+ * "Guest Room Type A" — the value the area-based twin pairing reads. A
+ * category column states the BOQ category, which it is. What a stated area
+ * WRITES is still `effectiveArea`, and a NEW line's area still takes the
+ * first import's three-way fallback; neither is this table's business.
+ */
 const STATED_BY: Record<BillStatedField, readonly string[]> = {
   itemDescription: ["itemDescription"],
   qty: ["qty"],
   productReference: ["productReference"],
   designer: ["designer"],
-  area: ["area", "subArea", "boqCategory"],
+  area: ["area", "subArea"],
   boqCategory: ["boqCategory"],
   qtyUnit: ["qtyUnit"],
 };

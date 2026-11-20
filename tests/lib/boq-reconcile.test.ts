@@ -232,8 +232,14 @@ describe("a revised sheet says nothing about a column it does not map", () => {
 
   it("reads which record columns a sheet states from its column map", () => {
     expect([...fieldsTheBillStates(MAPPED_WITHOUT_DESIGNER)].sort()).toEqual(["area", "itemDescription", "qty"]);
-    // The area is composed from three roles: any one of them states it.
-    expect(fieldsTheBillStates({ boqCategory: { index: 1, heading: "Package" } }).has("area")).toBe(true);
+    // An area or a sub-area column states the area; a category column alone
+    // states the category and NOT the area (pre-push review E7): its text is
+    // only the first import's fallback for an area nobody gave.
+    expect(fieldsTheBillStates({ area: { index: 1, heading: "Area" } }).has("area")).toBe(true);
+    expect(fieldsTheBillStates({ subArea: { index: 1, heading: "Sub-area" } }).has("area")).toBe(true);
+    const categoryOnly = fieldsTheBillStates({ boqCategory: { index: 1, heading: "Package" } });
+    expect(categoryOnly.has("area")).toBe(false);
+    expect(categoryOnly.has("boqCategory")).toBe(true);
     // A sheet staged before its map was recorded is read as stating everything, as before.
     expect(fieldsTheBillStates(undefined).size).toBe(7);
   });
@@ -244,6 +250,17 @@ describe("a revised sheet says nothing about a column it does not map", () => {
     expect(result.lines[0]!.deltas).toEqual([{ field: "qty", label: "Quantity", was: "6", now: "8" }]);
     // Without the map, the old reading: an empty designer is a change.
     expect(lineDeltas(line({ designer: null }), record({ designer: "NPI" })).map((delta) => delta.field)).toEqual(["designer"]);
+  });
+
+  it("shows no Area change on a sheet that maps a category and no area (E7)", () => {
+    const stated = fieldsTheBillStates({ code: { index: 0, heading: "Ref" }, boqCategory: { index: 1, heading: "Category" } });
+    const result = reconcileSheet(
+      [line({ area: null, boqCategory: "Seating" })],
+      [record({ area: "Guest Room Type A", boqCategory: null })],
+      [],
+      stated,
+    );
+    expect(result.lines[0]!.deltas.map((delta) => delta.field)).toEqual(["boqCategory"]);
   });
 
   it("counts a line changed only by an unmapped column as unchanged", () => {

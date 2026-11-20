@@ -105,6 +105,8 @@ import {
   TBC_TOKENS,
   containsPhrase,
   isDimensionSlot,
+  normaliseDimensionSlot,
+  normaliseUnit,
   type AttributeGroup,
   type DimensionSlot,
 } from "@/lib/spec-vocab";
@@ -240,13 +242,37 @@ export const UNLABELLED_SIZE_WHY = "Read from an unlabelled size line: every fig
  *     label has no claim to win it. Both stay as they were.
  *   * THE UNIT IS THE LINE'S OWN, exactly as a labelled line's: printed, or
  *     none — placed unconverted and bracketed. Never from a figure's size.
+ *   * NO WORD AFTER THE LAST FIGURE BUT A UNIT (pre-push review E6). The
+ *     combined-line reader takes one trailing word as the line's unit and,
+ *     where it is not one, drops it (`trailingWordNotAUnit`), so
+ *     `Dia 900 x H 25 top` read as a table 25 high and `W 600 x D 600 base`
+ *     as the item's footprint, the part's word nowhere. A labelled line has
+ *     always been read that way and is not changed here; an unlabelled line
+ *     has no label to say the figures are the item's, so it stays the note.
  */
 function unlabelledSizeReading(value: string): DimensionReading | null {
+  if (trailingWordNotAUnit(value) !== null) return null;
   const reading = readDimension(UNLABELLED_SIZE_LABEL, value);
   if (!reading || reading.tbc || reading.qualifier || (reading.unlettered?.length ?? 0) > 0) return null;
   if (reading.parts.length < 2) return null;
   if (reading.parts.some((part) => part.slotSuggested || part.figure === null)) return null;
   return reading;
+}
+
+/**
+ * The word straight after the line's last figure that the combined-line
+ * reader would take as the line's UNIT (`parseCombinedDimensions`: one
+ * trailing word, after a digit, that is not a slot letter) where it is NOT a
+ * unit — `top`, `base` — or null. Only a word of letters: a quote mark after a
+ * figure is the reader's own inch or feet business, left exactly as it was.
+ * Asked of an unlabelled line alone, so no other line reads differently.
+ */
+function trailingWordNotAUnit(value: string): string | null {
+  const trailing = /^(.*?)\s*([A-Za-z]+\.?)$/.exec(value.trim());
+  if (!trailing || !/[0-9]$/.test((trailing[1] ?? "").trim())) return null;
+  const word = trailing[2] ?? "";
+  if (normaliseDimensionSlot(word) !== null || normaliseUnit(word) !== null) return null;
+  return word;
 }
 
 /**

@@ -224,8 +224,10 @@ size on a line of its own with no label (`W2100 x D950 x H820mm, SH 440mm`,
 size was a note. Such a line is now read as the overall size ONLY where every
 figure carries its own slot letter through `readDimension` (no figure placed
 by printed order, none bare beside a lettered one, nothing left over — `L` is
-not a slot), it prints at least two figures, and it is the line's ONLY size
-line: beside a labelled size line, a Dims column or a second such line it
+not a slot — and no word after the last figure but a unit: the combined
+reader drops a trailing non-unit, so `Dia 900 x H 25 top` placed a top's
+thickness as the table's height, pre-push review E6), it prints at least two
+figures, and it is the line's ONLY size line: beside a labelled size line, a Dims column or a second such line it
 stays the note it was, because a line with no label has no claim to win "which
 size is the item's". The unit is the line's own or none (placed unconverted,
 bracketed). It is written under the label `Size`, the figure rows on the
@@ -375,9 +377,11 @@ already exist.
   confirmed as their revision; the pairing column read "Designer: NPI → —"
   and the confirm wrote NULL on both. A role the sheet's column map does not
   hold is the bill saying NOTHING, never the bill saying empty: the paired
-  record keeps its own designer, product reference, area (composed from
-  area, sub-area and category, so any of the three states it), BOQ category,
-  unit and quantity (with `qty_raw`), and the review shows no change for it.
+  record keeps its own designer, product reference, area (stated by an area
+  or sub-area column only — a category column alone is the first import's
+  fallback text, and wrote "Seating" over "Guest Room Type A", pre-push
+  review E7), BOQ category, unit and quantity (with `qty_raw`), and the review
+  shows no change for it.
   A MAPPED column whose cell is blank still writes its blank and shows "→ —"
   — unchanged, and a separate question. A sheet staged before its column map
   was recorded (no `columns`) writes everything, as before. The name comes

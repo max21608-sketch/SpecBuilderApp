@@ -214,8 +214,6 @@ describe("extraction timing contract", () => {
     "src/app/api/projects/[id]/export/check-sheet/route.ts": NO_MODEL,
     "src/app/api/projects/[id]/export/costing/route.ts": NO_MODEL,
     "src/app/api/projects/[id]/export/quote/route.ts": NO_MODEL,
-    // "Set designer…" (2026-11-20): up to 500 items in one transaction.
-    "src/app/api/projects/[id]/designer/route.ts": NO_MODEL,
     "src/app/api/cron/sweep-reads/route.ts": NO_MODEL,
     "src/app/api/cron/graph-renew/route.ts": NO_MODEL,
     "src/app/api/cron/graph-delta/route.ts": NO_MODEL,

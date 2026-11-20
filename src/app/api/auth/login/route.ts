@@ -35,6 +35,7 @@ import { environmentProblemMessage } from "@/lib/env";
 import { explainFailure } from "@/lib/error-detail";
 import { isDatabaseConnectionFailure } from "@/lib/db-transaction";
 import { clientAddress, loginThrottle } from "@/lib/login-throttle";
+import { CROSS_SITE_SIGN_IN_REFUSED, isCrossSiteWrite } from "@/lib/cross-site";
 
 const Body = z.object({
   email: z.string().email(),
@@ -77,6 +78,17 @@ function serverFailure(cause: unknown): Response {
 }
 
 export async function POST(req: Request): Promise<Response> {
+  // A SIGN-IN FROM ANOTHER SITE IS REFUSED (pre-push review E5, 2026-11-20).
+  // The middleware's cross-site refusal never runs here — this route is
+  // outside its matcher so that signing in needs no session — and
+  // `req.json()` reads a form's body whatever its content type, so a page
+  // elsewhere could sign the visitor into the attacker's account. The same
+  // rule, from the same file, before the body is read or a password checked.
+  const url = new URL(req.url);
+  if (isCrossSiteWrite({ method: req.method, pathname: url.pathname, headers: req.headers, fallbackHost: url.host })) {
+    return json({ ok: false, code: "cross_site_refused", error: CROSS_SITE_SIGN_IN_REFUSED }, 403);
+  }
+
   let body: unknown;
   try {
     body = await req.json();

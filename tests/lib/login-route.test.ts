@@ -6,10 +6,14 @@ const state = vi.hoisted(() => ({
   user: null as null | { id: string; email: string; name: string; role: string },
   throws: null as Error | null,
   tokenThrows: null as Error | null,
+  /** Passwords checked and sessions signed: a refused forgery must reach neither. */
+  checked: 0,
+  signed: 0,
 }));
 
 vi.mock("@/lib/auth-node", () => ({
   verifyCredentials: async () => {
+    state.checked += 1;
     if (state.throws) throw state.throws;
     return state.user;
   },
@@ -17,6 +21,7 @@ vi.mock("@/lib/auth-node", () => ({
 vi.mock("@/lib/session", () => ({ setSessionCookie: async () => {} }));
 vi.mock("@/lib/auth", () => ({
   makeSessionToken: async () => {
+    state.signed += 1;
     if (state.tokenThrows) throw state.tokenThrows;
     return "token";
   },
@@ -31,6 +36,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 const { POST } = await import("@/app/api/auth/login/route");
+const { CROSS_SITE_SIGN_IN_REFUSED } = await import("@/lib/cross-site");
 
 let address = 0;
 const signIn = (email: string, ip: string) =>
@@ -46,6 +52,8 @@ beforeEach(() => {
   state.user = null;
   state.throws = null;
   state.tokenThrows = null;
+  state.checked = 0;
+  state.signed = 0;
   address += 1;
 });
 
@@ -157,5 +165,67 @@ describe("POST /api/auth/login when the session cannot be signed", () => {
       if (saved === undefined) delete process.env.APP_ENV;
       else process.env.APP_ENV = saved;
     }
+  });
+});
+
+// Pre-push review E5 (2026-11-20): sign-in is outside the middleware's
+// matcher — it has to be, or the way in needs a session — so the cross-site
+// refusal never saw it, and `req.json()` reads a body whatever its content
+// type: a page on another site could post a JSON-shaped form and sign the
+// visitor into an account the attacker holds (login CSRF). The route asks the
+// same rule (`src/lib/cross-site.ts`) itself, before the password.
+describe("POST /api/auth/login from another site", () => {
+  const attempt = (headers: Record<string, string>, email: string) =>
+    POST(
+      new Request("https://spec.example.test/api/auth/login", {
+        method: "POST",
+        headers: { host: "spec.example.test", "x-forwarded-for": `198.18.0.${address}`, ...headers },
+        body: JSON.stringify({ email, password: "the-attackers-password" }),
+      }),
+    );
+
+  it("refuses a form posted from another site, in words, before any password is checked or session signed", async () => {
+    const email = `forged${address}@example.test`;
+    state.user = { id: "u", email, name: "Attacker", role: "editor" };
+    // A form's own content type: `req.json()` would have read it anyway.
+    const res = await attempt({ origin: "https://attacker.example.net", "content-type": "text/plain" }, email);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ ok: false, code: "cross_site_refused", error: CROSS_SITE_SIGN_IN_REFUSED });
+    expect(state.checked).toBe(0);
+    expect(state.signed).toBe(0);
+  });
+
+  it("refuses a sibling on the same site, Sec-Fetch-Site: cross-site, and an opaque origin", async () => {
+    const email = `sibling${address}@example.test`;
+    state.user = { id: "u", email, name: "Attacker", role: "editor" };
+    for (const headers of [
+      { origin: "https://other-app.example.test" },
+      { "sec-fetch-site": "cross-site" },
+      { origin: "null" },
+    ]) {
+      const res = await attempt({ ...headers, "content-type": "application/json" }, email);
+      expect(res.status, JSON.stringify(headers)).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe("cross_site_refused");
+    }
+    expect(state.signed).toBe(0);
+  });
+
+  it("signs in from the app's own page, behind a proxy that names the host", async () => {
+    const email = `own${address}@example.test`;
+    state.user = { id: "u", email, name: "U", role: "editor" };
+    const own = await attempt({ origin: "https://spec.example.test", "content-type": "application/json" }, email);
+    expect(own.status).toBe(200);
+    const proxied = await attempt(
+      { origin: "https://spec.example.test", host: "internal.vercel.test", "x-forwarded-host": "spec.example.test", "sec-fetch-site": "same-origin" },
+      email,
+    );
+    expect(proxied.status).toBe(200);
+    expect(state.signed).toBe(2);
+  });
+
+  it("signs in a script with no Origin, which is a machine and not a browser", async () => {
+    const email = `script${address}@example.test`;
+    state.user = { id: "u", email, name: "U", role: "editor" };
+    expect((await attempt({ "content-type": "application/json" }, email)).status).toBe(200);
   });
 });

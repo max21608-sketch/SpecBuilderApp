@@ -153,7 +153,15 @@ export const SESSION_SECRET_MISCONFIGURED =
 /** The builds that are deployed somewhere, as opposed to a developer's own machine. */
 const DEPLOYED: ReadonlySet<AppEnv> = new Set(["staging", "pilot", "production"]);
 
-type Problem = { sentence: string; detail: string };
+/**
+ * Which complaint, as a code a machine can read and anybody may see: the
+ * environment pair, or the session secret. It names the KIND of problem only —
+ * never a variable's value, and for the secret not even whether it is missing
+ * or short, since that would say something about its length.
+ */
+export type EnvironmentProblemCode = "environment_misconfigured" | "session_secret_misconfigured";
+
+type Problem = { code: EnvironmentProblemCode; sentence: string; detail: string };
 
 function sessionSecretProblem(appEnv: AppEnv): string | null {
   if (!DEPLOYED.has(appEnv)) return null;
@@ -170,10 +178,14 @@ function diagnose(): Problem | null {
   try {
     environment = getEnvironment();
   } catch (cause) {
-    return { sentence: ENVIRONMENT_MISCONFIGURED, detail: cause instanceof Error ? cause.message : String(cause) };
+    return {
+      code: "environment_misconfigured",
+      sentence: ENVIRONMENT_MISCONFIGURED,
+      detail: cause instanceof Error ? cause.message : String(cause),
+    };
   }
   const secret = sessionSecretProblem(environment.appEnv);
-  return secret ? { sentence: SESSION_SECRET_MISCONFIGURED, detail: secret } : null;
+  return secret ? { code: "session_secret_misconfigured", sentence: SESSION_SECRET_MISCONFIGURED, detail: secret } : null;
 }
 
 /**
@@ -184,6 +196,17 @@ function diagnose(): Problem | null {
  */
 export function environmentProblem(): string | null {
   return diagnose()?.detail ?? null;
+}
+
+/**
+ * The deployment's complaint as a CODE, or null when there is none — for
+ * `/api/health`, which anybody may read: the code says which kind of problem
+ * and nothing about any value (pre-push review E3, 2026-11-20).
+ *
+ * Never throws.
+ */
+export function environmentProblemCode(): EnvironmentProblemCode | null {
+  return diagnose()?.code ?? null;
 }
 
 /**

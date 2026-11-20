@@ -6,6 +6,7 @@ import {
   parseEnvelope,
   readAttachment,
   sameListedAttachment,
+  GRAPH_LISTED,
   stripReplyPrefixes,
 } from "@/lib/email-envelope";
 
@@ -418,22 +419,25 @@ describe("sameListedAttachment", () => {
   const fresh = { filename: "X-100 sizes.pdf", contentType: "application/pdf", size: 28, isRfc822: false };
 
   it("agrees with the entry registration wrote for the same file", () => {
-    expect(sameListedAttachment({ ...fresh }, fresh, { sizeComparable: true })).toBe(true);
+    expect(sameListedAttachment({ ...fresh }, fresh)).toBe(true);
   });
 
   it("refuses a different name, type or kind at the same index", () => {
-    expect(sameListedAttachment({ ...fresh, filename: "forwarded.eml" }, fresh, { sizeComparable: true })).toBe(false);
-    expect(sameListedAttachment({ ...fresh, filename: null }, fresh, { sizeComparable: true })).toBe(false);
-    expect(sameListedAttachment({ ...fresh, contentType: "message/rfc822" }, fresh, { sizeComparable: true })).toBe(false);
-    expect(sameListedAttachment({ ...fresh, isRfc822: true }, fresh, { sizeComparable: true })).toBe(false);
-    expect(sameListedAttachment(undefined, fresh, { sizeComparable: true })).toBe(false);
+    expect(sameListedAttachment({ ...fresh, filename: "forwarded.eml" }, fresh)).toBe(false);
+    expect(sameListedAttachment({ ...fresh, filename: null }, fresh)).toBe(false);
+    expect(sameListedAttachment({ ...fresh, contentType: "message/rfc822" }, fresh)).toBe(false);
+    expect(sameListedAttachment({ ...fresh, isRfc822: true }, fresh)).toBe(false);
+    expect(sameListedAttachment(undefined, fresh)).toBe(false);
   });
 
-  it("compares the size only where this parser wrote the list", () => {
-    // An upload's list is parseEnvelope's own, so a different count is a
-    // different reading. A Graph arrival lists Graph's count, which is not
+  it("compares the size wherever this parser wrote the list, and not on an entry Graph described", () => {
+    // An upload's list is parseEnvelope's own, and so is a Graph arrival's
+    // whose bytes were parsed (E4), so a different count is a different
+    // reading. An entry marked as Graph's carries Graph's count, which is not
     // known to be the decoded bytes, so it cannot be held to it.
-    expect(sameListedAttachment({ ...fresh, size: 0 }, fresh, { sizeComparable: true })).toBe(false);
-    expect(sameListedAttachment({ ...fresh, size: 4096 }, fresh, { sizeComparable: false })).toBe(true);
+    expect(sameListedAttachment({ ...fresh, size: 0 }, fresh)).toBe(false);
+    expect(sameListedAttachment({ ...fresh, size: 4096, listedBy: GRAPH_LISTED }, fresh)).toBe(true);
+    // The mark excuses the size only: a Graph entry naming another file is still refused.
+    expect(sameListedAttachment({ ...fresh, filename: "image001.png", listedBy: GRAPH_LISTED }, fresh)).toBe(false);
   });
 });

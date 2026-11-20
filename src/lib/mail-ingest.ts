@@ -41,7 +41,7 @@ import {
   lockMessageIdentity,
   mimeSha256,
 } from "@/lib/email-ingest";
-import { parseEnvelope, type EmailEnvelope } from "@/lib/email-envelope";
+import { GRAPH_LISTED, parseEnvelope, type EmailAttachmentMeta, type EmailEnvelope } from "@/lib/email-envelope";
 import { matchReplyToChase } from "@/lib/chase-reply";
 import { assignMessage } from "@/lib/email-registration";
 import type { ExtractionQueueMessage } from "@/lib/extraction-queue";
@@ -213,6 +213,8 @@ export async function ingestGraphMessage(job: MailIngestMessage): Promise<Ingest
   let mimeSize: number | null = null;
   let mimeError: string | null = null;
   let envelope: EmailEnvelope | null = null;
+  /** True when `envelope` is the parser's reading of the stored bytes, not Graph's JSON. */
+  let parsedFromBytes = false;
   let parseError: string | null = null;
   let sha256: string | null = null;
 
@@ -234,6 +236,7 @@ export async function ingestGraphMessage(job: MailIngestMessage): Promise<Ingest
     sha256 = mimeSha256(mime.bytes);
     try {
       envelope = await parseEnvelope(mime.bytes);
+      parsedFromBytes = true;
     } catch (cause) {
       parseError = cause instanceof Error ? cause.message : String(cause);
     }
@@ -252,8 +255,24 @@ export async function ingestGraphMessage(job: MailIngestMessage): Promise<Ingest
 
   // 4. Attachment metadata only. Bytes are never fetched: a file's kind is
   //    declared by a person and reading one costs money.
-  let attachments: { filename: string | null; contentType: string; size: number; isRfc822: boolean }[] = [];
-  if (message.hasAttachments) {
+  //
+  //    THE LIST A PERSON CLICKS IS THE LIST THE DOWNLOAD ROUTE INDEXES
+  //    (pre-push review E4, 2026-11-20). Where the message's bytes were
+  //    stored and parsed, the list stored is the PARSER's reading of them,
+  //    exactly as an upload's is: the download route re-parses the same bytes
+  //    and refuses a file that differs from the entry at the index clicked
+  //    (`sameListedAttachment`). Graph's own description could never pass that
+  //    — a forwarded Outlook item is an `itemAttachment` with no content type,
+  //    named by its subject, where the parser reads `message/rfc822` with no
+  //    name — and Graph's order, inline images included, need not be the
+  //    MIME's, so its index named another file. Graph's listing is asked for
+  //    only where there are no parsed bytes (too large to store, or a message
+  //    the parser refused), and each entry says it is Graph's, so the route
+  //    knows its size is Graph's own count.
+  let attachments: (EmailAttachmentMeta & { listedBy?: typeof GRAPH_LISTED })[] = [];
+  if (parsedFromBytes) {
+    attachments = envelope.attachments;
+  } else if (message.hasAttachments) {
     try {
       const listed = await graphJson<{ value: { name?: string; contentType?: string; size?: number; "@odata.type"?: string }[] }>(
         `${mailboxPath(`/messages/${encodeURIComponent(graphMessageId)}/attachments`)}?$select=id,name,contentType,size`,
@@ -265,6 +284,7 @@ export async function ingestGraphMessage(job: MailIngestMessage): Promise<Ingest
         isRfc822:
           (a.contentType ?? "").toLowerCase().startsWith("message/rfc822") ||
           String(a["@odata.type"] ?? "").includes("itemAttachment"),
+        listedBy: GRAPH_LISTED,
       }));
     } catch {
       // A listing failure must not lose the message. The panel says how many
