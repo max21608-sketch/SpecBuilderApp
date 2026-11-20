@@ -115,9 +115,19 @@ export function isSandboxDatabase(): boolean {
 //
 // So the two things that meet somebody BEFORE they are signed in — the
 // middleware and the sign-in page — ask this instead of finding out by failing.
-// It is non-throwing, like the label readers below, and it names the two
-// variables and nothing else: the messages `getEnvironment` throws contain no
-// secret by construction, which is what makes them safe to print.
+// It is non-throwing, like the label readers below, and it names variables and
+// nothing else: the messages `getEnvironment` throws contain no secret by
+// construction, which is what makes them safe to print.
+//
+// AND IT ASKS ABOUT AUTH_SECRET ON EVERY DEPLOYED BUILD (2026-11-20, production
+// hardening H1). `auth.ts` throws when the secret is missing, and the sign-in
+// route reached that throw only AFTER the password had been checked: a
+// deployment with no AUTH_SECRET took the password, verified it, and answered
+// with the bodyless 500 this section exists to prevent. Staging, pilot and
+// production need one of at least 32 characters (`npm run hash-password`
+// prints 64); development and the local stack set their own and are not asked,
+// so a developer is never locked out by a check written for deployments. The
+// secret itself is never printed, nor its length.
 //
 // ON PRODUCTION THE DETAIL IS WITHHELD, for the reason every other environment
 // detail is: the generic half already tells an administrator what to do, and
@@ -129,18 +139,48 @@ export const ENVIRONMENT_MISCONFIGURED =
   "This deployment is not configured correctly, so it cannot reach its database. " +
   "An administrator has to set APP_ENV and DATABASE_ENVIRONMENT to a matching pair and redeploy.";
 
+/** The shortest AUTH_SECRET a deployed build (staging, pilot, production) accepts. */
+export const AUTH_SECRET_MIN_LENGTH = 32;
+
+/** What a deployed build with no usable AUTH_SECRET says. */
+export const SESSION_SECRET_MISCONFIGURED =
+  "This deployment is not configured correctly, so it cannot sign anybody in. " +
+  `An administrator has to set AUTH_SECRET to a new random value of at least ${AUTH_SECRET_MIN_LENGTH} characters and redeploy.`;
+
+/** The builds that are deployed somewhere, as opposed to a developer's own machine. */
+const DEPLOYED: ReadonlySet<AppEnv> = new Set(["staging", "pilot", "production"]);
+
+type Problem = { sentence: string; detail: string };
+
+function sessionSecretProblem(appEnv: AppEnv): string | null {
+  if (!DEPLOYED.has(appEnv)) return null;
+  const value = process.env.AUTH_SECRET;
+  if (!value) return `AUTH_SECRET is not set on this ${appEnv} deployment.`;
+  if (value.length < AUTH_SECRET_MIN_LENGTH) {
+    return `AUTH_SECRET on this ${appEnv} deployment is shorter than ${AUTH_SECRET_MIN_LENGTH} characters.`;
+  }
+  return null;
+}
+
+function diagnose(): Problem | null {
+  let environment: Environment;
+  try {
+    environment = getEnvironment();
+  } catch (cause) {
+    return { sentence: ENVIRONMENT_MISCONFIGURED, detail: cause instanceof Error ? cause.message : String(cause) };
+  }
+  const secret = sessionSecretProblem(environment.appEnv);
+  return secret ? { sentence: SESSION_SECRET_MISCONFIGURED, detail: secret } : null;
+}
+
 /**
- * The environment guard's own complaint, or null when the pair is fine.
+ * The deployment's own complaint — the environment pair, or a missing or short
+ * AUTH_SECRET on a deployed build — or null when there is none.
  *
  * Never throws — that is the whole point of it.
  */
 export function environmentProblem(): string | null {
-  try {
-    getEnvironment();
-    return null;
-  } catch (cause) {
-    return cause instanceof Error ? cause.message : String(cause);
-  }
+  return diagnose()?.detail ?? null;
 }
 
 /**
@@ -148,9 +188,9 @@ export function environmentProblem(): string | null {
  * appended on every build except production.
  */
 export function environmentProblemMessage(): string | null {
-  const problem = environmentProblem();
+  const problem = diagnose();
   if (!problem) return null;
-  return currentAppEnvIsProduction() ? ENVIRONMENT_MISCONFIGURED : `${ENVIRONMENT_MISCONFIGURED} ${problem}`;
+  return currentAppEnvIsProduction() ? problem.sentence : `${problem.sentence} ${problem.detail}`;
 }
 
 // Non-throwing read of APP_ENV, for cosmetic UI (banner/title) that must

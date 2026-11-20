@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   user: null as null | { id: string; email: string; name: string; role: string },
   throws: null as Error | null,
+  tokenThrows: null as Error | null,
 }));
 
 vi.mock("@/lib/auth-node", () => ({
@@ -14,7 +15,12 @@ vi.mock("@/lib/auth-node", () => ({
   },
 }));
 vi.mock("@/lib/session", () => ({ setSessionCookie: async () => {} }));
-vi.mock("@/lib/auth", () => ({ makeSessionToken: async () => "token" }));
+vi.mock("@/lib/auth", () => ({
+  makeSessionToken: async () => {
+    if (state.tokenThrows) throw state.tokenThrows;
+    return "token";
+  },
+}));
 vi.mock("@/lib/env", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/env")>()),
   environmentProblemMessage: () => null,
@@ -39,6 +45,7 @@ const signIn = (email: string, ip: string) =>
 beforeEach(() => {
   state.user = null;
   state.throws = null;
+  state.tokenThrows = null;
   address += 1;
 });
 
@@ -124,5 +131,31 @@ describe("isDatabaseConnectionFailure", () => {
     expect(isDatabaseConnectionFailure(err("x", { name: "NeonDbError", code: "42703" }))).toBe(false);
     expect(isDatabaseConnectionFailure(err("x", { code: "42P01" }))).toBe(false);
     expect(isDatabaseConnectionFailure(new TypeError("Cannot read properties of undefined"))).toBe(false);
+  });
+});
+
+// Production hardening H1 (2026-11-20): the token was signed outside the try,
+// so a throw there — `auth.ts` throws on a missing AUTH_SECRET — was a
+// bodyless 500 for somebody who had typed the RIGHT password.
+describe("POST /api/auth/login when the session cannot be signed", () => {
+  it("says so in words with a reference, after the right password", async () => {
+    const saved = process.env.APP_ENV;
+    process.env.APP_ENV = "pilot";
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const email = `token${address}@example.test`;
+    state.user = { id: "u", email, name: "U", role: "editor" };
+    state.tokenThrows = new Error("AUTH_SECRET missing or too short");
+    try {
+      const response = await signIn(email, `192.0.2.${address + 150}`);
+      expect(response.status).toBe(500);
+      const body = (await response.json()) as { ok: boolean; code: string; error: string };
+      expect(body.ok).toBe(false);
+      expect(body.code).toBe("sign_in_failed");
+      expect(body.error).toMatch(/failed on the server's side.*Reference [0-9a-f]{8}/);
+    } finally {
+      spy.mockRestore();
+      if (saved === undefined) delete process.env.APP_ENV;
+      else process.env.APP_ENV = saved;
+    }
   });
 });

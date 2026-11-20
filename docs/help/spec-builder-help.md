@@ -427,6 +427,7 @@ copy it exactly. "Ref" below means an 8-character reference code (like
 | "Too many sign-in attempts. Wait N seconds and try again." | Ten wrong tries | Wait a minute. Do not keep trying |
 | "Signing in could not reach the database… Reference …" | The site cannot reach its database. Not their password | Try again in 5 minutes. Still failing → email Max, urgent, with the reference. Nobody will be able to sign in |
 | "Signing in failed on the server's side — this is not your password… Reference …" | A server fault | Try once more in a minute, then email Max with the reference |
+| "This deployment is not configured correctly, so it cannot sign anybody in…" | The site is missing its sign-in secret. Not their password, and nothing they can fix | Email Max, urgent, with the whole sentence. Nobody will be able to sign in until it is set |
 | "Your session has expired." / "Sign in again" | 24 hours passed, or they signed out elsewhere | "Sign in again". What was typed and not saved is still on the screen behind it — copy anything long before signing in |
 | "This is a view-only account" / "…so it cannot change anything here." | Their account can look but not edit | Email Max to ask for edit access |
 | "There is no page at this address" | An old or mistyped link | "Back to projects" and find it from there |
