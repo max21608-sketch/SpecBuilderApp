@@ -186,4 +186,10 @@ describe("middleware on a deployed build with no usable AUTH_SECRET", () => {
     const res = await middleware(api());
     expect(res.status).toBe(401);
   });
+
+  it("lets pilot run on a short secret it already has: only production is held to 32", async () => {
+    const { middleware } = await load("pilot", "pilot", "__qa-sixteen-chr");
+    const res = await middleware(api());
+    expect(res.status).toBe(401);
+  });
 });

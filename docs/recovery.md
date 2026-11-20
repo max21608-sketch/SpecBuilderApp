@@ -70,9 +70,9 @@ recovery plan.
   sign in again; nothing is lost. If it changed by accident, restoring the old
   value restores the sessions.
 - The sign-in page says "cannot sign anybody in" → `AUTH_SECRET` is missing
-  from the deployment, or shorter than 32 characters. Staging, pilot and
-  production refuse every request until it is set (`npm run hash-password`
-  prints one) and the deployment is rebuilt (2026-11-20).
+  from the deployment (staging, pilot or production), or on production shorter
+  than 32 characters. Every request is refused until it is set (`npm run
+  hash-password` prints one) and the deployment is rebuilt (2026-11-20).
 - Database unreachable → §4. Login reads the `users` table.
 - One person only → check `users.active` and their role.
 

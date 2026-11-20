@@ -124,10 +124,13 @@ export function isSandboxDatabase(): boolean {
 // route reached that throw only AFTER the password had been checked: a
 // deployment with no AUTH_SECRET took the password, verified it, and answered
 // with the bodyless 500 this section exists to prevent. Staging, pilot and
-// production need one of at least 32 characters (`npm run hash-password`
-// prints 64); development and the local stack set their own and are not asked,
-// so a developer is never locked out by a check written for deployments. The
-// secret itself is never printed, nor its length.
+// production must HAVE one. Only PRODUCTION must have one of at least 32
+// characters (`npm run hash-password` prints 64): nobody can read the secrets
+// staging and pilot already run on, and a length rule that turned pilot into a
+// 503 on the next deploy would be worse than the defect it closes (Max's
+// coordinator, 2026-11-20). Development and the local stack set their own and
+// are not asked, so a developer is never locked out by a check written for
+// deployments. The secret itself is never printed, nor its length.
 //
 // ON PRODUCTION THE DETAIL IS WITHHELD, for the reason every other environment
 // detail is: the generic half already tells an administrator what to do, and
@@ -139,7 +142,7 @@ export const ENVIRONMENT_MISCONFIGURED =
   "This deployment is not configured correctly, so it cannot reach its database. " +
   "An administrator has to set APP_ENV and DATABASE_ENVIRONMENT to a matching pair and redeploy.";
 
-/** The shortest AUTH_SECRET a deployed build (staging, pilot, production) accepts. */
+/** The shortest AUTH_SECRET a PRODUCTION build accepts. Staging and pilot are asked only that one is set. */
 export const AUTH_SECRET_MIN_LENGTH = 32;
 
 /** What a deployed build with no usable AUTH_SECRET says. */
@@ -156,7 +159,7 @@ function sessionSecretProblem(appEnv: AppEnv): string | null {
   if (!DEPLOYED.has(appEnv)) return null;
   const value = process.env.AUTH_SECRET;
   if (!value) return `AUTH_SECRET is not set on this ${appEnv} deployment.`;
-  if (value.length < AUTH_SECRET_MIN_LENGTH) {
+  if (appEnv === "production" && value.length < AUTH_SECRET_MIN_LENGTH) {
     return `AUTH_SECRET on this ${appEnv} deployment is shorter than ${AUTH_SECRET_MIN_LENGTH} characters.`;
   }
   return null;
@@ -174,8 +177,8 @@ function diagnose(): Problem | null {
 }
 
 /**
- * The deployment's own complaint — the environment pair, or a missing or short
- * AUTH_SECRET on a deployed build — or null when there is none.
+ * The deployment's own complaint — the environment pair, a missing AUTH_SECRET
+ * on a deployed build, or a short one on production — or null when there is none.
  *
  * Never throws — that is the whole point of it.
  */

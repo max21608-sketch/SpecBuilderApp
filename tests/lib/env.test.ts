@@ -242,18 +242,30 @@ describe("environmentProblem and AUTH_SECRET", () => {
     }
   });
 
-  it("refuses an AUTH_SECRET under 32 characters, and never prints it", async () => {
+  it("refuses an AUTH_SECRET under 32 characters on PRODUCTION, and never prints it", async () => {
     const short = "__qa-short-secret-31-characters"; // 31
     expect(short).toHaveLength(31);
-    for (const [appEnv, dbEnv] of DEPLOYED) {
-      const env = await load(appEnv, dbEnv, short);
-      expect(env.environmentProblem(), appEnv).toMatch(/shorter than 32 characters/);
-      expect(env.environmentProblemMessage() ?? "", appEnv).not.toContain(short);
+    const env = await load("production", "production", short);
+    expect(env.environmentProblem()).toMatch(/shorter than 32 characters/);
+    expect(env.environmentProblemMessage() ?? "").not.toContain(short);
+  });
+
+  // Nobody can read the secrets staging and pilot already run on, and a length
+  // rule that turned pilot into a 503 on the next deploy would be worse than
+  // the defect (2026-11-20). They are asked only that one is SET.
+  it("does not hold staging or pilot to the length, only to having one", async () => {
+    for (const [appEnv, dbEnv] of [
+      ["staging", "sandbox"],
+      ["pilot", "pilot"],
+    ] as const) {
+      const env = await load(appEnv, dbEnv, "short");
+      expect(env.environmentProblem(), appEnv).toBeNull();
+      expect(env.environmentProblemMessage(), appEnv).toBeNull();
     }
   });
 
-  it("accepts exactly 32 characters", async () => {
-    const env = await load("pilot", "pilot", "x".repeat(32));
+  it("accepts exactly 32 characters on production", async () => {
+    const env = await load("production", "production", "x".repeat(32));
     expect(env.environmentProblem()).toBeNull();
     expect(env.environmentProblemMessage()).toBeNull();
   });
