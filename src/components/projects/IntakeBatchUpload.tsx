@@ -208,6 +208,29 @@ type Queued = {
   pages: number | null;
 };
 
+/**
+ * The model's evidence, and what a PDF bill's text read as.
+ *
+ * A PDF BILL CODE COULD NOT READ says, before it is registered, that the model
+ * will transcribe it and that it is charged (C2): the statement of the charge
+ * belongs on the row, as it does for every document read on registration —
+ * the row that files it, and since F4 (2026-11-20) the row that offers it.
+ */
+function withPdfBill(
+  evidence: string | null,
+  pdfBill: { lines: number; pages: number; transcribe?: true; reason?: string } | null,
+): string | null {
+  if (pdfBill?.transcribe) {
+    return `${evidence ?? ""} ${pdfBill.reason ?? ""} The model will transcribe it when you open the review${pdfBill.pages ? ` (${pdfBill.pages} page${pdfBill.pages === 1 ? "" : "s"})` : ""} — one charged read — and mark every line for you to check against its page.`
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  if (pdfBill) {
+    return `${evidence ?? ""} Its text reads as a table: ${pdfBill.lines} line${pdfBill.lines === 1 ? "" : "s"} on ${pdfBill.pages} page${pdfBill.pages === 1 ? "" : "s"}.`.trim();
+  }
+  return evidence;
+}
+
 /** What will be used for a file: what somebody chose, else what was read. */
 const kindOf = (item: Queued) => item.choice || item.suggested;
 
@@ -546,15 +569,7 @@ export default function IntakeBatchUpload({
           // the lines are put back by code at registration, and the count is
           // the first thing to check against the PDF.
           const pdfBill = asked.data.decision ? (asked.data.pdfBill ?? null) : null;
-          // A PDF BILL CODE COULD NOT READ says, before it is registered, that
-          // the model will transcribe it and that it is charged (C2): the
-          // statement of the charge belongs on this row, as it does for every
-          // document read on registration.
-          const evidence = pdfBill?.transcribe
-            ? `${asked.data.evidence ?? ""} ${pdfBill.reason ?? ""} The model will transcribe it when you open the review${pdfBill.pages ? ` (${pdfBill.pages} page${pdfBill.pages === 1 ? "" : "s"})` : ""} — one charged read — and mark every line for you to check against its page.`.replace(/\s+/g, " ").trim()
-            : pdfBill
-              ? `${asked.data.evidence ?? ""} Its text reads as a table: ${pdfBill.lines} line${pdfBill.lines === 1 ? "" : "s"} on ${pdfBill.pages} page${pdfBill.pages === 1 ? "" : "s"}.`.trim()
-              : (asked.data.evidence ?? null);
+          const evidence = withPdfBill(asked.data.evidence ?? null, pdfBill);
           update(item.key, {
             sentToModel: item.sentToModel || asked.data.charged !== false,
             largeDocument: asked.data.largeDocument === true,
@@ -562,12 +577,15 @@ export default function IntakeBatchUpload({
           // THE NAME AND THE MODEL DISAGREE (K1): held, with the name's
           // suggestion kept in the box and the model's offered beside it. A
           // person chooses; nothing is registered or read until they do.
+          //
+          // AND THE MODEL'S READING CARRIES ITS COST (F4): a bill the model
+          // will transcribe says so beside the offer, as the unheld row does.
           if (asked.data.held && asked.data.modelDecision) {
             update(item.key, {
               status: "needs-kind",
               held: asked.data.held,
               alternative: choiceFor(asked.data.modelDecision),
-              alternativeEvidence: asked.data.evidence ?? null,
+              alternativeEvidence: withPdfBill(asked.data.evidence ?? null, asked.data.pdfBill ?? null),
             });
             continue;
           }
@@ -727,7 +745,11 @@ export default function IntakeBatchUpload({
   // whose kind a person has said, or whose document has already been read, is
   // not asked about again — so a pack whose suggestions were all accepted costs
   // nothing to identify, and the sentence has to be able to say so.
-  const toIdentify = pending.filter((item) => !settledKind(item)).length;
+  //
+  // NOR A FILE HELD FOR A PERSON (F4, 2026-11-20): the press skips one whose
+  // box nobody has answered — "Try identifying again" is its own press — so
+  // counting it promised a call the press does not make.
+  const toIdentify = pending.filter((item) => !settledKind(item) && item.status !== "needs-kind").length;
   const namedFromFilename = queue.filter((item) => item.suggestedFrom === "name" && !item.choice).length;
   const tally = uploadTally(queue);
   const showTally = busy || queue.some((item) => item.pathname);
@@ -833,9 +855,9 @@ export default function IntakeBatchUpload({
             )}
             {toIdentify === 0 ? (
               <>
-                One press: each file is stored and read. Every file already has a kind, so there is nothing to spend on
-                working that out — just a full charged read for every specification document, and a bill of quantities
-                is read by code and costs nothing.
+                One press: each file is stored and read. Nothing is left for the press to identify, so there is nothing
+                to spend on working that out — just a full charged read for every specification document, and a bill
+                of quantities is read by code and costs nothing.
               </>
             ) : (
               <>
@@ -1026,7 +1048,16 @@ export default function IntakeBatchUpload({
                     className="w-full"
                     value={shortLabel(item.alternative)}
                     evidence={item.alternativeEvidence ? `The model read: ${item.alternativeEvidence}` : "The model's reading"}
-                    onAccept={() => update(item.key, { choice: item.alternative })}
+                    // THE EVIDENCE MOVES WITH IT, so the line under the box
+                    // describes what was chosen — and a bill the model will
+                    // transcribe still says what that costs when the press
+                    // spends it (F4).
+                    onAccept={() =>
+                      update(item.key, {
+                        choice: item.alternative,
+                        ...(item.alternativeEvidence ? { evidence: item.alternativeEvidence } : {}),
+                      })
+                    }
                     disabled={busy}
                   />
                 )}

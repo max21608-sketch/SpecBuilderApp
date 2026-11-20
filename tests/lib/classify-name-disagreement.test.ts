@@ -126,6 +126,36 @@ describe("the classify route", () => {
     expect(body.held).toBe("The name says Finishes schedule; the model reads an FF&E schedule — which is it?");
   });
 
+  // THE HOLD USED TO RETURN BEFORE THE PDF-BILL CHECKS RAN (prod-ready review
+  // F4, 2026-11-20): a PDF named as a schedule which the model reads, certain,
+  // as a bill whose text code cannot put back was held with "Bill of
+  // quantities" one click away — and nothing on the row said that choosing it
+  // means the model transcribes it, one charged read. The held answer now
+  // carries the same `pdfBill` the unheld one does.
+  it("carries the transcription note on a held PDF the model reads as a bill code cannot read", async () => {
+    // Two pages, a line of text each: no header, no quantity column.
+    answers("bill_of_quantities", "headed BILL OF QUANTITIES");
+    const { body } = await classify("Guest rooms FF&E schedule.pdf");
+    expect(body).toMatchObject({
+      decision: null,
+      held: "The name says FF&E schedule; the model reads a bill of quantities — which is it?",
+      modelDecision: { importType: "boq", documentKind: null },
+    });
+    expect(body.pdfBill).toEqual({
+      lines: 0,
+      pages: 2,
+      transcribe: true,
+      reason: "This PDF's text has no quantity column a program could find.",
+    });
+  });
+
+  it("carries no bill note where the model's reading is not a bill", async () => {
+    answers("ffe_schedule");
+    const { body } = await classify("Finishes schedule rev C.pdf");
+    expect(body.held).toBeTruthy();
+    expect(body.pdfBill ?? null).toBeNull();
+  });
+
   it("answers as before where they agree, or the name says nothing", async () => {
     answers("shop_drawings");
     expect((await classify("SPEC-346-Seating - S-100 - Sofa.pdf")).body).toMatchObject({
