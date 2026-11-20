@@ -165,7 +165,7 @@ export const CLASSIFY_TOOL = {
  * threw ALL of it away, so the upload row showed a kind with nothing to check
  * it against. The first 400 characters of what it saw are still what it saw.
  */
-const cutText = (max: number) => z.string().transform((text) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text));
+export const cutText = (max: number) => z.string().transform((text) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text));
 
 export const ClassifyOutput = z.object({
   genre: z.enum(DOCUMENT_GENRES).catch("unclear"),
