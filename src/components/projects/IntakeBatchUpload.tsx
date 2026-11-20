@@ -166,6 +166,15 @@ type Queued = {
    */
   note: string | null;
   /**
+   * AN EMAIL ALREADY HELD (2026-11-20): the inbox has this message (same
+   * Message-ID), on this project or another, so nothing was recorded or read
+   * and `note` is the server's sentence naming where it is. It holds the
+   * panel open like a failure does — the redirect used to send the person to
+   * the new pack's page, which was empty when the email was all the press
+   * held ("That pack is not on this project"), and the sentence was gone.
+   */
+  duplicate: boolean;
+  /**
    * A PDF long enough that one read may not finish (`WARN_PDF_PAGES`). The
    * upload still proceeds; this is said on the row, in amber, and is not
    * `note`, which the tally reads as "waiting for a slot".
@@ -224,11 +233,11 @@ function uploadTally(queue: Queued[]) {
     (acc, item) => {
       if (item.pathname) acc.stored += 1;
       if (item.status !== "refused" && kindOf(item)) acc.identified += 1;
-      if (item.status === "registering" || (item.status === "done" && !item.note)) acc.beingRead += 1;
+      if (item.status === "registering" || (item.status === "done" && !item.note && !item.duplicate)) acc.beingRead += 1;
       // Registered, and its read is queued behind the pack's in-flight cap. It
       // starts on its own and needs nobody, which is why it is not in the
       // column that says somebody is wanted.
-      if (item.status === "done" && item.note) acc.waitingForSlot += 1;
+      if (item.status === "done" && item.note && !item.duplicate) acc.waitingForSlot += 1;
       if (item.status === "needs-kind") acc.waitingForYou += 1;
       if (item.status === "failed") acc.failed += 1;
       return acc;
@@ -312,6 +321,7 @@ export default function IntakeBatchUpload({
         alternative: "",
         alternativeEvidence: null,
         note: null,
+        duplicate: false,
         warning: null,
         tooLarge: false,
         failure: null,
@@ -636,7 +646,13 @@ export default function IntakeBatchUpload({
         // AN EMAIL THE INBOX ALREADY HOLDS. Not a failure and not a new read:
         // the server's sentence names the message that exists and where.
         if (res.data.duplicateOf) {
-          update(item.key, { status: "done", progress: 100, error: null, note: res.data.note ?? null });
+          update(item.key, {
+            status: "done",
+            progress: 100,
+            error: null,
+            duplicate: true,
+            note: res.data.note ?? "This email is already in the inbox, so nothing was recorded or read again.",
+          });
           continue;
         }
         // Stored and registered, but its read did not reach the queue. NOT a
@@ -663,7 +679,7 @@ export default function IntakeBatchUpload({
       // parent to refresh.
       setQueue((current) => {
         const id = batchId.current;
-        const waiting = current.some((row) => row.status === "needs-kind" || row.status === "failed");
+        const waiting = current.some((row) => row.status === "needs-kind" || row.status === "failed" || row.duplicate);
         if (waiting) {
           queueMicrotask(() => onRegistered?.());
         } else {
