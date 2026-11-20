@@ -1,5 +1,7 @@
 // Database tier — every single-row spec edit takes the RECORD's lock before
-// the row it edits (audit B6, E8, 2026-11-06; `src/lib/record-lock.ts`).
+// the row it edits (audit B6, E8, 2026-11-06; `src/lib/record-lock.ts`), and
+// a batch takes its records by id before its first line ("Set designer…",
+// E1, 2026-11-20).
 //
 // Skips silently without DATABASE_URL. Run on the local stack with:
 //   node --env-file=.env.localstack.local ~/dev/localstack/db-test-shared.mjs tests/db/lock-order.test.ts
@@ -41,6 +43,7 @@ import { resolveDisagreement } from "@/lib/disagreement-resolve";
 import { setAttributeFinish } from "@/lib/finish-edit";
 import { setAttributeStandard } from "@/lib/attribute-standard";
 import { normaliseFinishCode } from "@/lib/finishes";
+import { setDesignerOnRecords, type DesignerBatchResult } from "@/lib/designer-batch";
 import { deleteProjectRows } from "../../db/project-delete.mjs";
 
 vi.mock("@/lib/session", () => ({
@@ -385,6 +388,104 @@ describeIfDb("the record is locked before the row an edit touches", () => {
       await a.query("rollback").catch(() => undefined);
       await a.end().catch(() => undefined);
     }
+  }, 30_000);
+
+  // ---- "Set designer…" takes the project, then its records by id (E1) -------
+  //
+  // The batch used to lock its records one at a time in TICK order, each line
+  // opening a change set (a key-share lock on the project row) while the
+  // earlier lines' records were held. Ticked in reverse id order, it deadlocks
+  // against a records-by-id writer; against a project-first writer (a phase
+  // retire, a project-wide answer) it holds a record and waits for the
+  // project. Either way a 40P01 or a lock timeout on one row rolled back the
+  // whole press. It now takes the project, then every ticked record and its
+  // configurations by id, before the first line.
+
+  /** The ticked records' current versions, in the order given (the tick order). */
+  async function ticked(ids: string[]): Promise<{ id: string; version: number }[]> {
+    const rows = await client.query(`select id, version from spec_records where id = any($1::uuid[])`, [ids]);
+    const version = new Map(rows.rows.map((row) => [String(row.id), Number(row.version)]));
+    return ids.map((id) => ({ id, version: version.get(id)! }));
+  }
+
+  /**
+   * A takes `first`; B runs the batch; once B waits, A takes `next` — what
+   * that writer would lock next — and commits. Resolves with B's result.
+   */
+  async function designerAgainst(
+    first: [string, unknown[]],
+    next: [string, unknown[]],
+    records: { id: string; version: number }[],
+  ): Promise<DesignerBatchResult> {
+    const a = new pg.Client({ connectionString: databaseUrl });
+    const b = new pg.Client({ connectionString: databaseUrl });
+    await a.connect();
+    await b.connect();
+    try {
+      await a.query("begin");
+      await a.query("set local lock_timeout = '8s'");
+      await b.query("begin");
+      await b.query("set local lock_timeout = '8s'");
+      const pidB = (await b.query(`select pg_backend_pid() as pid`)).rows[0].pid;
+      await a.query(first[0], first[1]);
+
+      const running = setDesignerOnRecords(asSql(b), { projectId, designer: "__QA LCS", records, actor: "__qa@example.test" });
+      running.catch(() => undefined);
+      await waitUntilBlocked(pidB);
+
+      await a.query(next[0], next[1]);
+      await a.query("commit");
+      const result = await running;
+      await b.query("commit");
+      return result;
+    } finally {
+      await a.query("rollback").catch(() => undefined);
+      await b.query("rollback").catch(() => undefined);
+      await a.end().catch(() => undefined);
+      await b.end().catch(() => undefined);
+    }
+  }
+
+  const LOCK_RECORDS_BY_ID = `select id from spec_records where id = any($1::uuid[]) order by id for update`;
+
+  it("the designer batch, ticked in reverse id order, waits for a records-by-id writer rather than deadlocking (E1)", async () => {
+    const [low, high] = [await record(), await record()].sort();
+    const result = await designerAgainst(
+      [`select id from spec_records where id = $1 for update`, [low]],
+      [`select id from spec_records where id = $1 for update`, [high]],
+      await ticked([high!, low!]),
+    );
+    expect(result.refused).toEqual([]);
+    expect(result.set).toBe(2);
+  }, 30_000);
+
+  it("the designer batch waits for a project-first writer (a phase retire) rather than deadlocking (E1)", async () => {
+    const [low, high] = [await record(), await record()].sort();
+    const result = await designerAgainst(
+      [`select id from projects where id = $1 for update`, [projectId]],
+      [LOCK_RECORDS_BY_ID, [[low, high]]],
+      await ticked([high!, low!]),
+    );
+    expect(result.refused).toEqual([]);
+    expect(result.set).toBe(2);
+  }, 30_000);
+
+  it("the designer batch locks a line's configurations with its records, by id, before the first line (E1)", async () => {
+    // The configuration sorts BEFORE its line, so a line-then-configurations
+    // order is the reverse of the id order.
+    const [low, high] = [await record(), await record()].sort();
+    await client.query(
+      `update spec_records set parent_id = $1, depth = 1, split_reason = 'fabric', variant_label = 'A', variant_ordinal = 1 where id = $2`,
+      [high, low],
+    );
+    const result = await designerAgainst(
+      [`select id from spec_records where id = $1 for update`, [low]],
+      [`select id from spec_records where id = $1 for update`, [high]],
+      await ticked([high!]),
+    );
+    expect(result.refused).toEqual([]);
+    expect(result.set).toBe(1);
+    expect(result.configurations).toBe(1);
   }, 30_000);
 
   // ---- E8: one slot, two writers — refused in words, never a 500 -----------

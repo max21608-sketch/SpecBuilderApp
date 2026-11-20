@@ -22,6 +22,16 @@
 // the person is told how many were set and which were refused, and a refusal
 // in one row never costs the others.
 //
+// THE LOCKS COME FIRST, IN THE DOCUMENTED ORDER (2026-11-20, E1): the project
+// row, then every ticked record and its live configurations by id, before
+// the first line (`db-transaction.ts`; tests/db/lock-order.test.ts). Taken a
+// line at a time in tick order, a press ticked against the id order
+// deadlocked with a records-by-id writer, and a line's change set waited on
+// the project row while its record was held — against a phase retire, a
+// deadlock. A wait for a lock is the whole press's, never one line's: it is
+// "Something else was changing this… Nothing was written — try again", which
+// is true, because nothing has been written when the locks are taken.
+//
 // A LINE'S CONFIGURATIONS FOLLOW IT where they have no designer of their own:
 // a configuration copies its line's designer when it is made
 // (`variant-create.ts`), so on a bill with no designer column every one of
@@ -84,11 +94,30 @@ export async function setDesignerOnRecords(txn: TxnSql, input: DesignerBatchInpu
     });
   }
 
-  const project = await txn`select bws_project_number from projects where id = ${input.projectId}`;
+  // THE PROJECT LOCK, first, as every multi-record writer takes it
+  // (`applyProjectWide`, the bill confirm, a phase retire): a phase retired
+  // or a project-wide answer confirmed during the press queues behind it, or
+  // it behind them, rather than interleaving.
+  const project = await txn`select bws_project_number from projects where id = ${input.projectId} for update`;
   if (!project[0]) throw new DomainConflictError("project_missing", "No such project.", { status: 404 });
   const projectNumber = String(project[0].bws_project_number);
 
   const ids = input.records.map((record) => record.id);
+
+  // THEN EVERY RECORD THE PRESS CAN WRITE, BY ID, before the first line: the
+  // ticked items and their live configurations, in one statement. Taken line
+  // by line in TICK order, two lines ticked against the id order deadlocked
+  // against any records-by-id writer, and each line's change set waited on the
+  // project while it held its record. Only this project's: another project's
+  // item is refused below, and is not this press's to hold.
+  await txn`
+    select id from spec_records
+     where project_id = ${input.projectId}
+       and (id = any(${ids}::uuid[]) or (parent_id = any(${ids}::uuid[]) and status = 'active'))
+     order by id
+       for update
+  `;
+
   const rows = await txn`
     select r.id, r.project_id, r.status, r.record_no, r.variant_ordinal, p.record_no as parent_record_no
       from spec_records r
