@@ -36,6 +36,14 @@
 import type { Tone } from "@/components/ui/tone";
 
 /**
+ * `?upload=1` on the Documents tab: arrive with the uploader already OPEN
+ * (2026-11-20, G4). "Upload the pack" only switched tabs, and the person then
+ * had to find "Add documents" — two presses for the one thing the step names.
+ * The project page honours it once and takes it back off the URL.
+ */
+export const OPEN_UPLOADER_PARAM = "upload";
+
+/**
  * Why a step is the step. The KIND is what a screen keys off; the label is what
  * it prints. A screen that needs to suppress one (the project overview already
  * carries the export cluster in its own header band) names the kind.
@@ -130,7 +138,7 @@ export function nextStep(input: NextStepInput): NextStep | null {
     return {
       kind: "upload",
       label: "Upload the pack",
-      href: documentsTab,
+      href: `${documentsTab}&${OPEN_UPLOADER_PARAM}=1`,
       count: null,
       tone: "info",
       pending: false,

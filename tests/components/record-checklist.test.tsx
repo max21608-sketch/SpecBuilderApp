@@ -129,7 +129,7 @@ describe("the record checklist", () => {
     // Missing and TBC are two different things: nobody has looked, versus a
     // person actively said not yet.
     renderChecklist();
-    expect(screen.getByText("0 unlooked · 1 TBC")).toBeInTheDocument();
+    expect(screen.getByText("0 not answered · 1 TBC")).toBeInTheDocument();
   });
 
   it("links a settled answer to the page it came from", () => {
@@ -490,7 +490,7 @@ describe("the checklist's Dimensions row", () => {
     const list = screen.getByRole("list", { name: "Dimension slots for Dimensions" });
     expect(within(list).queryByText("not measured")).not.toBeInTheDocument();
     expect(screen.queryByText(/this item needs are on record/)).not.toBeInTheDocument();
-    expect(screen.getByText(/matrix does not cover this category/)).toBeInTheDocument();
+    expect(screen.getByText(/No gate model covers this category yet/)).toBeInTheDocument();
     // Still five slots to record, because nothing says they are wrong.
     expect(within(list).getAllByRole("listitem")).toHaveLength(5);
   });

@@ -386,8 +386,8 @@ function ProjectsView() {
                 <Th num className="w-[11%]">
                   TGQ
                   <Tip>
-                    Questions blocking a quotation. Matthew&rsquo;s matrix where he has written one for the
-                    category, the older per-level model where he has not.
+                    Questions blocking a quotation — counted by the category&rsquo;s gate model where it has one, and by
+                    the provisional per-level checklist where it has not.
                   </Tip>
                 </Th>
                 <Th className="w-[15%]">

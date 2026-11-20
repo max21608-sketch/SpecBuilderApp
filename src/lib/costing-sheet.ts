@@ -244,7 +244,9 @@ export function composeCostingSheet(
 function costingNotes(rows: CostingRow[]): string[] {
   const notes = [
     "Columns A to J only — the item block. Everything from K rightwards is the estimator's: three pricing blocks and the stone block, whose formulas this app cannot reproduce and does not hold the rates for. Paste these columns into the template and price it there.",
-    "Tags carries the composed dimensions, from the same composer as the BWS file and the quote. On the sheets this was built against that column held measurements pasted by hand in mixed units; this is the app's structured answer to that, and it is this repo's judgement rather than an instruction from Matthew.",
+    // An estimator reads this sheet (2026-11-20, G1): it says what Tags now
+    // holds, not whose idea it was -- the reasoning is in this file's header.
+    "Tags carries the app's composed dimensions in millimetres — the same figures as the BWS file and the quote — in place of the measurements that used to be pasted in by hand in mixed units.",
     "Specs and Specs 2 open this app's own copy of the document at the page, not SharePoint — the app was never told where these files also live, and a composed SharePoint URL would be a guess.",
   ];
 

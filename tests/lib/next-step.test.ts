@@ -36,7 +36,8 @@ describe("the next step", () => {
     const step = nextStep(input());
     expect(step?.kind).toBe("upload");
     expect(step?.label).toBe("Upload the pack");
-    expect(step?.href).toBe(`/dashboard/projects/${PROJECT}?tab=documents`);
+    // With the uploader OPEN on arrival: one press, not two (2026-11-20, G4).
+    expect(step?.href).toBe(`/dashboard/projects/${PROJECT}?tab=documents&upload=1`);
     expect(step?.pending).toBe(false);
   });
 

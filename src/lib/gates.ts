@@ -402,7 +402,7 @@ export function gateStatus(
       return {
         field,
         outcome: "unanswerable",
-        reason: "On Matthew's matrix with no BWS field and no home in this app yet.",
+        reason: "In the gate model, with no BWS field and no home in this app yet.",
         value: null,
         state: null,
       };
@@ -476,4 +476,4 @@ export function chainGates(byGate: Record<Gate, GateFieldsStatus>): Record<Gate,
 /** What a screen says where a category has no mapping onto Matthew's nine. */
 export const NO_MATRIX_CATEGORY_LABEL = "No gate view";
 export const NO_MATRIX_CATEGORY_EXPLANATION =
-  "Matthew's decision matrix covers nine upholstered seating categories. This item's category is not one of them — the cabinetry matrix is still to come — so there is nothing to check it against yet.";
+  "The gate model covers nine upholstered seating categories. This item's category is not one of them — the cabinetry categories are still to come — so there is nothing to check it against yet.";

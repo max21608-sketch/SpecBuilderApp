@@ -219,7 +219,9 @@ agreed by" has a date the app shows "No programme recorded" and cannot flag
 anything overdue. That warning is information, not an error.
 
 ### 5.3 Upload a pack
-Project → "Documents" tab → "Add documents" → drop the files or "Choose files".
+Project → "Upload the pack" (on a project with no documents yet; it opens the
+"Documents" tab with the uploader already open), or the "Documents" tab → "Add
+documents" → drop the files or "Choose files".
 
 - Accepted: **.pdf, .xlsx, .csv, .tsv, .eml**. An old **.xls** must be saved as
   .xlsx first. An Outlook **.msg** must be saved as .eml (in Outlook: File →
@@ -342,9 +344,9 @@ when nothing is left, it says so and offers "Back to the pack".
 - **Category.** On the record, or on the Fill-in screen under "N items cannot
   be filled in until categorised". Once an item's questions have been chased,
   its category cannot be changed (the chase keeps the questions it asked).
-- "N of these M items are in a category Matthew has not written a gate model
-  for" means their TGQ count is a placeholder that treats every open question
-  as blocking. That is a question for Matthew, not a fault.
+- "N of these M items use a provisional checklist — their category has no gate
+  model yet" means their TGQ count is a placeholder that treats every open
+  question as blocking. That is a question for Matthew, not a fault.
 
 ### 5.8 Fill in what we know, then chase
 Project → **"Fill in ourselves"**. Internal; nothing is sent. Open an item (the
@@ -588,7 +590,8 @@ Things that look wrong and are not:
   test sites the draft is addressed to you on purpose so nothing reaches a
   client by accident. Address it yourself before sending.
 - *An item shows nothing outstanding but is obviously unfinished* → it has no
-  category, so it has no questions. Give it one.
+  category, so it has no questions. Its dot on the phase table is grey ("No
+  category — nothing to measure it against yet"), not green. Give it one.
 - *TGQ numbers on two screens differ* → one counts questions, the other counts
   items with something outstanding. Hover the number for what it counts.
 - *"Product code — Nowhere to record it"* on the Gates tab → known: the
