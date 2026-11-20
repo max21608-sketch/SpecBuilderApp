@@ -70,7 +70,12 @@ Five things are load-bearing:
   arbitrate, because a confident wrong answer is worse than an unplaced one.
   Both Exchange forwarding shapes are covered: a redirect keeps the original
   sender and stamps the loop headers, a rule-forward replaces the sender and is
-  trusted only alongside `X-MS-Exchange-Organization-AutoForwarded`.
+  trusted only alongside `X-MS-Exchange-Organization-AutoForwarded`. **A header
+  is found by its name exactly as written, case aside, and never trimmed**
+  (2026-11-20, `headerValues`): a field name has no space in it, so
+  `X-MS-Exchange-Organization-AutoForwarded : true` is a sender's line, and
+  trimming read it as the stamp that spends money unwatched. postal-mime 4
+  hands the name over with that space on it; Graph keeps a name's case.
 - **Confirmed is not a hard closure.** `proposalBlockers` already refuses a
   proposal over a `confirmed` or `na` answer until the reviewer acknowledges it,
   whatever the new state is — so confirmed → a different value AND confirmed →

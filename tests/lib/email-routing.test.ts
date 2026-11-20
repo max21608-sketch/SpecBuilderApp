@@ -11,7 +11,7 @@ import {
   type RoutingRegisters,
   type RoutingSignal,
 } from "@/lib/email-routing";
-import type { EmailEnvelope } from "@/lib/email-envelope";
+import { parseEnvelope, type EmailEnvelope } from "@/lib/email-envelope";
 
 const panther = {
   id: "proj-panther",
@@ -417,5 +417,76 @@ describe("routeMessage into autoAssignDecision", () => {
     );
     expect(outcome.status).toBe("assigned");
     expect(autoAssignDecision(outcome)).toEqual({ assign: false, reason: "signal_too_weak" });
+  });
+});
+
+// ============================================================================
+// A STAMP IS FOUND BY ITS NAME EXACTLY AS WRITTEN (2026-11-20).
+//
+// A field name has no space in it (RFC 5322 §2.2), so a line written
+// `X-MS-Exchange-Organization-AutoForwarded : true` is not Exchange's stamp. It
+// was read as one, because the lookup trimmed the name. These go through
+// parseEnvelope, because postal-mime 4 is what hands the name over with the
+// space still on it. Case is still folded: Graph keeps a header's case,
+// postal-mime lowercases. Invented headers throughout.
+// ============================================================================
+describe("a stamp is read by its name exactly as written", () => {
+  const eml = (headers: string[], to = "kam@benwhistler.test") =>
+    Buffer.from(
+      [
+        "From: Jane Doe <someone@elsewhere.test>",
+        `To: ${to}`,
+        "Subject: Specification",
+        ...headers,
+        "",
+        "body",
+        "",
+      ].join("\r\n"),
+      "utf8",
+    );
+
+  it("reads Exchange's auto-forwarded stamp as Exchange writes it", async () => {
+    const parsed = await parseEnvelope(
+      eml(["X-MS-Exchange-Inbox-Rules-Loop: p17726@benwhistler.test", "X-MS-Exchange-Organization-AutoForwarded: true"]),
+    );
+    expect(autoAssignDecision(routeMessage(parsed, registers))).toEqual({
+      assign: true,
+      projectId: panther.id,
+      signal: "forwarded_from_inbox",
+    });
+    // And in the case Graph's internetMessageHeaders keeps it in.
+    const graphCased = envelope({
+      headers: [
+        { name: "X-MS-Exchange-Inbox-Rules-Loop", value: "p17726@benwhistler.test" },
+        { name: "X-MS-Exchange-Organization-AutoForwarded", value: "true" },
+      ],
+    });
+    expect(autoAssignDecision(routeMessage(graphCased, registers)).assign).toBe(true);
+  });
+
+  it("HOLDS a forward whose auto-forwarded line has a space before its colon: that is a sender's line, not the stamp", async () => {
+    const parsed = await parseEnvelope(
+      eml(["X-MS-Exchange-Inbox-Rules-Loop: p17726@benwhistler.test", "X-MS-Exchange-Organization-AutoForwarded : true"]),
+    );
+    // The name arrives with the space on it, and that is not the header.
+    expect(parsed.headers.map((header) => header.name)).toContain("x-ms-exchange-organization-autoforwarded ");
+    expect(autoAssignDecision(routeMessage(parsed, registers))).toEqual({ assign: false, reason: "unstamped_evidence" });
+  });
+
+  it("still holds a blind copy Exchange stamped, and reads the Bcc stamp by the same rule", async () => {
+    const stamped = await parseEnvelope(
+      eml(["X-MS-Exchange-Organization-Recipient-P2-Type: Bcc"], "p17726@benwhistler.test"),
+    );
+    const blind = routeMessage({ ...stamped, reportedRecipients: ["p17726@benwhistler.test"] }, registers);
+    expect(autoAssignDecision(blind)).toEqual({ assign: false, reason: "unstamped_evidence" });
+
+    // A spaced line is the sender's, not Exchange's: it neither stands in for
+    // the stamp nor is one. What holds a blind copy is the stamp Exchange
+    // writes, and a sender writing this line could only ever hold their own.
+    const spaced = await parseEnvelope(
+      eml(["X-MS-Exchange-Organization-Recipient-P2-Type : Bcc"], "p17726@benwhistler.test"),
+    );
+    const reported = routeMessage({ ...spaced, reportedRecipients: ["p17726@benwhistler.test"] }, registers);
+    expect(autoAssignDecision(reported)).toEqual({ assign: true, projectId: panther.id, signal: "recipient_is_inbox" });
   });
 });
