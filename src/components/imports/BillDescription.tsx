@@ -37,6 +37,7 @@ import {
   type BillUnitOverride,
   type PlanFigure,
   type PlannedAttribute,
+  type RevisionDifference,
   type SlotOverride,
 } from "@/lib/bill-description";
 import { DIMENSION_SLOT_LABELS } from "@/lib/spec-vocab";
@@ -50,7 +51,20 @@ export type SetSlot = (key: string, slot: SlotOverride | null) => void;
 export type SetUnit = (unit: BillUnitOverride | null) => void;
 
 /** The plan as the review GET sends it: plus, on a line a revision carries, why it will not be written. */
-export type ReviewDescription = BillDescriptionPlan & { revisionRefusal?: string | null };
+export type ReviewDescription = BillDescriptionPlan & {
+  revisionRefusal?: string | null;
+  /**
+   * Why it is held back (RV4): the record holds a bill's specifications
+   * (`bill` — said ONCE above the tab's table), or something else fills a
+   * slot or field it would write (`other` — said on the row). Absent on every
+   * line a revision does not hold back.
+   */
+  revisionHeldBy?: "bill" | "other";
+  /** The record the line continues, for the Specs tab link. */
+  revisionRecordId?: string;
+  /** What the description states differently from the record (RV2); empty where nothing differs. */
+  revisionDifferences?: RevisionDifference[];
+};
 
 const isFinish = (attribute: PlannedAttribute) => attribute.attrGroup !== "note" && attribute.attrGroup !== "dimension";
 
@@ -196,7 +210,28 @@ export function BillDescriptionSummary({
             </div>
           );
         })}
-      {plan.revisionRefusal && <p className={`text-xs ${TONE.warn.text}`}>{plan.revisionRefusal}</p>}
+      {/* A LINE A REVISION HOLDS BACK (RV2, RV4). Held back because the
+          record already holds a bill's specifications: the tab says that once
+          above its table, and the row says only what the revision states
+          DIFFERENTLY, beside what the record holds, with the way to correct
+          it. Held back for any other reason: the reason, here. */}
+      {plan.revisionHeldBy === "bill"
+        ? (plan.revisionDifferences ?? []).map((difference) => (
+            <p key={`${difference.what}:${difference.revision}`} className={`text-xs ${TONE.warn.text}`} data-testid="revision-difference">
+              Rev says {difference.what === "size" ? "" : `${difference.what} `}
+              <span className="font-mono">{difference.revision}</span>; the record holds{" "}
+              <span className="font-mono">{difference.record}</span> — correct it on the{" "}
+              {plan.revisionRecordId ? (
+                <a href={`/dashboard/records/${plan.revisionRecordId}?tab=specs`} className="underline">
+                  Specs tab
+                </a>
+              ) : (
+                "Specs tab"
+              )}
+              .
+            </p>
+          ))
+        : plan.revisionRefusal && <p className={`text-xs ${TONE.warn.text}`}>{plan.revisionRefusal}</p>}
     </div>
   );
 }

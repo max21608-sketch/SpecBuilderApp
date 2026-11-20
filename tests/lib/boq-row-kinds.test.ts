@@ -216,6 +216,20 @@ describe("the Confirm label", () => {
       "Importing…",
     );
   });
+
+  // RV5 (2026-11-20): a three-tab revision said "updates this phase".
+  it("counts the phases a revision updates, and the ones it creates beside them", () => {
+    const counts = { records: 37, fabricSpecs: 3, phases: 3 };
+    expect(boqConfirmLabel({ counts, revising: true, revisedPhases: 3, unmapped: 0, busy: false })).toBe(
+      "Confirm · updates 3 phases from 37 lines and 3 fabric and finish specs",
+    );
+    expect(boqConfirmLabel({ counts, revising: true, revisedPhases: 2, unmapped: 0, busy: false })).toBe(
+      "Confirm · updates 2 phases and creates 1 phase from 37 lines and 3 fabric and finish specs",
+    );
+    expect(boqConfirmLabel({ counts: { ...counts, phases: 1 }, revising: true, revisedPhases: 1, unmapped: 0, busy: false })).toBe(
+      "Confirm · updates this phase from 37 lines and 3 fabric and finish specs",
+    );
+  });
 });
 
 describe("a fabric line's state", () => {

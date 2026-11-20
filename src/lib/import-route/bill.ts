@@ -26,11 +26,12 @@ import {
   sheetColumnHeadings,
   resolveSlotOverrides,
   slotChangeFor,
+  revisionDescriptionDifferences,
   revisionDescriptionRefusal,
   type SlotOverride,
   type BillDescriptionPlan,
 } from "@/lib/bill-description";
-import { loadDescriptionFields, loadHeldAttributes } from "@/lib/bill-description-load";
+import { loadDescriptionFields, loadHeldAttributes, loadHeldSpecs } from "@/lib/bill-description-load";
 import { billFinishPlanInputs, planBillFabrics, type FabricLinePlan } from "@/lib/bill-fabric-filing";
 import {
   loadCurrentSwatches,
@@ -192,12 +193,27 @@ export async function getBillReview(run: Row): Promise<Response> {
         line.replaces && plans.has(line.index) ? [line.replaces.recordId] : [],
       );
       const held = await loadHeldAttributes(sql, carried);
+      // What each carried record holds now, so a held-back description says
+      // what it states differently (RV2) instead of the same sentence on every row.
+      const heldSpecs = await loadHeldSpecs(sql, carried);
       const bySheet: Record<number, unknown> = {};
       for (const [index, plan] of plans) {
         const line = sheet.lines.find((entry) => entry.index === index);
         const holding = line?.replaces ? held.get(line.replaces.recordId) : undefined;
         const revisionRefusal = holding ? revisionDescriptionRefusal(plan, holding) : null;
-        bySheet[index] = { ...plan, revisionRefusal };
+        const specs = line?.replaces ? heldSpecs.get(line.replaces.recordId) : undefined;
+        bySheet[index] = {
+          ...plan,
+          revisionRefusal,
+          // Only on a held-back line, so every other plan is what it was.
+          ...(revisionRefusal && line?.replaces && holding
+            ? {
+                revisionHeldBy: holding.fromBill ? "bill" : "other",
+                revisionRecordId: line.replaces.recordId,
+                revisionDifferences: specs ? revisionDescriptionDifferences(plan, specs) : [],
+              }
+            : {}),
+        };
         const forSheet = descriptionPlans[sheetIndex] ?? new Map();
         forSheet.set(index, { attributes: plan.attributes, held: revisionRefusal !== null });
         descriptionPlans[sheetIndex] = forSheet;

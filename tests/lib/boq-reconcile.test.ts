@@ -252,3 +252,36 @@ describe("a revised sheet says nothing about a column it does not map", () => {
     expect(result.counts.changed).toBe(0);
   });
 });
+
+// RV3 (2026-11-20). An invented bill prints ZZ-CH-02 under Room Type A and
+// again under Room Type B, and the phase holds one record for each. The code
+// alone pairs nothing; the code AND the area is offered — as a suggestion.
+describe("two lines carrying one code, told apart by their area", () => {
+  const typeA = record({ id: "rec-a", codes: ["ZZ-CH-02"], area: "Room Type A", label: "ZZ-002" });
+  const typeB = record({ id: "rec-b", codes: ["ZZ-CH-02"], area: "Room Type B", label: "ZZ-011" });
+  const lineA = line({ index: 0, lineNo: 11, code: "ZZ-CH-02", area: "Room Type A", boqCategory: null });
+  const lineB = line({ index: 1, lineNo: 21, code: "ZZ-CH-02", area: "room type b", boqCategory: null });
+
+  it("suggests each line's own record, says it was read from code and area, and counts it in the suggested", () => {
+    const result = reconcileSheet([lineA, lineB], [typeA, typeB]);
+    expect(result.lines.map((entry) => [entry.lineNo, entry.status, entry.accepted, entry.suggestedRecordId, entry.suggestedBy])).toEqual([
+      [11, "paired", false, "rec-a", "code_and_area"],
+      [21, "paired", false, "rec-b", "code_and_area"],
+    ]);
+    expect(result.counts).toMatchObject({ ambiguous: 0, suggested: 2 });
+    // Still a suggestion: until accepted, the records are listed as going, with the line that would keep each.
+    expect(result.missing.map((entry) => [entry.recordId, entry.suggestedFor])).toEqual([
+      ["rec-a", 11],
+      ["rec-b", 21],
+    ]);
+  });
+
+  it("stays pair-by-hand where the area does not tell them apart, or the record is already somebody's", () => {
+    const sameArea = reconcileSheet([lineA, { ...lineB, area: "Room Type A" }], [typeA, typeB]);
+    expect(sameArea.lines.map((entry) => entry.status)).toEqual(["ambiguous", "ambiguous"]);
+    const noArea = reconcileSheet([{ ...lineA, area: null }, lineB], [typeA, typeB]);
+    expect(noArea.lines.map((entry) => entry.status)).toEqual(["ambiguous", "paired"]);
+    const claimed = reconcileSheet([lineA, { ...lineB, replaces: { recordId: "rec-a", recordVersion: 1 } }], [typeA, typeB]);
+    expect(claimed.lines.find((entry) => entry.lineNo === 11)?.status).toBe("ambiguous");
+  });
+});

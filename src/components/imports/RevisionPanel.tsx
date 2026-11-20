@@ -56,7 +56,7 @@ export default function RevisionPanel({
           <SuggestButton
             size="sm"
             value={`Pair the ${reconciliation.counts.suggested} suggested`}
-            evidence="each line's code is on exactly one item of the phase"
+            evidence="each line's code — or, where two lines share it, its code and area — is on exactly one item of the phase"
             disabled={busy}
             onAccept={() =>
               void onAcceptPairings(
@@ -214,7 +214,11 @@ export function PairingCell({
         <SuggestButton
           className="mt-1"
           value={`Pair with ${pairedRecord.label}`}
-          evidence="the same code, on one item of the phase"
+          evidence={
+            pairing.suggestedBy === "code_and_area"
+              ? `the same code and area${pairedRecord.area ? ` (${pairedRecord.area})` : ""}, on one item of the phase — another line carries the code too`
+              : "the same code, on one item of the phase"
+          }
           disabled={status !== "parsed" || busy}
           onAccept={() =>
             void onSet({

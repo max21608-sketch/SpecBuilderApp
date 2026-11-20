@@ -299,3 +299,41 @@ describe("an unlabelled size line on the review", () => {
     expect(screen.queryByText(/read from an unlabelled size line/)).toBeNull();
   });
 });
+
+// RV2/RV4 (2026-11-20): a line a revision holds back says only what differs.
+describe("a description a revision holds back, on the row", () => {
+  const plan = planBillDescription("Desk chair\nW540 x D560 x H810mm", { fields: FIELDS, hasFabricLine: false })!;
+  const sentence = "The record this line continues already holds specifications from a bill, so nothing from this description is written.";
+
+  it("shows what the revision states beside what the record holds, with the Specs tab, and not the sentence", () => {
+    render(
+      <BillDescriptionSummary
+        plan={{
+          ...plan,
+          revisionRefusal: sentence,
+          revisionHeldBy: "bill",
+          revisionRecordId: "rec-9",
+          revisionDifferences: [{ what: "size", revision: "W540 x D560 x H810mm", record: "W520 x D560 x H810mm" }],
+        }}
+        open={false}
+        onToggle={() => undefined}
+      />,
+    );
+    expect(screen.getByTestId("revision-difference")).toHaveTextContent(
+      "Rev says W540 x D560 x H810mm; the record holds W520 x D560 x H810mm — correct it on the Specs tab.",
+    );
+    expect(screen.getByRole("link", { name: "Specs tab" })).toHaveAttribute("href", "/dashboard/records/rec-9?tab=specs");
+    expect(screen.queryByText(sentence)).toBeNull();
+  });
+
+  it("says nothing on the row where nothing differs, and still gives any other reason on the row", () => {
+    const { unmount } = render(
+      <BillDescriptionSummary plan={{ ...plan, revisionRefusal: sentence, revisionHeldBy: "bill", revisionDifferences: [] }} open={false} onToggle={() => undefined} />,
+    );
+    expect(screen.queryByTestId("revision-difference")).toBeNull();
+    expect(screen.queryByText(sentence)).toBeNull();
+    unmount();
+    render(<BillDescriptionSummary plan={{ ...plan, revisionRefusal: "holds a W dimension from another document", revisionHeldBy: "other" }} open={false} onToggle={() => undefined} />);
+    expect(screen.getByText("holds a W dimension from another document")).toBeInTheDocument();
+  });
+});

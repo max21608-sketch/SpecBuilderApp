@@ -1506,6 +1506,59 @@ export type HeldAttributes = {
   fieldIds: string[];
 };
 
+/** What a carried record holds now, as `revisionDescriptionDifferences` compares it (`loadHeldSpecs`). */
+export type HeldSpecs = {
+  /** The record's dimension cell as it stands: `composeDimensionCell` over its active dimension rows. */
+  dimensionCell: string;
+  /** Its finish fields by spec field id: the client's code and the value it holds there. */
+  fields: ReadonlyMap<string, { materialCode: string | null; value: string | null }>;
+};
+
+/** One thing a revision's description states differently from what the record holds. */
+export type RevisionDifference = {
+  /** `size`, or the BWS field's screen name. */
+  what: string;
+  /** What the revision's description states. */
+  revision: string;
+  /** What the record holds, or "nothing". */
+  record: string;
+};
+
+/**
+ * WHAT A HELD-BACK DESCRIPTION SAYS DIFFERENTLY (2026-11-20, RV2). A revision
+ * writes nothing from a description onto a record that already holds a
+ * bill's specifications (`revisionDescriptionRefusal`) — that rule stands —
+ * but HH-CH-03's revised `W540 x D560 x H810mm` beside the record's `W520 …`
+ * was hidden behind the same sentence every carried row printed. This names
+ * what differs, and only that: the composed size (the one composer, so like
+ * is compared with like), and each finish field the revision fills by its
+ * client code — the same code is the same finish, whatever words sit beside
+ * it, because the code is the library's key. An unchanged description gives
+ * nothing.
+ */
+export function revisionDescriptionDifferences(plan: BillDescriptionPlan, held: HeldSpecs): RevisionDifference[] {
+  const out: RevisionDifference[] = [];
+  if (plan.dimensionCell !== "" && plan.dimensionCell !== held.dimensionCell) {
+    out.push({ what: "size", revision: plan.dimensionCell, record: held.dimensionCell || "no size" });
+  }
+  const fold = (text: string | null | undefined) => (text ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  for (const attribute of plan.attributes) {
+    if (!attribute.specFieldId || attribute.attrGroup === "dimension" || attribute.attrGroup === "note") continue;
+    const holds = held.fields.get(attribute.specFieldId);
+    const what = fieldDisplayName(attribute.specFieldName) ?? "finish";
+    if (!holds) {
+      out.push({ what, revision: attribute.value, record: "nothing" });
+      continue;
+    }
+    const same =
+      attribute.materialCode && holds.materialCode
+        ? normaliseFinishCode(attribute.materialCode) === normaliseFinishCode(holds.materialCode)
+        : fold(attribute.value) === fold(holds.value);
+    if (!same) out.push({ what, revision: attribute.value, record: holds.value || holds.materialCode || "nothing" });
+  }
+  return out;
+}
+
 /**
  * Why a REVISION writes nothing from this line's description onto the record
  * it continues, or null where it writes the plan.

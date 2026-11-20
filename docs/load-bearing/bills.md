@@ -200,6 +200,20 @@ verbatim behind a toggle. Traps:
   statement per code, each keeping its own words.
 - **A revision writes nothing onto a carried record** that already holds a
   bill's description specs or whose slot/field is occupied, and says so.
+  **Since 2026-11-20 (RV2, RV4) it says WHAT DIFFERS, once per tab.** The
+  same sentence used to print on every carried row (14 times on one tab)
+  and hid the one row that mattered: HH-CH-03's revised `W540 x D560 x
+  H810mm` beside the record's `W520 …`. A held-back line now carries
+  `revisionHeldBy` (`bill`, or `other` for a slot or field another document
+  fills — that reason still prints on its row) and
+  `revisionDescriptionDifferences`: the composed size against the record's
+  own composed cell (`loadHeldSpecs`, the one composer, so like is compared
+  with like) and each finish field the description fills, by client code —
+  the same code is the same finish whatever its words. The tab says once
+  that nothing is written and how many state something different; the row
+  says only "Rev says …; the record holds … — correct it on the Specs tab".
+  An unchanged description says nothing. What is written is unchanged: the
+  confirm still decides by `loadHeldAttributes` and writes nothing.
 - **A bill whose confirm read its descriptions refuses the charged read** on
   the server (409), because it would propose everything again.
 
@@ -297,6 +311,16 @@ already exist.
   run, active, and at the version shown.
 - **One-to-one only.** A code on two records, or two lines carrying one code,
   pairs NOTHING — `SX11A` again. Candidates are offered; nothing is chosen.
+  **Since 2026-11-20 (RV3) two lines carrying one code may be SUGGESTED by
+  their area**: where a line's (code, area) — `effectiveArea`, folded, never
+  a substring — matches exactly ONE record of the phase that no stored
+  pairing claims, and no other line carries that same code and area, the
+  record is offered ("Pair with …", the evidence saying code and area), and
+  counted in "Pair the n suggested". The invented bill's HH-CH-02 under
+  Guest Room Type A and Type B now offers records 2 and 11. It is a
+  suggestion, never a pairing: until accepted the line confirms as new. Two
+  lines in one area, a line with no area, or a record already paired stays
+  "pair by hand".
 - **A new line is in `carriedForward` too.** It is on the run from the moment
   it is inserted, and a retire step that subtracted only the PAIRED records
   inserted it and retired it in the same confirm. Caught by a db-tier test.

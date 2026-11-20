@@ -148,6 +148,12 @@ export type LineReconciliation = {
    */
   restoreCandidates: string[];
   deltas: FieldDelta[];
+  /**
+   * What a SUGGESTED pairing was read from: the code alone (one line, one
+   * record), or — where two lines carry the code — the code AND the area,
+   * matching exactly one record (RV3). Absent on every other line.
+   */
+  suggestedBy?: "code" | "code_and_area";
 };
 
 export type MissingRecord = {
@@ -331,6 +337,17 @@ export function reconcileSheet(
   }
 
   const byId = new Map(records.map((record) => [record.id, record]));
+  // THE AREA A LINE SHARES WITH ONE RECORD (RV3): folded, never a substring.
+  const areaKey = (area: string | null | undefined) => (area ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  const lineCountByCodeArea = new Map<string, number>();
+  for (const line of live) {
+    const key = line.code ? normaliseRef(line.code) : "";
+    const area = areaKey(effectiveArea(line));
+    if (!key || !area) continue;
+    lineCountByCodeArea.set(`${key}\u0000${area}`, (lineCountByCodeArea.get(`${key}\u0000${area}`) ?? 0) + 1);
+  }
+  /** Records a STORED pairing on any line claims: never suggested for another. */
+  const storedClaims = new Set(live.flatMap((line) => (line.replaces && !line.replaces.restore ? [line.replaces.recordId] : [])));
   /** Records a reviewer's stored pairing claims: these are carried forward. */
   const claimed = new Set<string>();
   /** Records a suggestion offers, by line: carried only once accepted. */
@@ -389,11 +406,39 @@ export function reconcileSheet(
         candidates: [],
         restoreCandidates: [],
         deltas: lineDeltas(line, record, stated),
+        suggestedBy: "code",
       });
       continue;
     }
 
+    // TWO LINES, ONE CODE, TOLD APART BY THEIR AREA (RV3, 2026-11-20). The
+    // invented bill prints HH-CH-02 under Guest Room Type A and again under
+    // Type B, and the phase holds one record for each. The code alone pairs
+    // nothing (SX11A); the code AND the area, matching exactly one record
+    // that no stored pairing claims, and carried by this line alone, is
+    // offered as a SUGGESTION — never a pairing, so until somebody accepts it
+    // the line confirms as new, exactly as every other suggestion here.
+    // Anything less exact stays "pair by hand".
     if (matches.length > 1 || (matches.length === 1 && linesWithCode > 1)) {
+      const area = areaKey(effectiveArea(line));
+      const byArea = area ? matches.filter((record) => areaKey(record.area) === area && !storedClaims.has(record.id)) : [];
+      if (byArea.length === 1 && (lineCountByCodeArea.get(`${key}\u0000${area}`) ?? 0) === 1) {
+        const record = byArea[0] as ExistingRecord;
+        suggestedFor.set(record.id, line.lineNo);
+        out.push({
+          index: line.index,
+          lineNo: line.lineNo,
+          code: line.code,
+          status: "paired",
+          accepted: false,
+          suggestedRecordId: record.id,
+          candidates: matches.map((candidate) => candidate.id),
+          restoreCandidates: [],
+          deltas: lineDeltas(line, record, stated),
+          suggestedBy: "code_and_area",
+        });
+        continue;
+      }
       // The SX11A case. Candidates, nothing chosen.
       out.push({
         index: line.index,
