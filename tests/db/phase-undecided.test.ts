@@ -169,9 +169,13 @@ describeIfDb("a tab that looks like a phase the project has (RV0)", () => {
 
   it("stores “a new phase” as a choice, and then confirms it as one", { timeout: 30_000 }, async () => {
     const runId = await stage(PHASE, ["__QA-GR-01", "__QA-GR-02", "__QA-GR-03"]);
-    expect((await patchSheet(runId, { replacesRunId: null })).status).toBe(200);
-    const stored = await client.query(`select parsed->'sheets'->0 as sheet from intake_runs where id = $1`, [runId]);
+    const chosen = await patchSheet(runId, { replacesRunId: null });
+    expect(chosen.status).toBe(200);
+    const stored = await client.query(`select version, parsed->'sheets'->0 as sheet from intake_runs where id = $1`, [runId]);
     expect(stored.rows[0].sheet.newPhaseChosen).toBe(true);
+    // The version the PATCH answers is the bill's version AFTER its second
+    // write (clearing the pairings), so a confirm carrying it is not refused.
+    expect((await chosen.json()).version).toBe(Number(stored.rows[0].version));
 
     const res = await confirm(runId);
     expect(res.status).toBe(200);

@@ -265,8 +265,16 @@ describeIfDb("a seeded bill layout reads like a known heading", () => {
     expect(fabrics[1]!.rowKindEvidence).toBe("Category Code FBX-SEAT-X — the bill's fabric line; under row 13, ZZ-FUR-03.");
     expect(boqConfirmCounts(assertBoqDocument(staged.parsed).sheets)).toEqual({ records: 5, fabricSpecs: 3, phases: 1 });
 
+    // The test above confirmed a "CASEGOODS+SEATING+TABLES" phase on this
+    // project, so this tab looks like it (RV0, 2026-11-20): the reviewer says
+    // it is a new phase, through the review's own sheet PATCH.
+    const { PATCH } = await import("@/app/api/imports/[id]/route");
+    const chosen = await PATCH(request({ sheetIndex: 0, replacesRunId: null, version: staged.version }, "PATCH"), params(fbxId));
+    expect(chosen.status).toBe(200);
+    const { version } = (await chosen.json()) as { version: number };
+
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
-    const res = await POST(request({ version: staged.version }), params(fbxId));
+    const res = await POST(request({ version }), params(fbxId));
     const body = (await res.json()) as Record<string, unknown>;
     expect(res.status, JSON.stringify(body)).toBe(200);
     expect(body).toMatchObject({ imported: 5, fabricSpecs: 3 });

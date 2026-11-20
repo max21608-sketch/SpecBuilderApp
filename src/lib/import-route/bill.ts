@@ -460,8 +460,12 @@ export async function patchBoqLine(
         )
       returning version
     `;
+    // The version AFTER the pairings are cleared, which is a second write: the
+    // first one's version is already stale by then, and a screen (or a test)
+    // carrying it forward was refused "this bill changed" by its own change.
+    let version = rows[0]?.version;
     if (rows[0] && clearPairings) {
-      await sql`
+      const cleared = await sql`
         update intake_runs
         set parsed = jsonb_set(
               parsed,
@@ -473,13 +477,15 @@ export async function patchBoqLine(
             ),
             updated_by = ${actor}
         where id = ${id} and status = 'parsed'
+        returning version
       `;
+      if (cleared[0]) version = cleared[0].version;
     }
     if (!rows[0]) {
       if (await billMoved(id, expectedVersion)) return json({ ok: false, error: BILL_MOVED }, 409);
       return json({ ok: false, error: "That sheet is no longer in this bill, or the bill is already confirmed." }, 409);
     }
-    return json({ ok: true, version: rows[0].version });
+    return json({ ok: true, version });
   }
 
   const patch: Record<string, unknown> = {};

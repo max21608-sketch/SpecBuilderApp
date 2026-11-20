@@ -861,7 +861,11 @@ export default function FinishesLibrary({
                 </>
               )}{" "}
               (
-              <Link href={`/dashboard/records/${row.firstRecordId}`} className="text-blue-700 no-underline hover:underline">
+              <Link
+                href={`/dashboard/records/${row.firstRecordId}`}
+                prefetch={false}
+                className="text-blue-700 no-underline hover:underline"
+              >
                 {row.records === 1 ? "open the item" : `open one of ${row.records} items`}
               </Link>
               )

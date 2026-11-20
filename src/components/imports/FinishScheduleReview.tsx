@@ -446,7 +446,13 @@ export default function FinishScheduleReview({
         }
         actions={actions}
       />
-      <PageBody>{children}</PageBody>
+      <PageBody>
+        {children}
+        {/* Under every state of the screen, as it was in the header. */}
+        <p className="mt-4 flex flex-wrap items-center gap-2 text-[12.5px] text-neutral-600">
+          Does this schedule list furniture as well as finishes? {furniture}
+        </p>
+      </PageBody>
     </>
   );
 
@@ -577,9 +583,6 @@ export default function FinishScheduleReview({
         showApplied={showApplied}
         setShowApplied={setShowApplied}
       />
-      <p className="mt-4 flex flex-wrap items-center gap-2 text-[12.5px] text-neutral-600">
-        Does this schedule list furniture as well as finishes? {furniture}
-      </p>
     </>,
     headerAction,
   );
