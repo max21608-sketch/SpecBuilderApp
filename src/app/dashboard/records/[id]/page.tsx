@@ -37,7 +37,7 @@ import RecordDocuments from "@/components/records/RecordDocuments";
 import ReasonPrompt from "@/components/history/ReasonPrompt";
 import GatePanel from "@/components/records/GatePanel";
 import { GATES } from "@/lib/gates";
-import { describeChaseCounts, summariseGateRows } from "@/lib/chase-counts";
+import { chaseCountParts, summariseGateRows } from "@/lib/chase-counts";
 import PageBody from "@/components/ui/PageBody";
 import Note from "@/components/ui/Note";
 import Tabs from "@/components/ui/Tabs";
@@ -292,7 +292,7 @@ function RecordView() {
   // describe what is on the screen. Null where Matthew's matrix does not reach
   // the category: there is no second measure there to explain.
   const tgqBuckets = data.gates ? summariseGateRows(data.gates.TGQ.fields, answers) : null;
-  const chaseCounts = describeChaseCounts({
+  const chaseWhy = chaseCountParts({
     buckets: tgqBuckets,
     toChase: readiness.toChase,
     toQuote: readiness.toQuote,
@@ -377,7 +377,7 @@ function RecordView() {
         setLevel={setLevel}
         readiness={readiness}
         chaseHref={chaseHref}
-        chaseCounts={chaseCounts}
+        chaseWhy={chaseWhy}
         onAddSpec={() => {
           setTab("specs");
           setAddingSpec(true);
