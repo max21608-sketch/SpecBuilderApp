@@ -896,8 +896,21 @@ the plan, with its defaults T1–T3.
   the phase table (`twin_codes`); `TwinTicks` under Add a spec, Edit value and
   Retire. NOT built, by scope: the fill-in's dimension row offers no twins;
   level and category "also set on its twin"; "Add a configuration" offering
-  the twin; the configuration review cards' twin sentence; emails and spec
-  documents do not read twins.
+  the twin; the configuration review cards' twin sentence. Emails and spec
+  documents were on this list until prod-ready E1 (2026-11-20, below).
+- **An email lands on linked twins as the drawings do** (prod-ready E1,
+  2026-11-20). `HH-CH-02` on two lines the reviewer linked: the drawings card
+  offered both, and the email review called the code ambiguous and its row
+  said "Item not found". `resolveProposals` now runs `landOnTwins` over the
+  phases a ref lands on: where EVERY line it reaches on a phase is a twin of
+  every other — `everyPairTwinned` in `record-refs.ts`, the one predicate
+  `readTwinLines` now calls too — the phase lands on each line, one proposal
+  per record sharing the observation's ordinal, each ignorable on its own,
+  with a sentence saying they are twins. A set the links do not wholly cover
+  stays ambiguous, and says so: "HH-CH-02 is on 2 lines of Guest Rooms —
+  choose which" (`linesToChooseFrom`), never "Item not found", and the "did
+  not find an item" note no longer counts it. A message read before the link
+  lands on both at a (free) re-match.
 
 ### A line's common specs are a reading, and an edit to one fans out
 

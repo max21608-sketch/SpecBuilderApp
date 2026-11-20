@@ -37,6 +37,7 @@ import {
   classifyProposal,
   heldReading,
   isConfirmable,
+  linesToChooseFrom,
   proposalBlockers,
   type Proposal,
   type RecordEntry,
@@ -314,6 +315,15 @@ export default function SpecDocumentReview({
   const rows = groupIntoSpecRows(
     [...sections.pending, ...sections.ambiguous, ...sections.unassigned],
     proposals,
+  );
+  // Rows with a member that found NO item. A code on two lines of a phase
+  // found two, and its row says "choose which" instead (E1, 2026-11-20).
+  const notFound = rows.filter((row) =>
+    row.runs.some((member) => {
+      if (member.recordId) return false;
+      const proposal = proposals.find((entry) => entry.id === member.proposalId);
+      return !(proposal && linesToChooseFrom(proposal));
+    }),
   );
   // The record is STILL the unit of commit. This is the set of whole cards a
   // "confirm everything" would send, one request each.
@@ -645,9 +655,9 @@ export default function SpecDocumentReview({
         </Note>
       )}
 
-      {rows.some((row) => row.unplacedCount > 0) && tab === "pending" && (
+      {notFound.length > 0 && tab === "pending" && (
         <Note tone="warn">
-          {rows.filter((row) => row.unplacedCount > 0).length} of these did not find an item on this project. If the
+          {notFound.length} of these did not find an item on this project. If the
           bill has changed since this was read, or the app has learnt to read something it could not before, press
           Re-match — it re-reads nothing and costs nothing.
         </Note>

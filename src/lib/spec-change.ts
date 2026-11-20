@@ -28,7 +28,7 @@
 // ============================================================================
 import type { AnswerState } from "@/lib/spec-vocab";
 import { fieldDisplayName } from "@/lib/spec-field-label";
-import { heldReading, type HeldTarget, type Proposal } from "@/lib/spec-document";
+import { heldReading, linesToChooseFrom, type HeldTarget, type Proposal } from "@/lib/spec-document";
 import { composeDimensionCell } from "@/lib/dimensions";
 
 /**
@@ -106,10 +106,19 @@ function overTheBill(proposal: Proposal, what: string): ChangeDescription | null
     : { kind: "disagrees", label: "Disagrees with the bill", was, notable: true };
 }
 
+/**
+ * NO ITEM YET. "Item not found" where the code found none; where it found
+ * several lines of one phase and no twin link settles which, it says so
+ * (prod-ready E1, 2026-11-20) — the item was found twice, not lost.
+ */
+function unplaced(proposal: Proposal): ChangeDescription {
+  return { kind: "unplaced", label: linesToChooseFrom(proposal) ?? "Item not found", was: null, notable: true };
+}
+
 export function describeChange(proposal: Proposal): ChangeDescription {
   // A NOTE: a statement no question matched, kept against the item.
   if (proposal.note) {
-    if (!proposal.recordId) return { kind: "unplaced", label: "Item not found", was: null, notable: true };
+    if (!proposal.recordId) return unplaced(proposal);
     const bill = overTheBill(proposal, "note");
     if (bill) return bill;
     if (proposal.attributeTarget && heldReading(proposal) === "same") {
@@ -125,7 +134,7 @@ export function describeChange(proposal: Proposal): ChangeDescription {
     const slot = proposal.dimension.slot;
     const held = proposal.attributeTarget;
     if (!proposal.recordId) {
-      return { kind: "unplaced", label: "Item not found", was: null, notable: true };
+      return unplaced(proposal);
     }
     const bill = overTheBill(proposal, slot);
     if (bill) return bill;
@@ -148,7 +157,7 @@ export function describeChange(proposal: Proposal): ChangeDescription {
 
   if (proposal.finish) {
     const what = fieldDisplayName(proposal.finish.specFieldName) ?? "finish";
-    if (!proposal.recordId) return { kind: "unplaced", label: "Item not found", was: null, notable: true };
+    if (!proposal.recordId) return unplaced(proposal);
     const bill = overTheBill(proposal, what);
     if (bill) return bill;
     const held = proposal.attributeTarget;
@@ -174,7 +183,7 @@ export function describeChange(proposal: Proposal): ChangeDescription {
     // right; what they actually have to do is pick the question.
     return proposal.recordId
       ? { kind: "no_question", label: "Question not matched", was: null, notable: true }
-      : { kind: "unplaced", label: "Item not found", was: null, notable: true };
+      : unplaced(proposal);
   }
 
   const before = target.answerExists ? target.answerState : "missing";

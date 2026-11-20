@@ -75,6 +75,20 @@ export type RecordEntry = {
   twinIds?: string[];
 };
 
+/**
+ * EVERY RECORD IN THE SET IS A LINKED TWIN OF EVERY OTHER (0060) — the rule
+ * by which lines of one phase carrying one code are ONE item rather than
+ * SX11A's question. One predicate for the drawing card (`readTwinLines`) and
+ * the email and spec-document review (`resolveProposals`, prod-ready E1,
+ * 2026-11-20), so the two cannot disagree about which lines are twins.
+ * Vacuously true for fewer than two: a caller decides whether a set that
+ * small is a question at all. A record whose loader never read the links
+ * (`twinIds` absent) is nobody's twin.
+ */
+export function everyPairTwinned(set: readonly Pick<RecordEntry, "id" | "twinIds">[]): boolean {
+  return set.every((a, i) => set.slice(i + 1).every((b) => a.twinIds?.includes(b.id) === true));
+}
+
 // ---- refs ------------------------------------------------------------------
 
 /**

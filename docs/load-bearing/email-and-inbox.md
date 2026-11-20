@@ -165,6 +165,10 @@ Six things are load-bearing:
   settled value being withdrawn, and that already reaches the state through
   `emailAwareState`. The label never stands in for a blocker: `changes` still
   requires the overwrite acknowledgement.
+- **Two lines of one phase linked as TWINS are not SX11A** (prod-ready E1,
+  2026-11-20): the code lands on each, by the drawings' predicate, and two
+  lines that are NOT linked say "… is on 2 lines of … — choose which" rather
+  than "Item not found" (`specs-and-finishes.md`, the twin section).
 - **"Item not found" and "question not matched" are different jobs.**
   Collapsing them produced a row that contradicted itself — *3 runs* in the
   Applies to column beside *Not yet placed*. Once the fan-out lands, the item is

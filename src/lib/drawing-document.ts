@@ -50,7 +50,14 @@
 // phase: the page names one code, and ticking GR-FUR-08 and PL-FUR-08 both is
 // not what it said (`oneLinePerPhase`).
 // ============================================================================
-import { endsOnSegment, findRecordsByRef, namesOnSegments, normaliseRef, type RecordEntry } from "@/lib/record-refs";
+import {
+  endsOnSegment,
+  everyPairTwinned,
+  findRecordsByRef,
+  namesOnSegments,
+  normaliseRef,
+  type RecordEntry,
+} from "@/lib/record-refs";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import { containsPhrase, deferredToSomebody, TBC_TOKENS } from "@/lib/spec-vocab";
 import { normaliseName } from "@/lib/matching";
@@ -903,8 +910,8 @@ function readTwinLines(resolution: DrawingResolution, records: RecordEntry[]): D
   const asked = resolution.runs.some((run) => run.status === "ambiguous");
   if (ids.length < 2 || !asked) return resolution;
   const byId = new Map(records.map((record) => [record.id, record]));
-  const twinned = (a: string, b: string) => byId.get(a)?.twinIds?.includes(b) === true;
-  const allTwins = (set: readonly string[]) => set.every((a, i) => set.slice(i + 1).every((b) => twinned(a, b)));
+  // The one predicate the email review reads too (`everyPairTwinned`).
+  const allTwins = (set: readonly string[]) => everyPairTwinned(set.map((id) => byId.get(id) ?? { id }));
 
   const named = (set: readonly string[]) =>
     set
