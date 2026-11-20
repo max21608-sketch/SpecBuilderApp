@@ -26,6 +26,7 @@
 import {
   DIMENSION_SLOT_LABELS,
   normaliseDimensionSlot,
+  normaliseUnit,
   type AttributeState,
   type AttributeUnit,
   type DimensionSlot,
@@ -342,7 +343,12 @@ export function parseCombinedDimensions(raw: string): CombinedDimensions {
   const text = (raw ?? "").trim();
   if (text === "") return { parts: [], unitRaw: null };
 
-  const segments = text.split(/\s*[x×]\s*/i).filter((segment) => segment.trim() !== "");
+  const segments = text
+    .split(/\s*[x×]\s*/i)
+    .filter((segment) => segment.trim() !== "")
+    // A RUN OF LETTERED FIGURES WITH NO `x` (2026-11-20, R9) is the same line:
+    // `W 850 D 900 H 780 mm`, `H760mm SH 420`. See `letteredRun`.
+    .flatMap((segment) => letteredRun(segment) ?? [segment]);
   if (segments.length === 0) return { parts: [], unitRaw: null };
 
   // A unit on the LAST segment belongs to the whole line: "80 x 70 x 90 cm"
@@ -408,6 +414,60 @@ export function parseCombinedDimensions(raw: string): CombinedDimensions {
   }
 
   return { parts, unitRaw };
+}
+
+/**
+ * A SEGMENT THAT IS SEVERAL LETTERED FIGURES SEPARATED BY SPACES OR A COMMA,
+ * split into one segment per figure — or null, and the segment is read exactly
+ * as it always was (2026-11-20, R9).
+ *
+ * An invented specifier prints every size `Overall: W 850 D 900 H 780 mm`
+ * (and `Dia 1200 H 400 mm`), with no `x`, and every one was "a size this app
+ * could not place"; `W780 x D820 x H760mm SH 420` lost its H and SH the same
+ * way, and `W3400 x D650 x H900mm SH450` is open in found-in-use. The `x` is
+ * the separator this reader knew; where EVERY figure carries its own slot
+ * letter it is not needed, because the letters say which figure is which.
+ *
+ * Strict, because a looser split is a guess: each figure must sit beside a
+ * word `normaliseDimensionSlot` reads WHOLE (`W`, `D`, `H`, `SH`, `Dia`, `Ø`,
+ * `Width` …; `L`, `OAH`, `Seat`, `Base:` are not), before it (`W 850`,
+ * `W850`, `SH: 420`, `Dia.450`), with at most a unit after it (`780mm`, `780
+ * mm`). One bare figure, an unknown word, a feet mark, or a single figure in
+ * the segment and nothing is split: the line reads as before, and a line that
+ * cannot be read stays a note. A comma separates only with a space after it,
+ * so `W1,200` stays one figure for the one number reader to refuse. The unit
+ * printed once at the end is the last segment's, so it applies to the line as
+ * it does in the `x` form.
+ */
+function letteredRun(segment: string): string[] | null {
+  const tokens = segment.trim().split(/,?\s+/).filter(Boolean);
+  if (tokens.length < 2) return null;
+  const glued = new RegExp(String.raw`^([A-Za-z.${DIAMETER_SIGNS}]+?):?(${FIGURE_TOKEN})([A-Za-z]+\.?)?$`);
+  const figureAlone = new RegExp(String.raw`^(${FIGURE_TOKEN})([A-Za-z]+\.?)?$`);
+  const unitOk = (unit: string | undefined) => !unit || normaliseUnit(unit) !== null;
+  const parts: string[][] = [];
+  let at = 0;
+  while (at < tokens.length) {
+    const token = tokens[at] as string;
+    const joined = glued.exec(token);
+    if (joined && normaliseDimensionSlot(joined[1]) !== null && unitOk(joined[3])) {
+      parts.push([token]);
+      at += 1;
+    } else {
+      const next = tokens[at + 1];
+      const alone = next === undefined ? null : figureAlone.exec(next);
+      if (!alone || normaliseDimensionSlot(token.replace(/:$/, "")) === null || !unitOk(alone[2])) return null;
+      parts.push([token, next as string]);
+      at += 2;
+    }
+    // A unit word after the figure belongs to it: `H 780 mm`.
+    const unit = tokens[at];
+    if (unit !== undefined && normaliseDimensionSlot(unit) === null && normaliseUnit(unit) !== null) {
+      parts[parts.length - 1]!.push(unit);
+      at += 1;
+    }
+  }
+  return parts.length >= 2 ? parts.map((part) => part.join(" ")) : null;
 }
 
 export type DimensionRow = {

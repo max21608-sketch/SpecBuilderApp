@@ -681,3 +681,18 @@ describe("a part word beside a client code, in a description", () => {
     expect(finishes(plan("Dining chair\nFrame: WD-02").attributes)).toEqual(["WD-02 → Main timber finish"]);
   });
 });
+
+// R9 (2026-11-20): sizes printed with spaces between lettered figures, invented.
+describe("a size line whose lettered figures are separated by spaces", () => {
+  it("places a labelled one, and an unlabelled one, exactly as the x form", () => {
+    expect(plan("Lounge chair\nOverall: W 850 D 900 H 780 mm").dimensionCell).toBe("W850 x D900 x H780mm");
+    expect(plan("Side table\nOverall: Dia 1200 H 400 mm").dimensionCell).toBe("Dia.1200 x H400mm");
+    expect(plan("Lounge chair\nW780 x D820 x H760mm SH 420").dimensionCell).toBe("W780 x D820 x H760 x SH420mm");
+  });
+
+  it("keeps a line with a bare figure in the run as a note, and never guesses its slot", () => {
+    const result = plan("Table\nOverall: W 850 900 H 780 mm");
+    expect(result.dimensionCell).toBe("");
+    expect(notes(result.attributes)).toEqual(["Overall: W 850 900 H 780 mm"]);
+  });
+});

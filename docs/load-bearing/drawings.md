@@ -285,7 +285,10 @@ Seven things are load-bearing.
   (`W1520`, `Dia.460`) is the page speaking and is kept; three bare figures get
   none, and the model reports the same figures with the evidence for each. Two
   inferences on one line meant the weaker winning silently: `80 x 70 x 90 cm`
-  shipped as `W900 x D800 x H700mm`.
+  shipped as `W900 x D800 x H700mm`. Since 2026-11-20 (R9, `letteredRun`)
+  figures that EACH carry a prefix may be separated by spaces instead of `x`
+  (`W 850 D 900 H 780 mm`); a bare figure anywhere in such a run splits
+  nothing. The dump of all 58 staged drawing runs was unchanged by it.
 - **A PAGE COUNT IS NOT EVIDENCE OF A SPLIT.** `variantLettersByItem` reads the
   model's `one_item` / `configurations` / `unclear`, and only `configurations`
   letters anything — because lettering takes the bill line out of

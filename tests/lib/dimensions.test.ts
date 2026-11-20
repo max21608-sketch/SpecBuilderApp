@@ -588,3 +588,32 @@ describe("the slot words the follow-ups named (audit 5.4 A4)", () => {
     expect(line.parts.map((part) => part.slot)).toEqual(["W", "H"]);
   });
 });
+
+// R9 (2026-11-20). Invented sizes printed with spaces, not `x`, between figures
+// that each carry their own slot letter. Nothing here is client material.
+describe("parseCombinedDimensions — a run of lettered figures with no x", () => {
+  const read = (line: string) => parseCombinedDimensions(line).parts.map((part) => [part.slot, part.value]);
+
+  it("reads each lettered figure as its own part, the unit printed once at the end applying to the line", () => {
+    expect(read("W 850 D 900 H 780 mm")).toEqual([["W", "850"], ["D", "900"], ["H", "780"]]);
+    expect(parseCombinedDimensions("W 850 D 900 H 780 mm").unitRaw).toBe("mm");
+    expect(read("Dia 1200 H 400 mm")).toEqual([["DIA", "1200"], ["H", "400"]]);
+    expect(read("W780 x D820 x H760mm SH 420")).toEqual([["W", "780"], ["D", "820"], ["H", "760mm"], ["SH", "420"]]);
+    expect(read("SH: 420 H: 780 mm")).toEqual([["SH", "420"], ["H", "780"]]);
+    expect(read("Width 850 Depth 900 Height 780 mm")).toEqual([["W", "850"], ["D", "900"], ["H", "780"]]);
+  });
+
+  it("never splits a run with a bare figure, a word that is no slot, a feet mark, or one figure", () => {
+    for (const line of ["W 850 900 H 780 mm", "L 6400 D 650", "W 850 D 900 H 780 cm SEAT", "W 3'5\" D 2'", "Base: W 66 D 66"]) {
+      expect(parseCombinedDimensions(line).parts, line).toHaveLength(1);
+    }
+    expect(read("H 450")).toEqual([["H", "450"]]);
+    // A thousands-or-decimal comma is inside its figure, never a separator.
+    expect(read("W1,200 D500 H750mm")).toEqual([["W", "1,200"], ["D", "500"], ["H", "750"]]);
+  });
+
+  it("leaves every line with an x reading as it did", () => {
+    expect(read("80 x 70 x 90 cm")).toEqual([["W", "80"], ["D", "70"], ["H", "90"]]);
+    expect(read("Dia 122 x H 75 x Base: W 66 x D 66")).toEqual([["DIA", "122"], ["H", "75"], [null, "Base: W 66"], ["D", "66"]]);
+  });
+});

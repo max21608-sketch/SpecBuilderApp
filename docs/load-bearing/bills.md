@@ -218,11 +218,27 @@ bracketed). It is written under the label `Size`, the figure rows on the
 review say "read from an unlabelled size line", and the slot-change route
 reads the same line (`lineStatements`). The trap is widening it: `700 x 700 x
 H750mm` letters one figure, and reading the other two by position is the
-inference the dimension model refuses. Two lettered figures separated by a
-space and not `x` (`H760mm SH 420`) are not split by the combined-line reader,
-labelled or not, so such a line stays a note — a reader change, not made here.
-Measured: every real bill's description read and `boq:gap` byte-identical
-before and after.
+inference the dimension model refuses. Measured: every real bill's
+description read and `boq:gap` byte-identical before and after.
+
+**Lettered figures need no `x` between them** (2026-11-20, R9,
+`letteredRun` in `dimensions.ts`, inside `parseCombinedDimensions` — the one
+combined-line reader, which the drawings path shares). An invented
+specifier prints every size `Overall: W 850 D 900 H 780 mm`, and all seven
+were "a size this app could not place"; `W780 x D820 x H760mm SH 420` lost
+its H and SH, and `W3400 x D650 x H900mm SH450` (found-in-use, OPEN) the
+same. A segment is now split on spaces, or a comma with a space after it,
+ONLY where EVERY figure in it sits beside a word `normaliseDimensionSlot`
+reads whole (`W`, `D`, `H`, `SH`, `Dia`, `Ø`, `Width` …), with at most a
+unit after each; the unit printed once at the end is the line's, as in the
+`x` form. One bare figure, an unknown word (`L`, `OAH`, `SEAT`, `Base:`), a
+feet mark or a single figure and nothing is split, so such a line reads as
+it always did — a note where it cannot be read. A comma with no space stays
+inside its figure for the one number reader. Measured: every real bill's
+description read and `boq:gap` unchanged, every staged drawing run's dump
+(58) unchanged; 18 staged bill lines now place their size, all invented
+(the Larchmont schedule's seven, the Harbour House chair and stool on Rev A
+and B, and the five `__QA` procurement-schedule chairs).
 
 ### A seeded bill layout reads like a known heading, and may carry a row rule
 
