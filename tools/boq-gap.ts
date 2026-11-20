@@ -43,6 +43,7 @@ import { BOQ_ROLE_LABELS, columnLetter, isBoqReadRole, isBoqRole, type BoqReadRo
 import { finishLineTargets, parseRowRules } from "@/lib/boq-row-kinds";
 import { billItemName } from "@/lib/bill-description";
 import { suggestCategory, type CategoryRegister } from "@/lib/boq-stage";
+import { guessRowKinds } from "@/lib/row-kind-guess";
 
 type GoldenLine = {
   row: number;
@@ -189,6 +190,18 @@ function describeSheet(sheet: ParsedBoqSheet): string[] {
     .filter(({ targets }) => targets.rows.length > 1);
   out.push(`  finish lines written to more than one item: ${several.length}`);
   for (const { line, targets } of several) out.push(`    row ${line.lineNo} ${line.code ?? ""}: ${targets.sentence}`);
+  // WHAT THE REVIEW WOULD ASK (2026-11-20, `row-kind-guess.ts`): a section
+  // heading or a finish line, suggested and never set. Printed only where
+  // there is one, so a sheet with none prints exactly as before.
+  const guesses = guessRowKinds(lines);
+  if (guesses.size > 0) {
+    const sections = [...guesses].filter(([, guess]) => guess.kind === "section").map(([row]) => row);
+    const finishes = [...guesses].flatMap(([row, guess]) => (guess.kind === "finish_for" ? [`${row}→${guess.parent.row}`] : []));
+    out.push(
+      `  suggested kinds: ${sections.length} section heading(s)${sections.length ? ` (rows ${sections.join(", ")})` : ""} · ` +
+        `${finishes.length} finish line(s)${finishes.length ? ` (${finishes.join(", ")})` : ""}`,
+    );
+  }
   return out;
 }
 
@@ -233,6 +246,35 @@ function compare(sheet: ParsedBoqSheet | undefined, golden: Golden): string[] {
   const extra = sheet.lines.filter((line) => !wantByRow.has(line.lineNo));
   for (const line of extra.slice(0, 10)) misses.push(`row ${line.lineNo}: not in the golden (${line.code ?? "no code"})`);
   const fabricWanted = golden.lines.filter((line) => line.kind === "finish_for").length;
+  // The review's SUGGESTED kinds against the golden: a suggestion is only
+  // ever a question, so this counts how many would be right to accept.
+  const guesses = guessRowKinds(sheet.lines);
+  const suggestedLines: string[] = [];
+  if (guesses.size > 0) {
+    let finishRight = 0;
+    let finishAsked = 0;
+    let sectionRight = 0;
+    let sectionAsked = 0;
+    const wrong: string[] = [];
+    for (const [row, guess] of guesses) {
+      const want = wantByRow.get(row);
+      if (guess.kind === "finish_for") {
+        finishAsked += 1;
+        if (want?.kind === "finish_for" && expectedParent.get(row) === guess.parent.row) finishRight += 1;
+        else wrong.push(`row ${row}: suggested finish for row ${guess.parent.row}, golden ${want?.kind ?? "no line"}`);
+      } else {
+        sectionAsked += 1;
+        // A golden lists the lines that matter; a row it leaves out, or calls
+        // something other than an item or a finish line, is not a record.
+        if (!want || (want.kind !== "item" && want.kind !== "finish_for")) sectionRight += 1;
+        else wrong.push(`row ${row}: suggested section heading, golden ${want.kind}`);
+      }
+    }
+    suggestedLines.push(
+      `  SUGGESTED  finish lines on the golden's item ${pct(finishRight, finishAsked)} · section headings the golden leaves out ${pct(sectionRight, sectionAsked)}`,
+      ...wrong.slice(0, 10).map((miss) => `    ${miss}`),
+    );
+  }
   const out = [
     `  ACCURACY  lines ${sheet.lines.length}/${golden.lineCount}${extra.length ? ` (+${extra.length} not in golden)` : ""} · ` +
       `codes ${pct(codes, golden.lines.length)} · quantities ${pct(qtys, golden.lines.length)} · ` +
@@ -240,6 +282,7 @@ function compare(sheet: ParsedBoqSheet | undefined, golden: Golden): string[] {
   ];
   for (const miss of misses.slice(0, 15)) out.push(`    ${miss}`);
   if (misses.length > 15) out.push(`    … and ${misses.length - 15} more`);
+  out.push(...suggestedLines);
   return out;
 }
 

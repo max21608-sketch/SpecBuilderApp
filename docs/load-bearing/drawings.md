@@ -285,7 +285,10 @@ Seven things are load-bearing.
   (`W1520`, `Dia.460`) is the page speaking and is kept; three bare figures get
   none, and the model reports the same figures with the evidence for each. Two
   inferences on one line meant the weaker winning silently: `80 x 70 x 90 cm`
-  shipped as `W900 x D800 x H700mm`.
+  shipped as `W900 x D800 x H700mm`. Since 2026-11-20 (R9, `letteredRun`)
+  figures that EACH carry a prefix may be separated by spaces instead of `x`
+  (`W 850 D 900 H 780 mm`); a bare figure anywhere in such a run splits
+  nothing. The dump of all 58 staged drawing runs was unchanged by it.
 - **A PAGE COUNT IS NOT EVIDENCE OF A SPLIT.** `variantLettersByItem` reads the
   model's `one_item` / `configurations` / `unclear`, and only `configurations`
   letters anything — because lettering takes the bill line out of
@@ -874,6 +877,29 @@ from the screen would be a cell the file does not deliver.
 A fabric lands in the group **Materials and fabrics**, not *Finishes*: `finish`
 is this app's word for timber and metal. The BWS field is the part that
 matters.
+
+**A PART word does not outrank the client's own code** (2026-11-20, R4; step
+1a). The frozen timber list carries `frame`, `leg`, `legs` and `feet` as the
+PARTS a timber is usually on, so an invented bill's `Frame: MTL-02` on a bar
+stool was filed in Main timber finish while the client's code said metal —
+the words ran first and the code was never asked. Now, where the ONLY words
+that fired are timber part words (no timber material word — `wood`, `oak`,
+`walnut`, `veneer`, `timber` — and no fabric, metal or hardware word) and the
+client's code (`clientCodeKind`: `CODE_PREFIXES`, then a three-part project
+code) names a DIFFERENT kind, the code decides, and the reason says the part
+word named the part. A material word still beats the code (`Frame: solid oak`
+over `MTL-02` is timber), a timber code changes nothing, and the word lists
+are untouched. The trap is the one this section's first paragraph names:
+`classifyCallout` runs at READ time (`upgradeCalloutGuesses`, pending rows at
+version 1 holding no field), so it was MEASURED before it shipped, over every
+staged run on the local stack and every real bill: on screen, nothing staged
+moves (every affected row already holds a field or was applied); a FRESH
+read of three Aman drawing callouts — `base frame / legs`, `Legs`, `legs /
+base frame`, each coded `GR-MTL-01` — reads metal instead of timber, and one
+of the three had been corrected to Main metal finish by hand (two were
+applied as Main timber finish); in the bill descriptions only the invented
+bill's two `Frame: MTL-02` move. The bill's Finish COLUMN reads the same way
+(`planColumnFinish` takes `classifyCallout`'s kind where the words name one).
 
 ### A page that reported no picture proposes the page itself
 

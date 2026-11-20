@@ -42,6 +42,7 @@ import type { TxnSql } from "@/lib/db-transaction";
 import type { SqlLike } from "@/lib/record-atoms";
 import { assertBoqDocument } from "@/lib/boq-import";
 import { billItemName } from "@/lib/bill-description";
+import { billFinishLineWords } from "@/lib/bill-finish-kind";
 import { effectiveRowImage, type BillRowImage } from "@/lib/bill-row-image";
 import {
   decideFabricFiling,
@@ -165,7 +166,12 @@ export async function planBillSwatchBackfill(
       for (const line of sheet.lines) {
         if (line.ignored || line.rowKind !== "finish_for") continue;
         const says = fabricLineValue(line);
-        const byWords = attributes.filter((attribute) => !used.has(attribute.id) && attribute.value === says);
+        // A confirm before 2026-11-20 (R8) stored the line's words with any
+        // finish label still on; this backfill is for bills confirmed long before.
+        const said = billFinishLineWords(line);
+        const byWords = attributes.filter(
+          (attribute) => !used.has(attribute.id) && (attribute.value === says || attribute.value === said),
+        );
         const narrowed = byWords.filter(
           (attribute) => attribute.sourceSheet === sheet.sheetName && attribute.sourceLineNo === line.finishFor?.row,
         );

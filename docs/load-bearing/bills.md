@@ -108,7 +108,9 @@ pack screen says nothing is paired. Recorded and NOT fixed: a subtotal or
 section row that carries a description becomes a spec record with the
 subtotal's figure as its quantity — since 2026-09-23 a `section` or
 `subtotal` row KIND exists and defaults to Ignore, but only the model or a
-person sets one (see *A bill is never refused*). The header synonym list is
+person sets one (see *A bill is never refused*); since 2026-11-20 a row with
+nothing but a heading's text is offered "Section heading?", still a person's
+click. The header synonym list is
 SEED DATA since 2026-09-23 (`boq_column_aliases`, 0040).
 
 Rows above the header carry the revision, the date and the terms the run is
@@ -151,6 +153,48 @@ verbatim behind a toggle. Traps:
 - **A description fabric claims no COM when the item has a fabric line**, and
   `Fabric: COM` never claims one: a second COM would ship a cloth that does
   not exist. Both are notes.
+- **One code in the description and on a finish line is ONE finish, of any
+  kind** (2026-11-20, R6, `finishLineCodes` in `planSheetDescriptions`). An
+  invented sofa said `Legs: MTL-01 brushed brass` and a person set the line
+  `MTL-01 / Finish: Brushed brass, lacquered` under it to "Finish for": the
+  confirm wrote Main metal finish from the description AND Metal Finish 2
+  from the line, the second linked to nothing (the description had filed
+  MTL-01 first as "brushed brass", so the line's words were a CONFLICT). The
+  fabric rule above only covered a fabric. Now a description statement whose
+  code (`normaliseFinishCode`) is carried by one of the item's own finish
+  lines (`fabricOwnCode` or its schedule code, over `finishLineTargets`, so
+  a line written to two items counts on both) is a note saying which row
+  carries it; the line is written once, in the first field of its kind, and
+  files the code. A code the item's lines do not carry is written as before.
+  Since R8 (next bullet) the line's value has its finish label read off, so
+  where the library's words agree it links. Measured over every staged
+  bill on the local stack and every real bill with its golden's kinds: only
+  the invented sofa moves; no real bill writes one code twice.
+- **A finish line's description is a statement, and its finish label is not
+  the finish** (2026-11-20, R8, `finishLineStatement` in
+  `bill-fabric-filing.ts`). After R6 the invented sofa's one metal finish was
+  stored as "Finish: Brushed brass, lacquered" — the label word in the BWS
+  cell and the quote, and a CONFLICT against the library's "Brushed brass,
+  lacquered", so it linked nothing and the Finishes tab called the code
+  unresolved. A finish line's words are now read through the description
+  reader's own `splitLabel`: where the label is ONE of the words that already
+  say a line is a finish (`isFinishLineWord`, the bracket rule's list:
+  Finish, Fabric, Leather, COM, Trim …) and something follows it, the value
+  written, compared with the library and offered to the placeholder test is
+  what follows (`fabricLineValue`), and the review says "writes “…”". Three
+  things are deliberately NOT changed, each a trap: the line's KIND is read
+  from its whole words (an uncoded "Fabric: Example boucle" is a fabric by
+  its label); the stored attribute's LABEL stays the kind word
+  (`billFinishShape`), because that label is how `heldBillFinishKind` tells
+  a finish line's row from a description's on a revision — storing "Finish"
+  there would make a held metal look like description text; and a revision
+  of a record a confirm before this stored with the label on reads that
+  spelling as the same finish (`storedBefore`), never as one dropped. Any
+  other label ("Fabric @ Stool Collection & Pattern Ref: …") and a label with
+  nothing after it are unchanged. Measured: of 459 finish lines over every
+  staged bill on the local stack (Aman, Ronnie Scott's, Annabel's NY, Butler
+  ×2, Panther, invented), only the invented bill's three move; MTL-01 now
+  links, FAB-01 and FAB-02 still conflict because the library's words differ.
 - **An unlabelled line that starts with a code continues the label above it**
   (`Finish:` / `GR-TIM-10 …` / `GR-MTL-01 …`); a value listing codes is one
   statement per code, each keeping its own words.
@@ -158,6 +202,43 @@ verbatim behind a toggle. Traps:
   bill's description specs or whose slot/field is occupied, and says so.
 - **A bill whose confirm read its descriptions refuses the charged read** on
   the server (409), because it would propose everything again.
+
+**An unlabelled line is a size only by its own letters** (2026-11-20, an
+invented specifier's bill, `withUnlabelledSizeLine`). A bill that writes the
+size on a line of its own with no label (`W2100 x D950 x H820mm, SH 440mm`,
+`Dia 450 x H550mm`) placed nothing: every item said "no size placed" and the
+size was a note. Such a line is now read as the overall size ONLY where every
+figure carries its own slot letter through `readDimension` (no figure placed
+by printed order, none bare beside a lettered one, nothing left over — `L` is
+not a slot), it prints at least two figures, and it is the line's ONLY size
+line: beside a labelled size line, a Dims column or a second such line it
+stays the note it was, because a line with no label has no claim to win "which
+size is the item's". The unit is the line's own or none (placed unconverted,
+bracketed). It is written under the label `Size`, the figure rows on the
+review say "read from an unlabelled size line", and the slot-change route
+reads the same line (`lineStatements`). The trap is widening it: `700 x 700 x
+H750mm` letters one figure, and reading the other two by position is the
+inference the dimension model refuses. Measured: every real bill's
+description read and `boq:gap` byte-identical before and after.
+
+**Lettered figures need no `x` between them** (2026-11-20, R9,
+`letteredRun` in `dimensions.ts`, inside `parseCombinedDimensions` — the one
+combined-line reader, which the drawings path shares). An invented
+specifier prints every size `Overall: W 850 D 900 H 780 mm`, and all seven
+were "a size this app could not place"; `W780 x D820 x H760mm SH 420` lost
+its H and SH, and `W3400 x D650 x H900mm SH450` (found-in-use, OPEN) the
+same. A segment is now split on spaces, or a comma with a space after it,
+ONLY where EVERY figure in it sits beside a word `normaliseDimensionSlot`
+reads whole (`W`, `D`, `H`, `SH`, `Dia`, `Ø`, `Width` …), with at most a
+unit after each; the unit printed once at the end is the line's, as in the
+`x` form. One bare figure, an unknown word (`L`, `OAH`, `SEAT`, `Base:`), a
+feet mark or a single figure and nothing is split, so such a line reads as
+it always did — a note where it cannot be read. A comma with no space stays
+inside its figure for the one number reader. Measured: every real bill's
+description read and `boq:gap` unchanged, every staged drawing run's dump
+(58) unchanged; 18 staged bill lines now place their size, all invented
+(the Larchmont schedule's seven, the Harbour House chair and stool on Rev A
+and B, and the five `__QA` procurement-schedule chairs).
 
 ### A seeded bill layout reads like a known heading, and may carry a row rule
 
@@ -261,6 +342,24 @@ already exist.
   "Pair the n suggested" per tab; reconcile reports `accepted` and lists a
   suggested-only record in `missing` with `suggestedFor`. The level-picker
   trap, in a third place.
+- **A revision writes only the columns its sheet MAPS** (2026-11-20, R7,
+  `fieldsTheBillStates` in `boq-reconcile.ts`, read by `carryPairedLine` and
+  by the review's `lineDeltas`). Found on the local stack: a person set
+  `designer = 'NPI'` on two records through the record's Edit panel — the
+  bill has no designer column, so that is the only way to route a chase —
+  then a Rev B in the same layout, still with no designer column, was
+  confirmed as their revision; the pairing column read "Designer: NPI → —"
+  and the confirm wrote NULL on both. A role the sheet's column map does not
+  hold is the bill saying NOTHING, never the bill saying empty: the paired
+  record keeps its own designer, product reference, area (composed from
+  area, sub-area and category, so any of the three states it), BOQ category,
+  unit and quantity (with `qty_raw`), and the review shows no change for it.
+  A MAPPED column whose cell is blank still writes its blank and shows "→ —"
+  — unchanged, and a separate question. A sheet staged before its column map
+  was recorded (no `columns`) writes everything, as before. The name comes
+  from the description column, which every readable sheet maps; the bill's
+  own line-number column, its notes and kept columns are not written by a
+  revision at all.
 - **A retired line can come back** (C14). A retired bill line of the phase
   whose code is on the bill again is offered as a `restoreCandidate`, never
   chosen (two retired on one code: both offered, SX11A); the choice is
@@ -352,6 +451,47 @@ columns are plainly there was a dead end because of the words above them. Max:
   the sheet carries a `columnsDoubt` naming the layout, held as above. Where
   the synonyms cannot read the sheet at all (the Aman "Spec Code"), a layout
   applies exactly as before.
+- **A heading row is ASKED about, never set** (2026-11-20, an invented
+  specifier's bill, `src/lib/row-kind-guess.ts`). A bill read by its known
+  headings — no model, no person — stages every row as an Item, so `GUEST
+  ROOM TYPE A`, `BAR`, `RESTAURANT` in the code column became records. The
+  review now offers "Section heading?" (a `SuggestButton` with its evidence,
+  and "Accept all N suggested section headings" per tab) where a row has text
+  in EXACTLY ONE of code and description, no quantity (a `TBC` is a
+  quantity cell with words in it, so it is not), no unit and no other cell
+  the sheet reads. Accepting is the Kind control's own write
+  (`kindChoicePatch`, at the document's version), and that control is the
+  way back. Computed on read, never stored, and only for a line NOBODY has
+  given a kind: the bracket rule, a seeded layout's row rule, a model's
+  reading and a person's choice are never asked about again, and a bracketed
+  code is the bracket rule's. Not where the non-furniture question already
+  fires (a subtotal's words), and not on a finish-shaped row. The trap is
+  setting it at parse time: a coded item with nothing else on its row would
+  vanish from the phase, the file and the quote. Measured with `boq:gap`
+  (which now prints `suggested kinds` where a sheet has any): the real
+  Annabel's NY bill is asked about 8 rows, every one a row its golden leaves
+  out; no other real bill is asked anything.
+- **A finish line under its item is ASKED about too, and never across a
+  heading** (2026-11-20, the same bill and module). `FAB-01` / `Finish:
+  Kvadrat …` with no quantity, directly under `HH-SF-01`, staged as an Item.
+  The review offers "Finish for HH-SF-01?" where a line has no quantity AND
+  its code is a finish code by the readers the app already has
+  (`codeIsAFinishCode` — `CODE_PREFIXES` exactly on the leading letters,
+  `projectCodeKind`, the bill's `F-<KIND>-n`; never a prefix of the letters,
+  so `COMMODE-01` is not one) OR its description BEGINS with a finish label
+  (`Finish:`, `Fabric:`, `Timber:` …), and the nearest line above that is not
+  a finish line, another finish-shaped line or a blank is a LIVE item.
+  Accepting sets `finish_for` with that parent exactly as the Kind control
+  does; "Accept all N suggested finish lines" per tab. A section heading on
+  the way up — set, or itself suggested — stops the walk with no
+  suggestion: the finish under `BAR` belongs to nothing above it, and a
+  guess across a heading is the wrong item with nothing to flag it. The
+  bracket rule and a seeded layout's row rule still win: a bracketed code is
+  never asked about, and a line either rule gave a kind is never asked
+  again. Measured: on the real Annabel's NY bill, 54 suggestions, 54 on the
+  golden's item; Aman, Butler ×2, Panther and Ronnie Scott's are asked
+  nothing (their finish lines carry a bracket, a category, a quantity or no
+  finish-code shape — a miss a person still sets, never a wrong parent).
 - **A header printed again above a section is passed over and counted**
   (2026-11-16, audit C9). It used to stage as a record named "Description".
   A row is a reprint where at least two of the columns being read carry text

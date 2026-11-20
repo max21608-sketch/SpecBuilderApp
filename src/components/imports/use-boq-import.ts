@@ -493,6 +493,39 @@ export function useBoqImport(id: string) {
   }
 
   /**
+   * ACCEPT EVERY SUGGESTED KIND OF ONE SORT ON A TAB — section headings, or
+   * finish lines (`linesToAcceptAs`, the set the button counts). Each is the
+   * Kind control's own write (`rowKind`, and the item row for a finish line),
+   * one at a time with the document's version; the first refusal stops the
+   * rest and says why. One reload at the end, for `acceptAllLevels`' reason.
+   */
+  async function acceptKinds(
+    sheetIndex: number,
+    entries: readonly { index: number; rowKind: BoqRowKind; finishForRow: number | null }[],
+  ) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      for (const entry of entries) {
+        const res = await patchBill({
+          sheetIndex,
+          index: entry.index,
+          rowKind: entry.rowKind,
+          ...(entry.finishForRow === null ? {} : { finishForRow: entry.finishForRow }),
+        });
+        if (!res.ok) {
+          setError(res.error);
+          break;
+        }
+      }
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
    * READ THE WHOLE BILL AGAIN from its stored source — free, by code. For a
    * bill that failed (every one refused before 0040 included) and for one
    * staged before its columns were recorded. Reload first, then report.
@@ -719,6 +752,7 @@ export function useBoqImport(id: string) {
     acceptAllCategories,
     acceptAllPairings,
     ignoreAllSuggested,
+    acceptKinds,
     readAgain,
     setSlot,
     setUnit,

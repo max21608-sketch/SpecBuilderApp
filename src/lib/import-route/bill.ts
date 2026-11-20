@@ -42,7 +42,7 @@ import {
 // them. The screen reads the same module for its duplicate panel, so the rows
 // it calls ambiguous and the rows the carry refuses are one set.
 import { planCarry, listTabs, type CarryDecision, type CarrySheet } from "@/lib/boq-carry";
-import { reconcileSheet, type ExistingRecord, type RevisedLine } from "@/lib/boq-reconcile";
+import { fieldsTheBillStates, reconcileSheet, type ExistingRecord, type RevisedLine } from "@/lib/boq-reconcile";
 
 // ---- the review GET for a bill ---------------------------------------------
 
@@ -157,7 +157,12 @@ export async function getBillReview(run: Row): Promise<Response> {
         ignored: line.ignored,
         replaces: line.replaces ?? null,
       }));
-      reconciliation[sheetIndex] = { ...reconcileSheet(lines, existing, retired), records: existing, retired };
+      // R7: a column the revision does not map says nothing, so it is no change.
+      reconciliation[sheetIndex] = {
+        ...reconcileSheet(lines, existing, retired, fieldsTheBillStates(sheet.columns)),
+        records: existing,
+        retired,
+      };
     }
   }
 

@@ -227,8 +227,52 @@ export function effectiveArea(line: {
   return composeBoqArea(line.area, line.subArea) ?? line.boqCategory ?? null;
 }
 
-export function lineDeltas(line: RevisedLine, record: ExistingRecord): FieldDelta[] {
-  const pairs: { field: string; label: string; was: unknown; now: unknown }[] = [
+// ---- what a revised sheet SAYS about a record --------------------------------
+
+/** The record columns a paired line writes from the bill. */
+export type BillStatedField = "itemDescription" | "qty" | "productReference" | "designer" | "area" | "boqCategory" | "qtyUnit";
+
+/** The bill roles each record column is read from (`effectiveArea` composes the area from three). */
+const STATED_BY: Record<BillStatedField, readonly string[]> = {
+  itemDescription: ["itemDescription"],
+  qty: ["qty"],
+  productReference: ["productReference"],
+  designer: ["designer"],
+  area: ["area", "subArea", "boqCategory"],
+  boqCategory: ["boqCategory"],
+  qtyUnit: ["qtyUnit"],
+};
+
+const ALL_STATED = Object.keys(STATED_BY) as BillStatedField[];
+
+/**
+ * WHICH RECORD COLUMNS A REVISED SHEET SAYS ANYTHING ABOUT (2026-11-20, R7):
+ * those read from a role its column map HOLDS. A role the sheet does not map
+ * is "the bill says nothing", never "the bill says empty" — a person set
+ * `designer = 'NPI'` on two records through the Edit panel (the bill has no
+ * designer column, so that is the only way to route a chase), a Rev B with
+ * still no designer column was confirmed as their revision, and the confirm
+ * wrote designer = NULL on both while the pairing column showed "Designer:
+ * NPI → —". So the confirm writes, and the review counts as changed, ONLY
+ * these. A MAPPED column whose cell is blank still writes its blank, as it
+ * always did — that is the bill saying it is empty.
+ *
+ * A sheet staged before its column map was recorded (no `columns`) is read
+ * as stating every field, exactly as before: nobody can say what it maps.
+ */
+export function fieldsTheBillStates(
+  columns: Readonly<Record<string, unknown>> | null | undefined,
+): ReadonlySet<BillStatedField> {
+  if (!columns) return new Set(ALL_STATED);
+  return new Set(ALL_STATED.filter((field) => STATED_BY[field].some((role) => columns[role] != null)));
+}
+
+export function lineDeltas(
+  line: RevisedLine,
+  record: ExistingRecord,
+  stated: ReadonlySet<BillStatedField> = new Set(ALL_STATED),
+): FieldDelta[] {
+  const pairs: { field: BillStatedField; label: string; was: unknown; now: unknown }[] = [
     { field: "itemDescription", label: "Item", was: record.itemDescription, now: line.itemDescription },
     { field: "qty", label: "Quantity", was: record.qty, now: line.qty },
     { field: "productReference", label: "Product reference", was: record.productReference, now: line.productReference },
@@ -237,7 +281,9 @@ export function lineDeltas(line: RevisedLine, record: ExistingRecord): FieldDelt
     { field: "boqCategory", label: "BOQ category", was: record.boqCategory, now: line.boqCategory },
   ];
   return pairs
-    .map(({ field, label, was, now }) => {
+    // A field the sheet says nothing about is not a change (R7): the confirm keeps it.
+    .filter(({ field }) => stated.has(field))
+    .map(({ field, label, was, now }): FieldDelta | null => {
       const a = show(was);
       const b = show(now);
       return a === b ? null : { field, label, was: a, now: b };
@@ -257,6 +303,8 @@ export function reconcileSheet(
   records: ExistingRecord[],
   /** The phase's bill lines an earlier revision retired: offered back, never chosen. */
   retired: ExistingRecord[] = [],
+  /** The record columns the sheet says anything about (`fieldsTheBillStates`); every one where absent. */
+  stated: ReadonlySet<BillStatedField> = new Set(ALL_STATED),
 ): SheetReconciliation {
   const live = lines.filter((line) => !line.ignored);
 
@@ -302,7 +350,7 @@ export function reconcileSheet(
         suggestedRecordId: line.replaces.recordId,
         candidates: [],
         restoreCandidates: [],
-        deltas: record ? lineDeltas(line, record) : [],
+        deltas: record ? lineDeltas(line, record, stated) : [],
       });
       continue;
     }
@@ -319,7 +367,7 @@ export function reconcileSheet(
         suggestedRecordId: line.replaces.recordId,
         candidates: [],
         restoreCandidates: [],
-        deltas: record ? lineDeltas(line, record) : [],
+        deltas: record ? lineDeltas(line, record, stated) : [],
       });
       continue;
     }
@@ -340,7 +388,7 @@ export function reconcileSheet(
         suggestedRecordId: record.id,
         candidates: [],
         restoreCandidates: [],
-        deltas: lineDeltas(line, record),
+        deltas: lineDeltas(line, record, stated),
       });
       continue;
     }

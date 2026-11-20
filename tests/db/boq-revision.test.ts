@@ -112,7 +112,12 @@ describeIfDb("BOQ revision", () => {
     };
   }
 
-  async function stage(lines: Record<string, unknown>[], replacesRunId: string | null = null): Promise<string> {
+  async function stage(
+    lines: Record<string, unknown>[],
+    replacesRunId: string | null = null,
+    /** Sheet-level fields, such as the column map a sheet staged since 0040 carries. */
+    sheetExtra: Record<string, unknown> = {},
+  ): Promise<string> {
     const run = await client.query(
       `insert into intake_runs (project_id, source_kind, status, parsed, created_by, updated_by)
        values ($1, 'boq_xlsx', 'parsed', $2::jsonb, 'qa', 'qa') returning id`,
@@ -133,6 +138,7 @@ describeIfDb("BOQ revision", () => {
               replacesRunId,
               metadata: { revision: replacesRunId ? "B" : "A", date: "14-Sep-26", notes: [] },
               lines,
+              ...sheetExtra,
             },
           ],
         }),
@@ -389,5 +395,57 @@ describeIfDb("BOQ revision", () => {
       ["__QAQ33", null, null],
     ]);
   });
-});
 
+  // R7 (2026-11-20, found on the local stack): a person set a designer through
+  // the record's Edit panel — the bill has no designer column, so that is the
+  // only way to route a chase — and a revision with still no designer column
+  // wrote designer = NULL. A role the sheet does not map says nothing.
+  it("keeps what a person set in a column the revised sheet does not map", { timeout: 30_000 }, async () => {
+    // Ref, Description, Unit, Qty: no designer, no area, no category column.
+    const columns = {
+      code: { index: 0, heading: "Ref" },
+      itemDescription: { index: 1, heading: "Description" },
+      qtyUnit: { index: 2, heading: "Unit" },
+      qty: { index: 3, heading: "Qty" },
+    };
+    const bare = (index: number, over: Record<string, unknown> = {}) => ({
+      ...line({ index, code: `__QAD${index}` }),
+      designer: null,
+      area: null,
+      boqCategory: null,
+      ...over,
+    });
+    const first = await stage([bare(40), bare(41)], null, { columns });
+    expect((await confirm(first)).status).toBe(200);
+    const read = async () =>
+      (
+        await client.query(
+          `select x.ref_value as code, r.id, r.version, r.run_id, r.qty, r.designer, r.area, r.boq_category
+             from spec_records r join spec_record_refs x on x.record_id = r.id
+            where r.project_id = $1 and x.ref_value like '__QAD4%' and r.status = 'active' order by x.ref_value`,
+          [projectId],
+        )
+      ).rows;
+    const [a, b] = await read();
+    // What a person does on the record's Edit panel: a designer, and an area.
+    await client.query(`update spec_records set designer = 'NPI', area = '__QA Lobby', updated_by = 'qa' where id = any($1)`, [
+      [a.id, b.id],
+    ]);
+    const edited = await read();
+
+    const pair = (row: { id: string; version: number }) => ({ recordId: row.id, recordVersion: row.version });
+    const revision = await stage(
+      [bare(40, { replaces: pair(edited[0]), qty: 5 }), bare(41, { replaces: pair(edited[1]) })],
+      a.run_id,
+      { columns },
+    );
+    const response = await confirm(revision);
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { updated: number }).updated).toBe(2);
+    // The quantity the sheet maps is written; the designer and area it does not map are kept.
+    expect((await read()).map((row) => [row.code, Number(row.qty), row.designer, row.area])).toEqual([
+      ["__QAD40", 5, "NPI", "__QA Lobby"],
+      ["__QAD41", 1, "NPI", "__QA Lobby"],
+    ]);
+  });
+});

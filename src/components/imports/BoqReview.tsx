@@ -56,6 +56,7 @@ import { columnsAwaitingALook } from "@/lib/boq-roles";
 // acts on. The page NEVER decides either for itself — one function behind the
 // count on the button and the loop behind it.
 import { linesToIgnore } from "@/lib/non-furniture-guess";
+import { guessRowKinds, linesToAcceptAs } from "@/lib/row-kind-guess";
 // Pure: the refs one tab carries twice, and — the same set, which is why it is
 // one module — the rows a decision on this tab reaches on the others. The
 // duplicate panel used to compute its own fold here; the carry must use
@@ -70,6 +71,12 @@ import SheetHeader from "@/components/imports/SheetHeader";
 import { SheetColumns, StructureReadNotes, structurePending, useStructureRead } from "@/components/imports/StructureRead";
 import BillLineRow, { FamilyHeading, GroupGap, listOf, type BillLinePlace } from "@/components/imports/BillLineRow";
 import type { NextStep } from "@/lib/next-step";
+
+/** The index of the first sheet that is not dropped, or 0 where every sheet is (or there are none). */
+function firstLiveSheet(sheets: readonly { ignored?: boolean }[]): number {
+  const at = sheets.findIndex((sheet) => !sheet.ignored);
+  return at >= 0 ? at : 0;
+}
 
 /** A reason sentence joined into another, without its own full stop. */
 function asClause(text: string): string {
@@ -112,6 +119,7 @@ export default function BoqReview({
     acceptAllCategories,
     acceptAllPairings,
     ignoreAllSuggested,
+    acceptKinds,
     readAgain,
     setSlot,
     setUnit,
@@ -122,8 +130,14 @@ export default function BoqReview({
     confirm,
   } = boq;
   const { asking, structureError, askModel } = structure;
-  /** Which sheet is shown. A BOQ tab is a sub-quote, so a tab each. */
-  const [sheetTab, setSheetTab] = useState(0);
+  /**
+   * Which sheet is shown. A BOQ tab is a sub-quote, so a tab each. It OPENS
+   * ON THE FIRST SHEET THAT IS NOT DROPPED (2026-11-20, R5): a bill whose
+   * first tab is a cover page opened on that dropped cover, struck through,
+   * and the reviewer had to find the bill. Only the opening: a tab somebody
+   * drops while looking at it stays shown, with its way back on its panel.
+   */
+  const [sheetTab, setSheetTab] = useState(() => firstLiveSheet(data.import.parsed?.sheets ?? []));
   /**
    * Sheets whose Columns panel somebody opened with "Change columns". A sheet
    * nobody has mapped, and one a saved layout read that nobody has checked,
@@ -707,6 +721,13 @@ export default function BoqReview({
           const twinsToAccept = sheet.lines.filter(
             (line) => !line.ignored && !line.twinOf && twinSuggestions.has(line.lineNo),
           );
+          // A SECTION HEADING OR A FINISH LINE, ASKED (2026-11-20): read off
+          // the sheet as it stands (`guessRowKinds`), never stored, and only
+          // while the bill can still change. The "Accept all" sets are the one
+          // function the rows read (`linesToAcceptAs`).
+          const kindGuesses = run.status === "parsed" ? guessRowKinds(sheet.lines) : new Map<number, never>();
+          const sectionsToAccept = linesToAcceptAs(sheet.lines, kindGuesses, "section");
+          const finishesToAccept = linesToAcceptAs(sheet.lines, kindGuesses, "finish_for");
           // Row, Kind, Client ref, Item, Area, Qty, Designer, (Against the
           // phase), Category, Level, Include.
           const columns = reconciliation ? 11 : 10;
@@ -833,11 +854,23 @@ export default function BoqReview({
                           {notFurniture.length} may not be furniture
                         </Chip>
                       )}
+                      {sectionsToAccept.length > 0 && (
+                        <Chip tone="info">
+                          {sectionsToAccept.length} may be {sectionsToAccept.length === 1 ? "a section heading" : "section headings"}
+                        </Chip>
+                      )}
+                      {finishesToAccept.length > 0 && (
+                        <Chip tone="info">
+                          {finishesToAccept.length} may be {finishesToAccept.length === 1 ? "a finish line" : "finish lines"}
+                        </Chip>
+                      )}
                     </>
                   }
                   actions={
                     run.status === "parsed" &&
                     (notFurniture.length > 0 ||
+                      sectionsToAccept.length > 0 ||
+                      finishesToAccept.length > 0 ||
                       suggested.length > 0 ||
                       suggestedCategories.length > 0 ||
                       twinsToAccept.length > 0) ? (
@@ -852,6 +885,39 @@ export default function BoqReview({
                             evidence="each row says what it was read from · the Include box puts one back"
                             busy={busy}
                             onAccept={() => void ignoreAllSuggested(sheetIndex, notFurniture)}
+                          />
+                        )}
+                        {/* WHAT A ROW IS before what it is filed as: a heading
+                            accepted leaves the bill, and a finish line accepted
+                            becomes a spec on its item, not a record. */}
+                        {sectionsToAccept.length > 0 && (
+                          <SuggestButton
+                            value={`Accept all ${sectionsToAccept.length} suggested section heading${sectionsToAccept.length === 1 ? "" : "s"}`}
+                            evidence="each row says what it was read from · its Kind puts one back"
+                            busy={busy}
+                            onAccept={() =>
+                              void acceptKinds(
+                                sheetIndex,
+                                sectionsToAccept.map(({ line }) => ({ index: line.index, rowKind: "section" as const, finishForRow: null })),
+                              )
+                            }
+                          />
+                        )}
+                        {finishesToAccept.length > 0 && (
+                          <SuggestButton
+                            value={`Accept all ${finishesToAccept.length} suggested finish line${finishesToAccept.length === 1 ? "" : "s"}`}
+                            evidence="each row names its item and why · its Kind puts one back"
+                            busy={busy}
+                            onAccept={() =>
+                              void acceptKinds(
+                                sheetIndex,
+                                finishesToAccept.map(({ line, guess }) => ({
+                                  index: line.index,
+                                  rowKind: "finish_for" as const,
+                                  finishForRow: guess.kind === "finish_for" ? guess.parent.row : null,
+                                })),
+                              )
+                            }
                           />
                         )}
                         {/* Category before level: the category decides
@@ -968,6 +1034,12 @@ export default function BoqReview({
                             setUnit={setUnit}
                             setLineKind={setLineKind}
                             twinSuggestion={twinSuggestions.get(line.lineNo)}
+                            kindGuess={kindGuesses.get(line.lineNo)}
+                            onAcceptKind={() => {
+                              const guess = kindGuesses.get(line.lineNo);
+                              if (!guess) return;
+                              void setLineKind(sheetIndex, line.index, guess.kind, guess.kind === "finish_for" ? guess.parent.row : null);
+                            }}
                             onAcceptTwin={() => void setTwins(sheetIndex, [line], [])}
                             onClearTwin={() => void setTwins(sheetIndex, [], [line])}
                           />

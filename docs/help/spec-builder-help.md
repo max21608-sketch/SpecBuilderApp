@@ -269,7 +269,9 @@ If Confirm is greyed out, the reason is written beside it (section 6.4).
 The review shows each line "Against the phase" and suggests which existing
 record it is. Check the pairings ("Pair with…", "Make it a new item instead"),
 then confirm. Paired items keep their drawings, specs, picture and answers;
-only the bill's own columns are written over.
+only the bill's own columns are written over, and only the columns the revised
+bill HAS: a designer or an area somebody set on a record stays where the new
+bill has no such column, and the pairing shows no change for it.
 
 **A bill that arrived only as a PDF** shows **"Needs transcribing"**. Open it
 and press "Transcribe it" (charged, a few minutes). Ask the client for the
@@ -494,7 +496,15 @@ confirmed meanwhile. A failed attempt may still have been charged; Max can see.
 Other things users report on a bill, and what they are:
 
 - *"It made a record called Description"* or headings became items → set the
-  row's kind to "Section heading" or untick "Include", before confirming.
+  row's kind to "Section heading" or untick "Include", before confirming. A
+  row with nothing but a heading's text shows a dashed **"Section heading?"**
+  with the reason beside it; press it, or "Accept all N suggested section
+  headings" on the tab. The row's Kind changes it back.
+- *"A fabric (or finish) line became its own item"* → set the row's kind to
+  "Finish for…" and choose its item. A finish code with no quantity under an
+  item shows a dashed **"Finish for <the item>?"** with the reason; press it,
+  or "Accept all N suggested finish lines". It is never offered across a
+  section heading.
 - *"The codes are in the wrong column / every item has the same name"* → the
   columns are mapped wrongly. Columns panel.
 - *"A line says 'check against the PDF'"* → the app could not be sure it read

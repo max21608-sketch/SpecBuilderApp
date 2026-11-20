@@ -49,6 +49,7 @@ import type { FabricLinePlan } from "@/lib/bill-fabric-filing";
 import { effectiveArea } from "@/lib/boq-reconcile";
 import { composeBillNotes } from "@/lib/boq-roles";
 import { nonFurnitureOf } from "@/lib/non-furniture-guess";
+import type { RowKindGuess } from "@/lib/row-kind-guess";
 import { clampText } from "@/lib/shout";
 
 /**
@@ -514,6 +515,8 @@ export default function BillLineRow({
   twinSuggestion,
   onAcceptTwin,
   onClearTwin,
+  kindGuess,
+  onAcceptKind,
 }: {
   line: Line;
   place: BillLinePlace;
@@ -549,6 +552,13 @@ export default function BillLineRow({
   twinSuggestion?: TwinSuggestion;
   onAcceptTwin?: () => void;
   onClearTwin?: () => void;
+  /**
+   * The kind `guessRowKinds` suggests for this line (a section heading, or a
+   * finish line for the item above), if any. Accepting writes the kind
+   * through the Kind control's own write; that control is the way back.
+   */
+  kindGuess?: RowKindGuess;
+  onAcceptKind?: () => void;
 } & Pick<BoqImport, "setLine" | "setPicture" | "setSlot" | "setUnit" | "setLineKind">) {
   const fabric = line.rowKind === "finish_for";
   // The SAME code on a line that is not beside this one.
@@ -799,6 +809,24 @@ export default function BillLineRow({
             )}
             {line.productReference && (
               <span className="text-neutral-500"> · {line.productReference}</span>
+            )}
+            {/* A SECTION HEADING OR A FINISH LINE, ASKED (2026-11-20): a
+                question with its evidence, one click to accept, written
+                through the Kind control's own write — which is also the way
+                back. Nothing is set on its own (`row-kind-guess.ts`). */}
+            {kindGuess && onAcceptKind && run.status === "parsed" && !line.ignored && !line.rowKind && (
+              <span className="mt-1 block" data-testid="kind-suggestion">
+                <SuggestButton
+                  value={
+                    kindGuess.kind === "section"
+                      ? "Section heading"
+                      : `Finish for ${kindGuess.parent.code ?? `row ${kindGuess.parent.row}`}`
+                  }
+                  evidence={kindGuess.reason}
+                  busy={busy}
+                  onAccept={onAcceptKind}
+                />
+              </span>
             )}
             {/* WHAT THE NEW RECORD'S NOTES WILL SAY: the
                 notes column, then every kept column as

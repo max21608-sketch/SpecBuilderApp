@@ -37,7 +37,7 @@ import {
   type BoqDocument,
   type StagedBoqSheet,
 } from "@/lib/boq-import";
-import { effectiveArea, type LinePairing } from "@/lib/boq-reconcile";
+import { effectiveArea, fieldsTheBillStates, type LinePairing } from "@/lib/boq-reconcile";
 // THE ONE FOLD writes ref_value_norm too (audit 5.4 A3): boq-import had a
 // second one that kept dots and dashes, and nothing matched on its output.
 import { normaliseRef } from "@/lib/record-refs";
@@ -691,24 +691,33 @@ async function carryPairedLine(bill: BillConfirm, tally: BillTally, at: SheetWri
     `;
     for (const row of back) tally.recordIds.push(String(row.id));
   }
+  // ONLY WHAT THE SHEET MAPS IS WRITTEN (2026-11-20, R7). A column the
+  // revision's sheet has no role for says nothing about the record, so the
+  // record keeps its own: a designer a person set through the Edit panel on a
+  // bill with no designer column used to be written NULL by the revision. A
+  // mapped column whose cell is blank still writes its blank. The review's
+  // "changed" reads the same set (`fieldsTheBillStates`, `lineDeltas`).
+  const stated = fieldsTheBillStates(sheet.columns as Readonly<Record<string, unknown>> | null | undefined);
+  const says = (field: Parameters<typeof stated.has>[0]) => stated.has(field);
   const changed = await txn`
     update spec_records
     set status = 'active',
         retired_at = null,
         retired_by = null,
-        item_description = ${billItemName(line)},
-        product_reference = ${line.productReference},
-        qty = ${line.qty},
-        designer = ${line.designer},
-        area = ${effectiveArea(line)},
-        boq_category = ${line.boqCategory ?? null},
+        item_description = case when ${says("itemDescription")}::boolean then ${billItemName(line)} else spec_records.item_description end,
+        product_reference = case when ${says("productReference")}::boolean then ${line.productReference} else spec_records.product_reference end,
+        qty = case when ${says("qty")}::boolean then ${line.qty}::integer else spec_records.qty end,
+        designer = case when ${says("designer")}::boolean then ${line.designer} else spec_records.designer end,
+        area = case when ${says("area")}::boolean then ${effectiveArea(line)} else spec_records.area end,
+        boq_category = case when ${says("boqCategory")}::boolean then ${line.boqCategory ?? null} else spec_records.boq_category end,
         -- The bill's own unit, like its quantity: a revision writes it.
         -- NOT the notes column: internal notes are a person's once the
         -- record exists, and a revised bill never writes over them.
-        qty_unit = ${line.qtyUnit ?? null},
+        qty_unit = case when ${says("qtyUnit")}::boolean then ${line.qtyUnit ?? null} else spec_records.qty_unit end,
         -- 0059: the cell as printed where it gave no count, written over
-        -- like the quantity, so a revision that now prints a count clears it.
-        qty_raw = ${qtyRawToWrite(line)},
+        -- like the quantity, so a revision that now prints a count clears it
+        -- — and kept, with the quantity, where the sheet has no quantity column.
+        qty_raw = case when ${says("qty")}::boolean then ${qtyRawToWrite(line)} else spec_records.qty_raw end,
         source_import_id = ${runId},
         source_line_no = ${line.lineNo},
         run_id = ${specRunId},

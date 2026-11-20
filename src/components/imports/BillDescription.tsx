@@ -222,7 +222,10 @@ function figureWhere(figure: PlanFigure): string {
     : figure.printed
       ? `printed as ${figure.printed === "DIA" ? "Dia" : figure.printed}`
       : "no letter printed";
-  return `${at} · ${letter}`;
+  // A LINE THAT PRINTED NO LABEL says how it was read (2026-11-20, R1): its
+  // figures are placed because each carries its own letter, and the reviewer
+  // is told so rather than shown a "Size:" the bill never printed.
+  return `${at} · ${letter}${figure.unlabelledLine ? " · read from an unlabelled size line" : ""}`;
 }
 
 /**

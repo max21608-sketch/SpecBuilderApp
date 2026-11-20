@@ -98,7 +98,8 @@ import { readDimension, sizeLabel, sizeLineRefusal, type DimensionReading } from
 import { kindCode, leadingFinishCode, readFinishes, type FinishReading } from "@/lib/spec-finishes";
 import { calloutKindsNamed, classifyCallout, suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
 import { billFinishLineKind } from "@/lib/bill-finish-kind";
-import { finishLineTargets } from "@/lib/boq-row-kinds";
+import { fabricOwnCode, fabricScheduleCode, finishLineTargets } from "@/lib/boq-row-kinds";
+import { normaliseFinishCode } from "@/lib/finishes";
 import {
   DIMENSION_SLOT_LABELS,
   TBC_TOKENS,
@@ -124,8 +125,13 @@ export type BillStatement = {
   label: string | null;
   /** What follows the label, trimmed; the whole line where there is no label. */
   value: string;
-  /** Where the label came from, when it was not this line's own. */
-  labelFrom: "heading" | "above" | "column" | null;
+  /**
+   * Where the label came from, when it was not this line's own. `unlabelled`
+   * is a line that printed NO label and is read as the overall size because
+   * every figure on it carries its own slot letter (`withUnlabelledSizeLine`);
+   * its `label` is then `UNLABELLED_SIZE_LABEL`, which the bill never printed.
+   */
+  labelFrom: "heading" | "above" | "column" | "unlabelled" | null;
   /**
    * A bill COLUMN of its own this statement is, rather than a line of the
    * description cell: its `label` is the column's heading. Absent on every
@@ -193,8 +199,78 @@ export function lineStatements(
   line: BillColumnCells & { itemDescriptionRaw?: string | null },
   headings: BillColumnHeadings = {},
 ): BillStatement[] | null {
-  const statements = [...(readBillDescription(line.itemDescriptionRaw)?.statements ?? []), ...columnStatements(line, headings)];
+  const statements = withUnlabelledSizeLine([
+    ...(readBillDescription(line.itemDescriptionRaw)?.statements ?? []),
+    ...columnStatements(line, headings),
+  ]);
   return statements.length > 0 ? statements : null;
+}
+
+// ---- an unlabelled size line ---------------------------------------------------
+
+/**
+ * The label an UNLABELLED size line is read with, and written under. The bill
+ * printed none; this is the app's word, as "Note" is for an unlabelled note.
+ */
+export const UNLABELLED_SIZE_LABEL = "Size";
+
+/** What the review and the dump say about such a line, wherever they say how a size was read. */
+export const UNLABELLED_SIZE_WHY = "Read from an unlabelled size line: every figure on it carries its own slot letter.";
+
+/**
+ * AN UNLABELLED LINE THAT IS A SIZE BY ITS OWN LETTERS (2026-11-20, the
+ * invented Harbour House bill, R1).
+ *
+ * A specifier writes the size as a line of its own with no label —
+ * `W2100 x D950 x H820mm, SH 440mm`, `Dia 450 x H550mm` — and every item said
+ * "no size placed", the size kept as a note. Read as the overall size ONLY
+ * where the line itself leaves nothing to guess, through the one reader
+ * (`readDimension`, `normaliseDimensionSlot`) and never a second parser:
+ *
+ *   * EVERY FIGURE CARRIES ITS OWN SLOT LETTER — W, D, H, SH, Dia (or a
+ *     vocabulary alias such as `OAH`). No figure placed by printed order
+ *     (`900 x 1200mm`), no figure with no letter beside a lettered one
+ *     (`700 x 700 x H750mm`), and nothing left over (`L 6400 x D650 …` — `L`
+ *     is not a slot): any of those and the line stays the note it was.
+ *   * AT LEAST TWO FIGURES. `H 450` alone on a line is as likely a clearance
+ *     or a component as the item's height.
+ *   * IT IS THE LINE'S ONLY SIZE LINE. Not beside a labelled size line, a
+ *     Dims column, or a second such line: which of two sizes is the item's is
+ *     the "one metric size line fills the slots" question, and a line with no
+ *     label has no claim to win it. Both stay as they were.
+ *   * THE UNIT IS THE LINE'S OWN, exactly as a labelled line's: printed, or
+ *     none — placed unconverted and bracketed. Never from a figure's size.
+ */
+function unlabelledSizeReading(value: string): DimensionReading | null {
+  const reading = readDimension(UNLABELLED_SIZE_LABEL, value);
+  if (!reading || reading.tbc || reading.qualifier || (reading.unlettered?.length ?? 0) > 0) return null;
+  if (reading.parts.length < 2) return null;
+  if (reading.parts.some((part) => part.slotSuggested || part.figure === null)) return null;
+  return reading;
+}
+
+/**
+ * The statements with their one unlabelled size line, if they have exactly
+ * one and no other size line, read as a size (`labelFrom: "unlabelled"`).
+ * Every other list is returned as it was — the same array, so a line without
+ * one reads byte for byte as before.
+ */
+export function withUnlabelledSizeLine(statements: BillStatement[]): BillStatement[] {
+  if (statements.some((statement) => sizeReadLabel(statement) !== null)) return statements;
+  const candidates = statements
+    .map((statement, index) => ({ statement, index }))
+    .filter(
+      ({ statement }) =>
+        statement.label === null &&
+        statement.labelFrom === null &&
+        !statement.column &&
+        unlabelledSizeReading(statement.value) !== null,
+    );
+  if (candidates.length !== 1) return statements;
+  const at = candidates[0]!.index;
+  return statements.map((statement, index) =>
+    index === at ? { ...statement, label: UNLABELLED_SIZE_LABEL, labelFrom: "unlabelled" as const } : statement,
+  );
 }
 
 /**
@@ -240,7 +316,7 @@ function cellLines(raw: string): string[] {
  * the value. A line whose first colon has nothing in front of it is not
  * labelled.
  */
-function splitLabel(line: string): { label: string; value: string } | null {
+export function splitLabel(line: string): { label: string; value: string } | null {
   const at = line.indexOf(":");
   if (at <= 0) return null;
   const label = line.slice(0, at).trim();
@@ -719,6 +795,12 @@ export type PlanFigure = Omit<LineFigure, "defaultSlot" | "statementIndex"> & {
   overridden: boolean;
   /** Its line's own label, where it has one — the column heading for a Dims cell. */
   label: string | null;
+  /**
+   * Its line printed no label and is read as the size by its own letters
+   * (`withUnlabelledSizeLine`). Present only then, so every other plan is
+   * byte for byte what it was.
+   */
+  unlabelledLine?: true;
 };
 
 /**
@@ -816,6 +898,7 @@ export function planBillDescription(
   {
     fields,
     hasFabricLine,
+    finishLineCodes,
     slotOverrides,
     unitOverride,
     columns,
@@ -823,6 +906,13 @@ export function planBillDescription(
   }: {
     fields: SpecFieldEntry[];
     hasFabricLine: boolean;
+    /**
+     * The codes this item's own FINISH LINES carry (`normaliseFinishCode`),
+     * each with the row of the line carrying it — any kind, from
+     * `planSheetDescriptions`. A description statement naming one of them is
+     * that finish again, and is kept as a note (R6).
+     */
+    finishLineCodes?: ReadonlyMap<string, number> | null;
     /** A reviewer's slot changes, by part key (`StagedBoqLine.slotOverrides`). */
     slotOverrides?: Readonly<Record<string, unknown>> | null;
     /**
@@ -838,7 +928,7 @@ export function planBillDescription(
   const reading = readBillDescription(raw);
   const fromColumns = columns ? columnStatements(columns, columns.headings ?? {}) : [];
   if (!reading && fromColumns.length === 0) return null;
-  const statements = [...(reading?.statements ?? []), ...fromColumns];
+  const statements = withUnlabelledSizeLine([...(reading?.statements ?? []), ...fromColumns]);
   const name = reading?.name ?? singleLineName?.trim() ?? (typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "");
   const cautions: string[] = [];
   let depthWithoutWidth: string | null = null;
@@ -875,13 +965,15 @@ export function planBillDescription(
       }
       if (placed && placed.index === index) {
         const unit = placed.reading.unit ?? unitSetOnReview;
-        const converted = unitSetOnReview
+        const unlabelled = statement.labelFrom === "unlabelled" ? UNLABELLED_SIZE_WHY : null;
+        const unitWhy = unitSetOnReview
           ? `Unit set on review: the bill prints none, and the reviewer said ${unitSetOnReview}.`
           : placed.unitless
             ? "No unit is printed on this size or its label, so it is kept as printed and not converted — set the unit beside the size, or correct it on the record's Specs tab."
             : placed.metric
               ? null
               : "Converted from inches, exactly: the bill gives no metric size.";
+        const converted = [unlabelled, unitWhy].filter(Boolean).join(" ") || null;
         for (const part of placedParts(placed)) {
           const key = part.key;
           const slot = resolved.effective.get(key) ?? part.printed ?? "note";
@@ -1068,6 +1160,23 @@ export function planBillDescription(
         );
         continue;
       }
+      // ONE CODE, ONE FINISH (2026-11-20, R6). The item's own finish line
+      // carries this code: it is written as the finish, in the field of its
+      // kind, and filed in the library under the code. Writing this statement
+      // too put one finish in two BWS fields — `Legs: MTL-01` in Main metal
+      // finish beside the line's "Finish: Brushed brass" in Metal Finish 2,
+      // the second linked to nothing. The fabric rule above, for every kind and
+      // wherever the line is not read as a fabric.
+      const lineRow = finish.codeRaw ? finishLineCodes?.get(normaliseFinishCode(finish.codeRaw)) : undefined;
+      if (lineRow !== undefined) {
+        attributes.push(
+          note(
+            piece,
+            `Row ${lineRow} is this item's own finish line for ${finish.codeRaw}, which is written as the finish: this names the same code, so it is kept as a note and fills no field — one finish, one field.`,
+          ),
+        );
+        continue;
+      }
       let specFieldId: string | null = null;
       let why: string | null = finish.noField;
       if (!finish.noField) {
@@ -1147,6 +1256,7 @@ export function planBillDescription(
       slot: resolved.effective.get(figure.key) ?? "note",
       overridden: resolved.applied.has(figure.key),
       label: statements[figure.statementIndex]?.label ?? null,
+      ...(statements[figure.statementIndex]?.labelFrom === "unlabelled" ? { unlabelledLine: true as const } : {}),
     })),
   };
 }
@@ -1234,9 +1344,11 @@ function planColumnFinish(
     );
   }
   // One kind by its words, or — where the words name none — by the cell's own
-  // leading code, read exactly as a drawing's callout code is.
+  // leading code, read exactly as a drawing's callout code is. Through
+  // `classifyCallout` either way, so a PART word beside a code naming another
+  // kind (`MTL-02 FRAME`) reads as the code there and here alike (R4).
   const callout = classifyCallout({ labelRaw: null, valueRaw: value, materialCodeRaw: code ? kindCode(code) : null });
-  const kind = kinds[0] ?? (callout.kind === "hardware" ? null : callout.kind);
+  const kind = callout.kind === "hardware" ? (kinds[0] ?? null) : (callout.kind ?? kinds[0] ?? null);
   if (!kind) {
     return note(statement, "Names no fabric, timber or metal this app recognises, so it is kept as a note and fills no BWS field.");
   }
@@ -1281,6 +1393,8 @@ type PlanLine = {
   itemDescriptionRaw?: string | null;
   dimensionsRaw?: string | null;
   finishRaw?: string | null;
+  /** The bill's own finish-code column (COM CODE), where the sheet has it. */
+  finishCode?: string | null;
   ignored?: boolean;
   rowKind?: string;
   rowKindSource?: string;
@@ -1314,12 +1428,27 @@ export function planSheetDescriptions(
       .filter((line) => billFinishLineKind(line).kind === "fabric")
       .flatMap((line) => finishLineTargets(targetLines, line).rows),
   );
+  // THE CODES EACH ITEM'S FINISH LINES CARRY, of any kind (R6): the line's own
+  // code (`fabricOwnCode`, the item's code taken off) and its schedule code.
+  const finishCodesByRow = new Map<number, Map<string, number>>();
+  for (const line of targetLines) {
+    if (line.rowKind !== "finish_for" || line.ignored || !line.finishFor) continue;
+    const own = fabricOwnCode({ code: line.code, finishFor: { code: line.finishFor.code ?? null } });
+    const codes = [own, fabricScheduleCode(line)].flatMap((code) => (code ? [normaliseFinishCode(code)] : []));
+    if (codes.length === 0) continue;
+    for (const row of finishLineTargets(targetLines, line).rows) {
+      const byCode = finishCodesByRow.get(row) ?? new Map<string, number>();
+      for (const code of codes) if (!byCode.has(code)) byCode.set(code, line.lineNo);
+      finishCodesByRow.set(row, byCode);
+    }
+  }
   const plans = new Map<number, BillDescriptionPlan>();
   for (const line of lines) {
     if (line.rowKind === "finish_for") continue;
     const plan = planBillDescription(line.itemDescriptionRaw, {
       fields,
       hasFabricLine: withFabric.has(line.lineNo),
+      finishLineCodes: finishCodesByRow.get(line.lineNo) ?? null,
       slotOverrides: line.slotOverrides ?? null,
       unitOverride: line.unitOverride ?? null,
       columns: { dimensionsRaw: line.dimensionsRaw, finishRaw: line.finishRaw, headings },

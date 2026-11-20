@@ -5,6 +5,7 @@ import {
   lineDeltas,
   effectiveArea,
   configurationRange,
+  fieldsTheBillStates,
   type ExistingRecord,
   type RevisedLine,
 } from "@/lib/boq-reconcile";
@@ -214,5 +215,40 @@ describe("effectiveArea", () => {
     expect(effectiveArea({ area: null, boqCategory: "Seating" })).toBe("Seating");
     expect(effectiveArea({ area: "Guestrooms", boqCategory: "Seating" })).toBe("Guestrooms");
     expect(lineDeltas(line({ area: null, boqCategory: "Seating" }), record({ area: "Seating" }))).toEqual([]);
+  });
+});
+
+// R7 (2026-11-20). A person set a designer through the record's Edit panel —
+// the only way to route a chase on a bill with no designer column — and a
+// revision with still no designer column showed "Designer: NPI → —" and wrote
+// NULL. A role the sheet does not map is the bill saying nothing.
+describe("a revised sheet says nothing about a column it does not map", () => {
+  const MAPPED_WITHOUT_DESIGNER = {
+    code: { index: 0, heading: "Ref" },
+    itemDescription: { index: 1, heading: "Description" },
+    qty: { index: 2, heading: "Qty" },
+    area: { index: 3, heading: "Location" },
+  };
+
+  it("reads which record columns a sheet states from its column map", () => {
+    expect([...fieldsTheBillStates(MAPPED_WITHOUT_DESIGNER)].sort()).toEqual(["area", "itemDescription", "qty"]);
+    // The area is composed from three roles: any one of them states it.
+    expect(fieldsTheBillStates({ boqCategory: { index: 1, heading: "Package" } }).has("area")).toBe(true);
+    // A sheet staged before its map was recorded is read as stating everything, as before.
+    expect(fieldsTheBillStates(undefined).size).toBe(7);
+  });
+
+  it("shows no change for an unmapped column, and still shows one for a mapped column", () => {
+    const stated = fieldsTheBillStates(MAPPED_WITHOUT_DESIGNER);
+    const result = reconcileSheet([line({ designer: null, qty: 8, boqCategory: null })], [record({ designer: "NPI" })], [], stated);
+    expect(result.lines[0]!.deltas).toEqual([{ field: "qty", label: "Quantity", was: "6", now: "8" }]);
+    // Without the map, the old reading: an empty designer is a change.
+    expect(lineDeltas(line({ designer: null }), record({ designer: "NPI" })).map((delta) => delta.field)).toEqual(["designer"]);
+  });
+
+  it("counts a line changed only by an unmapped column as unchanged", () => {
+    const stated = fieldsTheBillStates(MAPPED_WITHOUT_DESIGNER);
+    const result = reconcileSheet([line({ designer: null, boqCategory: null })], [record({ designer: "NPI" })], [], stated);
+    expect(result.counts.changed).toBe(0);
   });
 });

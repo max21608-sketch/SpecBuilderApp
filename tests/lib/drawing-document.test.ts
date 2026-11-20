@@ -293,6 +293,48 @@ describe("classifyGroup", () => {
   });
 });
 
+// R4 (2026-11-20). An invented specifier's bar stool says `Frame: MTL-02`, and
+// `frame` is in the frozen timber list as a PART word, so the client's metal
+// was filed in Main timber finish. Codes and words here are invented.
+describe("classifyCallout — a part word beside the client's own code", () => {
+  it("lets the code decide where the only words that fired are part words naming a different kind", () => {
+    const frame = classifyCallout({ labelRaw: "Frame", valueRaw: "MTL-02", materialCodeRaw: "MTL-02" });
+    expect(frame.kind).toBe("metal");
+    expect(frame.group).toBe("finish");
+    expect(frame.guessed).toBe(false);
+    expect(frame.reason).toBe("the code MTL-02 says so — “frame” names the part, not what it is made of");
+    expect(classifyCallout({ labelRaw: "LEGS", valueRaw: null, materialCodeRaw: "ZZ-MTL-01" }).kind).toBe("metal");
+    expect(classifyCallout({ labelRaw: "Seat frame", valueRaw: "as specified", materialCodeRaw: "UPH-04" }).kind).toBe("fabric");
+  });
+
+  it("keeps a MATERIAL word ahead of the code, and a timber code changes nothing", () => {
+    // `oak`, `wood`, `bronze`, `velvet`: the words name what it is made of.
+    expect(classifyCallout({ labelRaw: "Frame", valueRaw: "solid oak", materialCodeRaw: "MTL-02" }).kind).toBe("timber");
+    expect(classifyCallout({ labelRaw: "FEET", valueRaw: "Dark tinted wood", materialCodeRaw: "MT-01" }).kind).toBe("timber");
+    expect(classifyCallout({ labelRaw: "Frame", valueRaw: "bronze, satin", materialCodeRaw: "WD-02" }).kind).toBe("metal");
+    expect(classifyCallout({ labelRaw: "Frame", valueRaw: "velvet wrapped", materialCodeRaw: "MTL-02" }).kind).toBe("fabric");
+    const timber = classifyCallout({ labelRaw: "Frame", valueRaw: "WD-01", materialCodeRaw: "WD-01" });
+    expect(timber).toMatchObject({ kind: "timber", reason: null });
+  });
+
+  it("reads a part word with no code, or a code that says nothing, as it always did", () => {
+    expect(classifyCallout({ labelRaw: "SOFA FEET", valueRaw: "TBC", materialCodeRaw: null }).kind).toBe("timber");
+    expect(classifyCallout({ labelRaw: "Frame", valueRaw: "CH-01.2", materialCodeRaw: "CH-01.2" }).kind).toBe("timber");
+    // A part word beside hardware is not ONLY part words: the words decide.
+    expect(classifyCallout({ labelRaw: "Frame hinge", valueRaw: null, materialCodeRaw: "MTL-02" }).kind).toBe("timber");
+  });
+
+  it("is the reading the bill's description and its finish column file by", () => {
+    const fields = [
+      { id: "f-tim1", jsonId: 4, name: "Main timber finish" },
+      { id: "f-mtl1", jsonId: 5, name: "Main metal finish" },
+    ];
+    expect(suggestSpecField({ attrGroup: "finish", labelRaw: "Frame", valueRaw: "MTL-02", materialCodeRaw: "MTL-02" }, fields, new Set())).toBe(
+      "f-mtl1",
+    );
+  });
+});
+
 describe("re-reading a callout on an already-staged run", () => {
   // The shape a pack staged before the word lists were widened holds: group
   // `other`, no field, nobody has touched it.

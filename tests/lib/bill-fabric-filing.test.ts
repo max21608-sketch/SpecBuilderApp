@@ -6,10 +6,12 @@
 // brackets, with a picture anchored on the row.
 import { describe, expect, it } from "vitest";
 import {
+  billFinishPlanInputs,
   decideFabricFiling,
   fabricLineValue,
   fabricLineWrite,
   fabricMaterialCode,
+  finishLineStatement,
   planBillFabrics,
   planBillFinishWrites,
   planFinishSwatches,
@@ -18,6 +20,7 @@ import {
 } from "@/lib/bill-fabric-filing";
 import type { BillRowImage } from "@/lib/bill-row-image";
 import type { Finish } from "@/lib/finishes";
+import { planSheetDescriptions } from "@/lib/bill-description";
 
 const finish = (over: Partial<Finish> = {}): Finish => ({
   id: "fin-1",
@@ -435,7 +438,8 @@ describe("fabricLineWrite — what the confirm stores and the review predicts", 
       value: "Fabric @ Armchair (Option 1)",
       state: "tbc",
     });
-    expect(fabricLineWrite(line(null, "Fabric: N/A"), "Armchair")).toEqual({ value: "Fabric: N/A", state: "tbc" });
+    // Its finish label is read off (R8, 2026-11-20): the label is not the finish.
+    expect(fabricLineWrite(line(null, "Fabric: N/A"), "Armchair")).toEqual({ value: "N/A", state: "tbc" });
     expect(fabricLineWrite(line(null, "N/A"), "Armchair")).toEqual({ value: "N/A", state: "tbc" });
   });
 
@@ -695,5 +699,166 @@ describe("planBillFinishWrites — the one plan the review and the confirm share
     const plan = run(lines, { heldFabric });
     const review = planBillFabrics({ sheets: [{ sheetName: "Bill", ignored: false, lines }], rowImages: null, library: [], heldSwatches: new Set(), prefix: "ZZA", descriptionCodes: () => [], heldFabric, heldSlots: () => [] });
     expect(review.get("0:1")?.refusal).toBe(plan.refusals[0]!.sentence);
+  });
+});
+
+// R6 (2026-11-20). An invented bill's sofa says `Legs: ZZ-MTL-01 brushed brass`
+// in its description, and the line `ZZ-MTL-01 / Finish: Example brass,
+// lacquered` under it was set to "Finish for" the sofa. The confirm wrote both:
+// Main metal finish from the description and Metal Finish 2 from the line, the
+// second linked to nothing. One code on one record is ONE finish.
+describe("one code in a description and on a finish line is one finish", () => {
+  const FIELDS = [
+    { id: "f-com1", jsonId: 1, name: "COM 1" },
+    { id: "f-com2", jsonId: 2, name: "COM 2" },
+    { id: "f-tim1", jsonId: 4, name: "Main timber finish" },
+    { id: "f-tim2", jsonId: 31, name: "Timber Finish 2" },
+    { id: "f-mtl1", jsonId: 5, name: "Main metal finish" },
+    { id: "f-mtl2", jsonId: 35, name: "Metal Finish 2" },
+  ];
+  type Line = Parameters<typeof planSheetDescriptions>[0][number] & Parameters<typeof planBillFinishWrites>[0]["sheets"][number]["lines"][number];
+  const sofa: Line = {
+    index: 0,
+    lineNo: 7,
+    code: "ZZ-SF-01",
+    itemDescription: "Three seat sofa",
+    itemDescriptionRaw: "Three seat sofa\nLegs: ZZ-MTL-01 brushed brass\nFrame: ZZ-WD-01\nTop: ZZ-STN-01 honed",
+    ignored: false,
+    rowKind: "item",
+  };
+  const line = (index: number, lineNo: number, code: string, words: string): Line => ({
+    index,
+    lineNo,
+    code,
+    itemDescription: words,
+    ignored: false,
+    rowKind: "finish_for",
+    finishFor: { row: 7, code: "ZZ-SF-01" },
+  });
+  const plan = (lines: Line[], library: Finish[] = []) => {
+    const descriptions = planSheetDescriptions(lines, FIELDS);
+    const finishPlan = planBillFinishWrites({
+      sheets: [{ sheetName: "Guest Rooms", ignored: false, lines }],
+      library,
+      prefix: "ZZA",
+      heldFabric: () => [],
+      ...billFinishPlanInputs({
+        sheets: [{ lines }],
+        descriptions: [new Map([...descriptions].map(([index, p]) => [index, { ...p, held: false }]))],
+        carriedFieldIds: () => [],
+        jsonIdOfField: new Map(FIELDS.map((field) => [field.id, field.jsonId])),
+      }),
+    });
+    return { description: descriptions.get(0)!, finishPlan };
+  };
+
+  it("keeps the description's statement as a note and writes the line's finish once, in the first field of its kind", () => {
+    const { description, finishPlan } = plan([sofa, line(1, 10, "ZZ-MTL-01", "Finish: Example brass, lacquered")]);
+    const legs = description.attributes.find((attribute) => attribute.label === "Legs")!;
+    expect(legs).toMatchObject({ attrGroup: "note", specFieldId: null, materialCode: null });
+    expect(legs.why).toMatch(/^Row 10 is this item's own finish line for ZZ-MTL-01/);
+    const write = finishPlan.lines.get("0:1")!;
+    expect(write.kind).toBe("metal");
+    expect(write.onRows.map((entry) => entry.placement?.jsonId)).toEqual([5]);
+    // Nothing else files the code first, so the line's own words file it — and it is linked.
+    expect(write.filing).toMatchObject({ outcome: "new", code: "ZZ-MTL-01" });
+    expect(write.finishKey).not.toBeNull();
+  });
+
+  it("links the line to the library row that exists", () => {
+    const held = finish({ id: "fin-mtl", code: "ZZ-MTL-01", codeNorm: "ZZ-MTL-01", description: null });
+    const { finishPlan } = plan([sofa, line(1, 10, "ZZ-MTL-01", "Finish: Example brass, lacquered")], [held]);
+    expect(finishPlan.lines.get("0:1")).toMatchObject({ filing: { outcome: "matched" }, finishKey: "fin-mtl" });
+  });
+
+  it("holds for a timber and a code no field holds, and leaves a statement with another code alone", () => {
+    const { description, finishPlan } = plan([
+      sofa,
+      line(1, 10, "ZZ-WD-01", "Finish: Example oak, oiled"),
+      line(2, 11, "ZZ-STN-01", "Finish: Example stone, honed"),
+    ]);
+    const byLabel = new Map(description.attributes.map((attribute) => [attribute.label, attribute]));
+    expect(byLabel.get("Frame")?.attrGroup).toBe("note");
+    expect(byLabel.get("Top")?.attrGroup).toBe("note");
+    // The metal the description names and no line carries is written as before.
+    expect(byLabel.get("Legs")).toMatchObject({ attrGroup: "finish", specFieldName: "Main metal finish", materialCode: "ZZ-MTL-01" });
+    expect(finishPlan.lines.get("0:1")!.onRows.map((entry) => entry.placement?.jsonId)).toEqual([4]);
+  });
+
+  it("is not read from a line nobody has made a finish line, or one left out", () => {
+    const loose = { ...line(1, 10, "ZZ-MTL-01", "Finish: Example brass"), rowKind: "item" as const, finishFor: null };
+    expect(plan([sofa, loose]).description.attributes.find((attribute) => attribute.label === "Legs")?.attrGroup).toBe("finish");
+    const ignored = { ...line(1, 10, "ZZ-MTL-01", "Finish: Example brass"), ignored: true };
+    expect(plan([sofa, ignored]).description.attributes.find((attribute) => attribute.label === "Legs")?.attrGroup).toBe("finish");
+  });
+});
+
+// R8 (2026-11-20). After R6 the invented sofa's one metal finish was the line
+// `ZZ-MTL-01 / Finish: Example brass, lacquered`, stored with the word
+// "Finish:" — in the BWS cell, and a CONFLICT against a library row describing
+// the code as "Example brass, lacquered".
+describe("a finish line's own label is read off its value", () => {
+  type Line = Parameters<typeof planBillFinishWrites>[0]["sheets"][number]["lines"][number];
+  const sofa: Line = { index: 0, lineNo: 7, code: "ZZ-SF-01", itemDescription: "Three seat sofa", ignored: false, rowKind: "item" };
+  const metal = (words: string): Line => ({
+    index: 1,
+    lineNo: 10,
+    code: "ZZ-MTL-01",
+    itemDescription: words,
+    ignored: false,
+    rowKind: "finish_for",
+    finishFor: { row: 7, code: "ZZ-SF-01" },
+  });
+  const run = (lines: Line[], over: Partial<Parameters<typeof planBillFinishWrites>[0]> = {}) =>
+    planBillFinishWrites({
+      sheets: [{ sheetName: "Guest Rooms", ignored: false, lines }],
+      library: [],
+      prefix: "ZZA",
+      descriptionCodes: () => [],
+      heldFabric: () => [],
+      heldSlots: () => [],
+      ...over,
+    });
+
+  it("reads a leading finish label through the description reader's own split, and nothing else", () => {
+    expect(finishLineStatement("Finish: Example brass, lacquered")).toEqual({ label: "Finish", value: "Example brass, lacquered" });
+    expect(finishLineStatement("LEATHER: Example hide, tan").value).toBe("Example hide, tan");
+    // Not one of the finish words, a label with nothing after it, or no label: unchanged.
+    for (const words of ["Fabric @ Stool Collection & Pattern Ref: Example", "Finish:", "Example brass", "Colour: Ivory"]) {
+      expect(finishLineStatement(words), words).toEqual({ label: null, value: words });
+    }
+  });
+
+  it("writes the finish without its label, links it where the library's words agree, and says so on the review", () => {
+    const library = [finish({ id: "fin-mtl", code: "ZZ-MTL-01", codeNorm: "ZZ-MTL-01", description: "Example brass, lacquered", state: "confirmed" })];
+    const plan = run([sofa, metal("Finish: Example brass, lacquered")], { library });
+    const write = plan.lines.get("0:1")!;
+    expect(write.written).toEqual({ value: "Example brass, lacquered", state: "confirmed" });
+    expect(write).toMatchObject({ kind: "metal", filing: { outcome: "matched" }, finishKey: "fin-mtl" });
+    const review = planBillFabrics({
+      sheets: [{ sheetName: "Guest Rooms", ignored: false, lines: [sofa, metal("Finish: Example brass, lacquered")] }],
+      rowImages: null,
+      library,
+      heldSwatches: new Set(),
+      prefix: "ZZA",
+      descriptionCodes: () => [],
+      heldFabric: () => [],
+      heldSlots: () => [],
+    });
+    expect(review.get("0:1")?.writes).toEqual({ value: "Example brass, lacquered", qualifier: null });
+  });
+
+  it("still reads the line's kind from its label", () => {
+    const cloth = { ...metal("Fabric: Example boucle, ivory"), code: null };
+    expect(run([sofa, cloth]).lines.get("0:1")).toMatchObject({ kind: "fabric", written: { value: "Example boucle, ivory" } });
+  });
+
+  it("does not refuse a revision of a record that holds the line as a confirm before this stored it", () => {
+    const carried = { ...sofa, replaces: { recordId: "rec-1", recordVersion: 3 } };
+    const plan = run([carried, metal("Finish: Example brass, lacquered")], {
+      heldFabric: (recordId, kind) => (recordId === "rec-1" && kind === "metal" ? ["Finish: Example brass, lacquered"] : []),
+    });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.lines.get("0:1")?.onRows.map((entry) => entry.held)).toEqual([true]);
   });
 });
