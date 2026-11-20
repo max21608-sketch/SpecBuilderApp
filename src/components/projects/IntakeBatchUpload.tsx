@@ -175,6 +175,13 @@ type Queued = {
    */
   duplicate: boolean;
   /**
+   * THE RUN AN EMAIL'S REGISTRATION MADE, for the email's own review page
+   * (F1, 2026-11-20). An email joins no pack — `assignMessage` files its read
+   * with `batch_id` null — so a press that uploaded only emails has no pack to
+   * go to, and goes here instead, where the Documents tab's "Emails" row links.
+   */
+  emailRunId: string | null;
+  /**
    * A PDF long enough that one read may not finish (`WARN_PDF_PAGES`). The
    * upload still proceeds; this is said on the row, in amber, and is not
    * `note`, which the tally reads as "waiting for a slot".
@@ -322,6 +329,7 @@ export default function IntakeBatchUpload({
         alternativeEvidence: null,
         note: null,
         duplicate: false,
+        emailRunId: null,
         warning: null,
         tooLarge: false,
         failure: null,
@@ -405,13 +413,21 @@ export default function IntakeBatchUpload({
    * here, a press that registers nothing creates nothing: not an upload that
    * fails to store, and not a file held for a kind. Returns null, with the
    * banner set, when the pack itself could not be made.
+   *
+   * AND NOT AN EMAIL (F1, 2026-11-20). An email's read is filed with no pack
+   * (`assignMessage`, `batch_id` null: it counts against the project's
+   * batch-less slots), so a pack made for one held nothing, the batches list
+   * hid it, and the redirect to it said "That pack is not on this project".
+   * The press never calls this for an email, and the label counts only the
+   * files that can be in the pack.
    */
   async function ensureBatch(): Promise<string | null> {
     if (batchId.current) return batchId.current;
+    const files = queue.filter((item) => kindOf(item) !== "email").length;
     const batch = await apiFetch<{ batch: { id: string } }>(`/api/projects/${projectId}/batches`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ label: `${queue.length} document${queue.length === 1 ? "" : "s"}` }),
+      body: JSON.stringify({ label: `${files} document${files === 1 ? "" : "s"}` }),
     });
     if (!batch.ok) {
       setError(batch.error);
@@ -606,8 +622,11 @@ export default function IntakeBatchUpload({
           continue;
         }
 
-        const id = await ensureBatch();
-        if (!id) return;
+        // AN EMAIL IS REGISTERED WITH NO PACK (F1): its read is filed with none
+        // whatever is sent, so asking for one only made an empty pack.
+        const email = entry.documentKind === "email";
+        const id = email ? null : await ensureBatch();
+        if (!email && !id) return;
 
         update(item.key, { status: "registering", failure: null, held: null });
         const res = await apiFetch<{
@@ -621,7 +640,7 @@ export default function IntakeBatchUpload({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             projectId,
-            batchId: id,
+            ...(id ? { batchId: id } : {}),
             importType: entry.importType,
             documentKind: entry.documentKind,
             pathname,
@@ -665,6 +684,7 @@ export default function IntakeBatchUpload({
           progress: 100,
           error: autoRead && !autoRead.dispatched && !waiting ? (autoRead.error ?? "Stored, but not queued for reading.") : null,
           note: waiting ? (autoRead.note ?? null) : null,
+          emailRunId: email ? (res.data.importId ?? null) : null,
         });
       }
 
@@ -677,14 +697,22 @@ export default function IntakeBatchUpload({
       // files that had each failed with a reason vanished together and read as
       // "one mass fail". A press that leaves anything held only asks the
       // parent to refresh.
+      //
+      // WITH NO PACK, AN EMAIL'S OWN REVIEW (F1). A press of emails only made
+      // no pack: one email goes to its review page, where the Documents tab's
+      // "Emails" row links; several close the panel over that Documents card,
+      // whose "Emails" group lists them. With a pack, the pack, as always —
+      // the emails beside it are under "Emails" too.
       setQueue((current) => {
         const id = batchId.current;
         const waiting = current.some((row) => row.status === "needs-kind" || row.status === "failed" || row.duplicate);
+        const emails = current.filter((row) => row.emailRunId);
         if (waiting) {
           queueMicrotask(() => onRegistered?.());
         } else {
           queueMicrotask(() => onUploaded?.());
           if (id) window.location.href = `/dashboard/projects/${projectId}/intake/${id}`;
+          else if (emails.length === 1) window.location.href = `/dashboard/imports/${emails[0]!.emailRunId}`;
         }
         return current;
       });
