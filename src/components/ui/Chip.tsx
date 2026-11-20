@@ -14,6 +14,7 @@ export default function Chip({
   tone = "plain",
   mono = false,
   dot = false,
+  wrap = false,
   className = "",
   children,
   ...rest
@@ -22,13 +23,20 @@ export default function Chip({
   mono?: boolean;
   /** A solid dot before the text, for "working" or a tier. */
   dot?: boolean;
+  /**
+   * Let a LONG label wrap inside its box instead of widening its column: one
+   * line where it fits, more where it does not (prod-ready I1, 2026-11-20 —
+   * the Inbox's routing reason pushed its table 447px past its box at 1440).
+   * Off by default: a code or a state must never break across lines.
+   */
+  wrap?: boolean;
   /** Layout only. */
   className?: string;
   children: React.ReactNode;
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded border px-2 py-0.5 text-[11.5px] leading-5 ${TONE[tone].chip} ${
+      className={`inline-flex items-center gap-1.5 ${wrap ? "max-w-full whitespace-normal break-words" : "whitespace-nowrap"} rounded border px-2 py-0.5 text-[11.5px] leading-5 ${TONE[tone].chip} ${
         mono ? "font-mono" : ""
       } ${className}`.trim()}
       {...rest}

@@ -54,6 +54,15 @@ column's minimum, so a code still never splits at its hyphens in a cell. In a
 table, a ref is a no-wrap run per WORD (`ClientRefs`) and long text is cut
 with `clampText`, never left to push a column wide.
 
+**A chip that carries a SENTENCE wraps** (prod-ready I1, 2026-11-20). The
+Inbox's routing chip — "assigned by hand · Nothing in this message names a
+project: …" — was a `Chip`, which never wraps, so at 1440 the "Read and
+waiting for you" table ran 447px past its box and the page 256px past the
+window. `Chip` takes `wrap` (one line where it fits, more where it does not,
+never wider than its box); it is off by default because a code or a state
+must never break across lines, and on for a chip whose text is somebody's
+sentence.
+
 ### The UI must survive a response that is not JSON
 
 Client code must not assume every API response is JSON. Check the status and
