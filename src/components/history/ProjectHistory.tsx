@@ -46,8 +46,13 @@ import { formatDay } from "@/lib/format-day";
 
 type Payload = { changes: ProjectChange[] };
 
+/**
+ * An instant, never a `date` column (those are `formatDay`'s). en-GB, as the
+ * inbox and the Documents tab print one: it was the browser's own locale, and
+ * History read "Nov 20, 12:34 PM" beside "20/11/2026, 12:15" (2026-11-20).
+ */
 function when(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
+  return new Date(iso).toLocaleString("en-GB", {
     day: "numeric",
     month: "short",
     hour: "2-digit",
