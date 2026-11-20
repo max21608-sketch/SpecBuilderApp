@@ -152,6 +152,13 @@ type Queued = {
    */
   held: string | null;
   /**
+   * THE MODEL'S READING, where it CONTRADICTS the name's (K1, 2026-11-20): the
+   * box keeps the name's suggestion and this is offered beside it, both one
+   * click, neither filed. Empty where there is no disagreement.
+   */
+  alternative: string;
+  alternativeEvidence: string | null;
+  /**
    * Stored and registered, and its read is queued behind the pack's in-flight
    * cap. NOT `error`: this is the ordinary outcome for the fourth document
    * onwards and it needs nobody, so it is said in slate beside the file rather
@@ -302,6 +309,8 @@ export default function IntakeBatchUpload({
         error: unreadableUploadAdvice(file.name),
         errorDetail: null,
         held: null,
+        alternative: "",
+        alternativeEvidence: null,
         note: null,
         warning: null,
         tooLarge: false,
@@ -475,6 +484,8 @@ export default function IntakeBatchUpload({
             pdfBill?: { lines: number; pages: number; transcribe?: true; reason?: string } | null;
             /** Held: the model filed it as something else, and its text reads as a bill. */
             held?: string | null;
+            /** Held because the NAME says another kind: what the model read it as (K1). */
+            modelDecision?: { importType: string; documentKind: string | null } | null;
             evidence?: string;
             titleText?: string | null;
             charged?: boolean;
@@ -522,6 +533,18 @@ export default function IntakeBatchUpload({
             sentToModel: item.sentToModel || asked.data.charged !== false,
             largeDocument: asked.data.largeDocument === true,
           });
+          // THE NAME AND THE MODEL DISAGREE (K1): held, with the name's
+          // suggestion kept in the box and the model's offered beside it. A
+          // person chooses; nothing is registered or read until they do.
+          if (asked.data.held && asked.data.modelDecision) {
+            update(item.key, {
+              status: "needs-kind",
+              held: asked.data.held,
+              alternative: choiceFor(asked.data.modelDecision),
+              alternativeEvidence: asked.data.evidence ?? null,
+            });
+            continue;
+          }
           if (read) {
             // THE DOCUMENT BEATS THE NAME, and the evidence moves with it: a
             // suggestion and the sentence under it are one reading, or the row
@@ -951,6 +974,17 @@ export default function IntakeBatchUpload({
                   // WHAT IT WAS READ FROM, so a filed answer can still be
                   // checked against the file rather than taken on trust.
                   item.evidence && <p className="w-full text-xs text-neutral-500">{item.evidence}</p>
+                )}
+                {/* THE MODEL'S READING, where it contradicts the name's (K1):
+                    one click, as the name's is, and neither filed. */}
+                {item.alternative && !item.choice && item.status === "needs-kind" && (
+                  <SuggestButton
+                    className="w-full"
+                    value={shortLabel(item.alternative)}
+                    evidence={item.alternativeEvidence ? `The model read: ${item.alternativeEvidence}` : "The model's reading"}
+                    onAccept={() => update(item.key, { choice: item.alternative })}
+                    disabled={busy}
+                  />
                 )}
                 {item.error && <p className="w-full text-xs text-red-700">{item.error}</p>}
                 {item.error && item.errorDetail && (

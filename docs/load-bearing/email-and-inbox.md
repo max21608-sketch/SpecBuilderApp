@@ -216,6 +216,19 @@ each file, asks what it is, fills the box in and reads it.
   schedule must come back unclear, because the cost is not symmetric.
 - **Every answer is flagged with its evidence**, and a person's choice always
   beats the suggestion.
+- **A model answer the NAME contradicts settles nothing either** (prod-ready
+  K1, 2026-11-20). A clean bill named "… Bill of Quantities.xlsx" (no price
+  columns, its one sheet called "FF&E Schedule") showed "Bill of quantities"
+  from its name; the press asked the model, which said FF&E schedule, and the
+  file was filed and READ as one — 153k output tokens, no records, nothing
+  asked. `nameModelDisagreement` (`document-name-guess.ts`) compares the two
+  on the app's FIELDS (so specification sheets read as shop drawings agree);
+  where they differ the route answers `decision: null`, `held` ("The name says
+  Bill of quantities; the model reads an FF&E schedule — which is it?") and
+  `modelDecision`, and the row keeps the name's suggestion in the box and
+  offers the model's beside it, both one click. Nothing is registered or read
+  until a person chooses; agreement, or either abstaining, is unchanged. The
+  classify answer itself is still stored nowhere.
 - **The kind still arrives DECLARED** at `/api/imports`, which is untouched. The
   classify route creates no run, opens no attempt and stages nothing.
 - **A scanned, image-only PDF is refused at classify time** (`91360b6`,

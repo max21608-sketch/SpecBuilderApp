@@ -229,7 +229,10 @@ Project → "Documents" tab → "Add documents" → drop the files or "Choose fi
   this?" dropdown on each: Preamble, Bill of quantities, Shop drawings, FF&E
   schedule, Specification bible, Finishes schedule, Fabric schedule, Email,
   Other specification document. Files it cannot identify say "Not identified"
-  — choose the kind by hand.
+  — choose the kind by hand. Where the file's name and its contents disagree
+  ("The name says Bill of quantities; the model reads an FF&E schedule —
+  which is it?"), both are offered as buttons on its row: press the right one,
+  then press again. Nothing is read until you do.
 - **Nothing is read and nothing is charged until you press "Start intake
   (N)".** A bill from a spreadsheet is read by code and is free. Every other
   kind is a charged read.
