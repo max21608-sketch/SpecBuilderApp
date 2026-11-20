@@ -211,7 +211,7 @@ Projects → "Add a project" → BWS number (e.g. `P17231`), name, client → "A
 project". "Project P… already exists." means it is already there: search the
 list, including the "Archived" and "All" tabs.
 
-Then open it and press "Edit" on the Project card to set the client, the shared
+The app then opens the new project, on "Upload the pack". Press "Edit" on the Project card to set the client, the shared
 inbox, the drawing units and the three dates (order date, **complete
 specifications agreed by**, delivery date). Until "complete specifications
 agreed by" has a date the app shows "No programme recorded" and cannot flag
