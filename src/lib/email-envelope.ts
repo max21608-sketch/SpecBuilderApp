@@ -108,7 +108,32 @@ function isoDate(value: unknown): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-/** Parses a stored `.eml`. Never throws on a malformed part — a half-read message is still worth reviewing. */
+/**
+ * One attachment's bytes, in whichever of the three shapes postal-mime hands
+ * them over: `ArrayBuffer | Uint8Array | string`.
+ *
+ * A part postal-mime decodes as text itself comes back as a Uint8Array — a
+ * calendar invite (`text/calendar`, `application/ics`) does — and until the
+ * move to postal-mime 4 (2026-11-20) only the other two shapes were read, so
+ * an attached invite was listed at 0 bytes and its download refused. A string
+ * appears only under `attachmentEncoding: "base64"`, which this app never
+ * asks for; it is decoded as base64 for completeness, never as text.
+ */
+function attachmentBytes(content: unknown): Buffer | null {
+  if (content instanceof ArrayBuffer) return Buffer.from(content);
+  if (ArrayBuffer.isView(content)) return Buffer.from(content.buffer, content.byteOffset, content.byteLength);
+  if (typeof content === "string") return Buffer.from(content, "base64");
+  return null;
+}
+
+/**
+ * Parses a stored `.eml`. Never throws on a malformed part — a half-read
+ * message is still worth reviewing. It DOES throw, with a `code`, when a
+ * message passes one of postal-mime's own bounds (nesting depth, header size,
+ * part count, forwarded addresses): those bound a hostile message, and the
+ * three paths that register mail (`email-ingest.ts`, `mail-ingest.ts`,
+ * `intake-source.ts`) catch it and record the failure.
+ */
 export async function parseEnvelope(bytes: Buffer | Uint8Array): Promise<EmailEnvelope> {
   const parsed = await PostalMime.parse(bytes);
 
@@ -143,12 +168,7 @@ export async function parseEnvelope(bytes: Buffer | Uint8Array): Promise<EmailEn
       return {
         filename: attachment.filename ? String(attachment.filename) : null,
         contentType,
-        size:
-          attachment.content instanceof ArrayBuffer
-            ? attachment.content.byteLength
-            : typeof attachment.content === "string"
-              ? attachment.content.length
-              : 0,
+        size: attachmentBytes(attachment.content)?.byteLength ?? 0,
         isRfc822: contentType.startsWith("message/rfc822"),
       };
     }),
@@ -190,13 +210,7 @@ export async function readAttachment(
   // a jsonb column. `parseEnvelope`'s own comment says the bytes never enter
   // the staged JSON, and this keeps that true.
   const parsed = await PostalMime.parse(bytes);
-  const content = (parsed.attachments ?? [])[index]?.content;
-  const body =
-    content instanceof ArrayBuffer
-      ? Buffer.from(content)
-      : typeof content === "string"
-        ? Buffer.from(content, "base64")
-        : null;
+  const body = attachmentBytes((parsed.attachments ?? [])[index]?.content);
   if (!body) return null;
   return { meta, bytes: body };
 }
