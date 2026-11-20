@@ -219,7 +219,9 @@ agreed by" has a date the app shows "No programme recorded" and cannot flag
 anything overdue. That warning is information, not an error.
 
 ### 5.3 Upload a pack
-Project → "Documents" tab → "Add documents" → drop the files or "Choose files".
+Project → "Upload the pack" (on a project with no documents yet; it opens the
+"Documents" tab with the uploader already open), or the "Documents" tab → "Add
+documents" → drop the files or "Choose files".
 
 - Accepted: **.pdf, .xlsx, .csv, .tsv, .eml**. An old **.xls** must be saved as
   .xlsx first. An Outlook **.msg** must be saved as .eml (in Outlook: File →

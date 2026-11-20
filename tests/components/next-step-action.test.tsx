@@ -204,7 +204,7 @@ describe("the project overview's header", () => {
   it("asks for the pack where nothing has arrived", async () => {
     overview({ documents: [], runs: [], summary: { records: 0, toQuote: 0 } });
     const link = await screen.findByRole("link", { name: "Upload the pack" });
-    expect(link.getAttribute("href")).toBe(`/dashboard/projects/${PROJECT}?tab=documents`);
+    expect(link.getAttribute("href")).toBe(`/dashboard/projects/${PROJECT}?tab=documents&upload=1`);
   });
 
   it("names the failed read rather than the records behind it", async () => {
