@@ -202,8 +202,6 @@ type Queued = {
    * where this is false.
    */
   sentToModel: boolean;
-  /** Identified by the reading model because it is too long for the fast one. */
-  largeDocument: boolean;
   /** The browser's page count, passed to classify as a hint. Null when not counted. */
   pages: number | null;
 };
@@ -381,7 +379,6 @@ export default function IntakeBatchUpload({
         tooLarge: false,
         failure: null,
         sentToModel: false,
-        largeDocument: false,
         pages: null,
         };
       });
@@ -562,7 +559,6 @@ export default function IntakeBatchUpload({
             evidence?: string;
             titleText?: string | null;
             charged?: boolean;
-            largeDocument?: boolean;
           }>("/api/imports/classify", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -596,7 +592,6 @@ export default function IntakeBatchUpload({
           const evidence = withPdfBill(asked.data.evidence ?? null, pdfBill);
           update(item.key, {
             sentToModel: item.sentToModel || asked.data.charged !== false,
-            largeDocument: asked.data.largeDocument === true,
           });
           // THE NAME AND THE MODEL DISAGREE (K1): held, with the name's
           // suggestion kept in the box and the model's offered beside it. A
@@ -1095,11 +1090,6 @@ export default function IntakeBatchUpload({
                       </Button>
                     )}
                   </div>
-                )}
-                {item.largeDocument && (
-                  <p className="w-full text-xs text-neutral-500">
-                    Large document — identified with the reading model.
-                  </p>
                 )}
                 {item.warning && <p className="w-full text-xs text-amber-700">{item.warning}</p>}
                 {item.held && <p className="w-full text-xs text-amber-700">{item.held}</p>}

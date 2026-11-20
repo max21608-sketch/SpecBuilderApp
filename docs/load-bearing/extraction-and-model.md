@@ -206,6 +206,9 @@ identifying again** (the file is stored, nothing uploads twice); two or more
 failures for one reason get one banner; `onUploaded` fires only when nothing
 waits on a person, and `onRegistered` refreshes the page otherwise; a batch is
 created at the first REGISTRATION, and the batches route lists no empty one. A
-PDF over the classify model's 100 pages is identified by `EXTRACTION_MODEL`.
+PDF over the classify model's 100 pages was identified by `EXTRACTION_MODEL`
+until 2026-11-20; since then the classify model is Haiku 5.5, a 1M-context
+model that takes every PDF the upload admits, and a PDF over 100 pages only
+gets the longer deadline (`classifyDeadlineFor`).
 Bulk assign ("Set the ticked ones to…", "All unset → Shop drawings") is a
 person's choice and skips the model call, exactly as the select does.

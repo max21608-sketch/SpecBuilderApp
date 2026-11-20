@@ -14,8 +14,8 @@ export async function checkUpload(file: File): Promise<UploadVerdict> {
 /**
  * The verdict AND the page count it was reached from. The count travels on to
  * the classify route as a hint, because the server's own reader cannot see the
- * page tree of most compressed PDFs and the count decides which model looks at
- * the document (`classifyModelFor`). Null wherever nothing was counted.
+ * page tree of most compressed PDFs and the count decides how long the look
+ * may take (`classifyDeadlineFor`). Null wherever nothing was counted.
  */
 export async function checkUploadCounted(file: File): Promise<{ verdict: UploadVerdict; pages: number | null }> {
   if (!isPdfUpload(file.name, file.type)) return { verdict: { kind: "proceed" }, pages: null };

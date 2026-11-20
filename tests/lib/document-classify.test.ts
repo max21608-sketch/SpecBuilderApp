@@ -84,6 +84,18 @@ describe("what comes back from the model", () => {
   it("keeps the evidence, because it is what a person checks the answer against", () => {
     expect(answer().evidence).toContain("headed BILL OF QUANTITIES");
   });
+
+  it("cuts over-long evidence to the bound instead of blanking it", () => {
+    // Haiku 5.5's first live answers ran ~490 characters; `.max().catch("")`
+    // threw every one of them away.
+    const long = `Title block reads "HH-SF-01". ${"x".repeat(600)}`;
+    const cut = answer({ evidence: long, titleText: long });
+    expect(cut.evidence).toHaveLength(400);
+    expect(cut.evidence.startsWith('Title block reads "HH-SF-01".')).toBe(true);
+    expect(cut.evidence.endsWith("…")).toBe(true);
+    expect(cut.titleText).toHaveLength(400);
+    expect(answer({ evidence: 42 as unknown as string }).evidence).toBe("");
+  });
 });
 
 // ============================================================================
@@ -124,6 +136,26 @@ describe("a bill of quantities that arrived as a PDF", () => {
     expect(fileDocument({ genre: "specification_sheets", certain: true }).decision).toEqual(
       KIND_FROM_GENRE.shop_drawings,
     );
+  });
+
+  it("files a drawing set whose only doubt is between two genres read the same way", () => {
+    // Haiku 5.5 on the real Panther shop-drawing set, three times in three:
+    // "shop drawings, not certain", weighed against specification sheets.
+    const drawings = { importType: "spec_document", documentKind: "shop_drawings" };
+    expect(fileDocument({ genre: "shop_drawings", certain: false, weighedAgainst: "specification_sheets" }).decision).toEqual(drawings);
+    expect(fileDocument({ genre: "specification_sheets", certain: false, weighedAgainst: "shop_drawings" }).decision).toEqual(drawings);
+  });
+
+  it("still holds a document whose doubt would change what reads it", () => {
+    // A bill against an FF&E schedule is the costly mistake: still a person's.
+    expect(fileDocument({ genre: "bill_of_quantities", certain: false, weighedAgainst: "ffe_schedule" }).decision).toBeNull();
+    expect(fileDocument({ genre: "ffe_schedule", certain: false, weighedAgainst: "bill_of_quantities" }).decision).toBeNull();
+    expect(fileDocument({ genre: "shop_drawings", certain: false, weighedAgainst: "unclear" }).decision).toBeNull();
+    expect(fileDocument({ genre: "shop_drawings", certain: false, weighedAgainst: null }).decision).toBeNull();
+    expect(fileDocument({ genre: "shop_drawings", certain: false, weighedAgainst: "shop_drawings" }).decision).toBeNull();
+    expect(fileDocument({ genre: "shop_drawings", certain: false }).decision).toBeNull();
+    // An answer naming a genre that does not exist is read as naming none.
+    expect(ClassifyOutput.parse({ genre: "shop_drawings", certain: false, weighedAgainst: "a drawing" }).weighedAgainst).toBeNull();
   });
 
   it("says nothing about support when the model was not sure", () => {

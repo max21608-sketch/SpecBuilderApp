@@ -31,23 +31,14 @@ export const MAX_MODEL_PDF_BYTES = 20 * 1024 * 1024;
  *
  * THE MODEL'S OWN DOCUMENTED CEILING, NOT A NUMBER THIS APP CHOSE, and it is
  * tied to the model: 600 for a 1M-context model, which the extraction model
- * is, and 100 for a 200k-context one. If the extraction model is ever changed
- * to a 200k-context model this has to come down with it, which is the reason
+ * is, and 100 for a 200k-context one. The file-check model (`CLASSIFY_MODEL`,
+ * Haiku 5.5 since 2026-11-20) is a 1M-context model too, so it takes every PDF
+ * this admits. If either is ever changed to a 200k-context model this has to
+ * come down with it, which is the reason
  * the figure is a named constant with this sentence beside it rather than a
  * literal in a message.
  */
 export const MAX_MODEL_PDF_PAGES = 600;
-
-/**
- * The most PDF pages the CLASSIFY model can take: 100, the documented ceiling
- * for a 200k-context model, which the fast model (`CLASSIFY_MODEL`) is.
- *
- * A PDF counted over this is identified by the reading model instead
- * (`classifyModelFor`), because the upload admits up to `MAX_MODEL_PDF_PAGES`
- * and a 300-page set sent to the fast model is refused with a bare 400. Tied
- * to the model for the same reason the figure above is.
- */
-export const CLASSIFY_MODEL_MAX_PDF_PAGES = 100;
 
 /**
  * Over this many pages, the upload row WARNS and the upload still proceeds.

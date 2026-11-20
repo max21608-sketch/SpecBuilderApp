@@ -50,7 +50,8 @@ const NO_FORCED_TOOL = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-
 
 /**
  * May this model be asked to call a tool by force? False for the models that
- * refuse it; true for the ones this app has always forced (Opus 5, Haiku 4.5).
+ * refuse it; true for the ones this app has always forced (Opus 5, Haiku 4.5)
+ * and for Haiku 5.5, which accepts one (the file check, since 2026-11-20).
  * A dated or prefixed id (`anthropic.claude-opus-5-5`) is read by its stem.
  */
 export function forcedToolAllowed(model: string): boolean {
