@@ -161,7 +161,8 @@ area, quantity, category, level, how much has been captured, and its TGQ.
 "Versions". Buttons: "Add a spec by hand", "Chase the N".
 
 **Documents tab and pack page.** Every document, its state, and "Review" or
-"Open". "Add documents" uploads more.
+"Open". "Add documents" uploads more. Emails are listed under "Emails", apart
+from the packs, even when dropped in with one: each is read on its own.
 
 **Review screens.** One for a bill, one for drawings (a document on its own, or
 "Review all N drawings together"), one for a finishes schedule, a preamble, an

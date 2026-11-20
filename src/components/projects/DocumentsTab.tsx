@@ -69,9 +69,15 @@ function billOf(run: DocumentRun): StuckBill {
   };
 }
 
-/** One delivery, and the runs that arrived in it. */
+/**
+ * One delivery, and the runs that arrived in it — or one of the two groups of
+ * runs that belong to no pack: EMAILS, which are kept apart on purpose, and
+ * runs from before 0007, which predate packs altogether.
+ */
 export type Pack = {
   id: string | null;
+  /** `pack` has an id; the other two never do. */
+  group: "pack" | "emails" | "loose";
   label: string | null;
   createdAt: string;
   runs: DocumentRun[];
@@ -89,6 +95,7 @@ const KIND_LABELS: Record<string, string> = {
   finishes_schedule: "Finishes schedule",
   fabric_schedule: "Fabric schedule",
   other: "Other document",
+  email: "Email",
 };
 
 /** How many files a pack shows before the rest fold behind a link. */
@@ -108,13 +115,23 @@ export function useProjectDocuments() {
   // Pre-0007 runs have no batch and are collected under a single null pack at
   // the end -- they are real documents somebody imported and must not vanish
   // because a later migration gave their successors a grouping.
+  //
+  // AN EMAIL HAS NO BATCH EITHER, AND NOT BECAUSE IT IS OLD (2026-11-20, U5).
+  // `assignMessage` inserts every email's run with `batch_id` null, whether it
+  // was dropped in with a pack or arrived through the mailbox, because its
+  // read is counted against the project's batch-less slots rather than the
+  // pack's (`extraction-slots.ts`, "an email has no pack") — joining it to the
+  // pack would put it in the pack's counts and its Read all. So it stays apart,
+  // in a group of its own that says so, and "uploaded before deliveries were
+  // grouped" is said only of runs it is true of.
   const packs = useMemo<Pack[]>(() => {
     if (!documents) return [];
     const byBatch = new Map<string, Pack>();
     const loose: DocumentRun[] = [];
+    const emails: DocumentRun[] = [];
     for (const run of documents) {
       if (!run.batch_id) {
-        loose.push(run);
+        (run.document_kind === "email" ? emails : loose).push(run);
         continue;
       }
       const existing = byBatch.get(run.batch_id);
@@ -124,6 +141,7 @@ export function useProjectDocuments() {
       }
       byBatch.set(run.batch_id, {
         id: run.batch_id,
+        group: "pack",
         label: run.batch_label,
         createdAt: run.batch_created_at ?? run.created_at,
         runs: [run],
@@ -131,8 +149,18 @@ export function useProjectDocuments() {
     }
     const grouped = [...byBatch.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     for (const pack of grouped) pack.runs.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    if (emails.length > 0) {
+      emails.sort((a, b) => b.created_at.localeCompare(a.created_at));
+      grouped.push({ id: null, group: "emails", label: null, createdAt: emails[0]?.created_at ?? "", runs: emails });
+    }
     if (loose.length > 0) {
-      grouped.push({ id: null, label: null, createdAt: loose[loose.length - 1]?.created_at ?? "", runs: loose });
+      grouped.push({
+        id: null,
+        group: "loose",
+        label: null,
+        createdAt: loose[loose.length - 1]?.created_at ?? "",
+        runs: loose,
+      });
     }
     return grouped;
   }, [documents]);
@@ -292,7 +320,7 @@ export default function DocumentsTab({
           const drawings = pack.runs.filter((run) => run.document_kind === "shop_drawings");
           const reading = pack.runs.filter((run) => isIntakeRunWorking(run.status) || run.status === "pending");
           const ready = pack.runs.filter((run) => run.status === "parsed");
-          const key = pack.id ?? "unpacked";
+          const key = pack.id ?? (pack.group === "emails" ? "emails" : "unpacked");
           const expanded = expandedPacks.has(key);
           const shown = expanded ? pack.runs : pack.runs.slice(0, PACK_FILES_SHOWN);
           const folded = pack.runs.length - shown.length;
@@ -302,7 +330,9 @@ export default function DocumentsTab({
                 <b className="text-[13px]">
                   {pack.id
                     ? (pack.label ?? `${pack.runs.length} document${pack.runs.length === 1 ? "" : "s"}`)
-                    : "Not part of a pack"}
+                    : pack.group === "emails"
+                      ? `Emails · ${pack.runs.length}`
+                      : "Not part of a pack"}
                 </b>
                 <span className="text-xs text-neutral-500">
                   {pack.id ? (
@@ -313,6 +343,8 @@ export default function DocumentsTab({
                       )}
                       {ready.length > 0 && <> · {ready.length} ready to review</>}
                     </>
+                  ) : pack.group === "emails" ? (
+                    <>Kept apart from the packs: each email is read and reviewed on its own.</>
                   ) : (
                     <>Uploaded before deliveries were grouped. Nothing is wrong with them.</>
                   )}
