@@ -4,7 +4,8 @@ Asked for by Max on 2026-11-20: "get this app production ready in a few days …
 come up with a very detailed plan, having tested, having gone through the app …
 take screenshots … sanity checking everything … you need to replace me."
 
-**Status (2026-11-20, evening): TESTED, FIXES BUILT ON THREE BRANCHES, NOTHING
+**Status (2026-11-20, afternoon): TESTED; FIXES BUILT ON FOUR BRANCHES, TWO OF
+THEM MERGED INTO `prod-ready` AND CHECKED ON A PRODUCTION BUILD; NOTHING
 PUSHED.** Claude cannot push (GitHub is read-only for Claude under the
 organisation's policy) and cannot create production (Neon, Vercel and the
 Blob store are consoles only Max holds). Everything below that says "Max" is
@@ -69,6 +70,9 @@ The running log of every finding is `~/dev/briefs/prod-ready/findings.md`.
 | Scale | A 300-line invented bill (20 section headings); the 79-record Aman test project (32 reads); the 101-line AMB bill |
 | Speed | `next build` + `next start` on the local stack, every main screen and export timed cold and warm |
 | Roles and errors | A view-only account (screen and direct API), unknown pages, unknown and malformed record ids, a chase with no project, an export with a bad phase id |
+| A bill with headings the app does not know | `Spec Ref / Room / Item & Specification / No. Req'd / Lead time / £ each` — the model's column read mapped every role right and held Confirm for "The columns are right" |
+| The production first run | An EMPTY local database: 60 migrations, 13 seed files (17 categories, 797 questions, 56 BWS fields, 115 palette options, 33 heading aliases), the first admin with the password from the environment |
+| What is deployed | Pilot's sign-in page serves `[PILOT]` and v1.15 (the 2026-11-18 promotion is live) |
 | Code and plans | Two read-only reviews: one of everything production changes (security, ops, config); one of every open item in `docs/plans/` |
 
 **Not tested, and why.** Microsoft Graph mail ingestion (disabled everywhere);
@@ -99,6 +103,9 @@ D = data wrong or lost · U = a person misled or stuck · C = cosmetic or fricti
 | E4 | An email's Confirm is refused for ever (409 "rows changed… Reload") when the same item has a statement the app cannot place; reload and Re-match do not help | D | `prod-flows` E0 |
 | E1 | A code on two LINKED twin lines: a drawing lands on both, an email on neither ("Item not found") | D | `prod-flows` E1 |
 | K1 | A bill with no price columns — even named "… Bill of Quantities.xlsx" — is filed by the model as an FF&E schedule and read at a charge: 1,500 proposals, no records, no question asked. The box showed "Bill of quantities" and the press overrode it | D | `prod-flows` K1 — a disagreement between the name and the model holds the file for a person |
+| B8 | A size written without `x` (`Overall: W 850 D 900 H 780 mm`, `H760mm SH 420`) places nothing — the same reader as found-in-use's `SH450` | D | `prod-bill` R9 (0 changes on every real bill and all 58 staged drawing runs) |
+| B9 | A finish line's own label ("Finish: Brushed brass…") reached the BWS cell and the quote | D | `prod-bill` R8 |
+| B10 | Library rows a bill creates carry no description, so the BWS cell is "MTL-01 TBC" with no words (MTL-01's words lost through R6; the fabric codes' never filled) | D | `prod-bill` R10, in progress |
 | B7 | A decimal quantity (`6.4` lm banquette) is "not given": `spec_records.qty` is an integer | D | **decision** D8 |
 
 ### 3.2 A person misled or stuck
@@ -131,7 +138,8 @@ D = data wrong or lost · U = a person misled or stuck · C = cosmetic or fricti
 | S8 | No health check, no error alerting: an uptime check on `/login` stays green with the database down | should | `prod-harden` H4 — public `/api/health` (runs `select 1`, names the commit) and one `[request-error]` log line per uncaught error |
 | S4 | `create-user` took any password on the command line, had no way to deactivate | should | `prod-harden` H5 |
 | S1 | The production chase email had never run; it sent empty `x-intended-*` headers | should | `prod-harden` H6 (test + fix) |
-| S3 | `npm audit`: `next` 15.5.25 has advisories fixed in later 15.5.x; `postal-mime` 3.0.0 (every uploaded .eml) has a high advisory; `zod` memory advisory | should | **not built** — §6 day 1, its own worktree with its own `node_modules` |
+| S3 | `npm audit`: `next` 15.5.25 has a critical and a high advisory fixed in 15.5.29; `postal-mime` 3.0.0 (every uploaded .eml) has a high one; `zod`'s needs zod 4 | should | `prod-deps`: next 15.5.29, the transitive fixes, postal-mime 4.2.1 (which also fixed calendar invites downloading as 0 bytes). Production audit 15 → 10, no critical; zod, the blob chain and Next's own postcss written up in `docs/stack.md` as accepted, with what would change it |
+| S11 | After the parser upgrade an email attachment download could serve a different file than the one listed; a sender could fake Exchange's AutoForwarded stamp with `Name : value` | should | `prod-deps` F1, F2, in progress |
 | B1-sec | No per-project access: every account sees every client's NDA material | blocker | **decision** D1 |
 | S7 | Nothing bounds a person's model spend and nothing records it | should | **console** D3 (a spend limit) |
 | S9 | Blob store region unverified; Anthropic data residency not written down | should | **decision** D7 |
@@ -160,9 +168,10 @@ stack at the end. None touches a migration.
 
 | Branch | Items | State |
 |---|---|---|
-| `prod-harden` | H1–H7 (above), U1–U5 | built; four checks green (5,181 tests) before U1–U5; final run in the coder's report |
-| `prod-bill` | R1–R7, with a before/after regression run of every real bill on this machine | in progress |
-| `prod-flows` | E0, RV0, E1, K1, I1, E2/E3, F4, F1–F3, V1 | queued |
+| `prod-harden` | H1–H7, U1–U5 | done, 5,205 tests; **merged into `prod-ready`**; health, HSTS, cross-site refusal, add-project, Set designer, chase link and Emails group checked on the production build |
+| `prod-bill` | R1–R9, R10 in progress, with a before/after regression run of every real bill and staged run on this machine | R1–R9 done, 5,168 tests; **merged into `prod-ready`**; checked on a fresh project on the production build (and one layout regression it caused fixed in `63030a9`) |
+| `prod-flows` | E0, RV0, E1, K1, I1, E2/E3, F4, F1–F3, V1 | E0, RV0, E1, K1, I1 committed; the rest in progress |
+| `prod-deps` | next 15.5.29, `npm audit fix`, postal-mime 4.2.1, the accepted advisories written up; F1/F2 | the four done, 5,125 tests; F1/F2 in progress. Changes `package-lock.json`, so it is verified in a worktree with its own `node_modules` |
 
 **How they reach production.** Merge the three into one integration branch
 (`prod-int`), run the four checks with the database tier required and the
@@ -252,12 +261,13 @@ no violation in the console.
 ## 6. The plan, day by day
 
 **Day 1 — code (Claude; Max pushes).**
-1. Land `prod-harden`, `prod-bill`, `prod-flows` on `prod-int`; the four
+1. Land `prod-harden`, `prod-bill`, `prod-flows`, `prod-deps` on `prod-ready`; the four
    checks with the database tier required; the overflow audit; the rehearsal
    walked again on the production build, screenshots at 1920 and 1440.
-2. Dependency bump in its own worktree with its own `node_modules`: `next` to
-   the latest 15.5.x, `postal-mime` to 4.x (a major — the email tests are the
-   proof), `zod` to the patched 3.x. The four checks again.
+2. Because `prod-deps` changes the lockfile, `prod-ready` gets its OWN
+   `node_modules` (`npm ci`) for the final four checks and the walk — every
+   other worktree symlinks the main checkout's, which still has the old
+   packages until Max runs `npm ci` there after the push.
 3. `docs/environments.md`: a "Creating production" section mirroring pilot's
    (§8 below), `KNOWN_HOSTS.production` filled in once the host exists, the
    help file updated for every screen that changed.
@@ -293,6 +303,9 @@ enquiry with Max watching, the uptime check and the spend alert armed.
   "— TBC" separator.
 - Per-project access if D1 says "later".
 - A cost view over `model_metadata` (every read already stores its usage).
+- The bill review's six separate "Accept all …" buttons per tab could be one
+  "Accept every suggestion on this tab" (Max's call; each still names its
+  evidence per row).
 - A very large spec-document review renders as one page (1,500 rows were
   143,000 pixels tall); paginate or group by item.
 - The overview polls the whole project every 5 s.
