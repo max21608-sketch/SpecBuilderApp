@@ -86,6 +86,10 @@ repo, with the screenshots and walk scripts).
     audit is clean on 31 pages. Every visible fix was re-checked on the
     production build.
   - **Pushed by Max** to `origin/staging` at `72a69fe` the same evening.
+- **Seven chase decisions, made by Claude at Max's instruction** (not
+  Matthew's, and he can overrule each on his sheet), with an AI-drafted
+  cabinetry gate model: `chase-decisions-2026-11-20.md`. A record only;
+  nothing is built or seeded.
 - **Another session** is reworking intake (`open-intake-2026-11-20.md`,
   branch `intake-2026-11-20`). It is built on `prod-ready` at `d160967`. Its
   stages that change the upload code wait for `prod-ready` to land.
