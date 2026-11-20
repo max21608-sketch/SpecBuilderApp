@@ -10,6 +10,8 @@
 import { it, expect, beforeAll, afterAll } from "vitest";
 import { describeIfDb } from "./db-tier";
 import pg from "pg";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -19,13 +21,100 @@ describeIfDb("the seeded gate overlay", () => {
   afterAll(async () => { await client.end(); });
   const q = async (text: string, params: unknown[] = []) => (await client.query(text, params)).rows;
 
-  it("holds Matthew's 35 rows, split across his three gates", async () => {
+  it("holds Matthew's 35 rows and the 21 AI-drafted cabinetry rows, split across the three gates", async () => {
     const rows = await q("select gate, count(*)::int n from spec_field_gates group by gate order by gate");
     expect(rows).toEqual([
-      { gate: "TG0", n: 17 },
+      { gate: "TG0", n: 34 },
       { gate: "TG1", n: 4 },
-      { gate: "TGQ", n: 14 },
+      { gate: "TGQ", n: 18 },
     ]);
+    const ranges = await q(`
+      select count(*) filter (where matrix_row between 1 and 35)::int as his,
+             count(*) filter (where matrix_row between 101 and 121)::int as drafted,
+             count(*)::int as total
+        from spec_field_gates`);
+    expect(ranges).toEqual([{ his: 35, drafted: 21, total: 56 }]);
+  });
+
+  it("his rows 1-35 are exactly what db/seed/0006 says, column for column", async () => {
+    // 0014 must never edit his rows: the cabinetry types receive his "All
+    // categories" rows through the GENERATED applies_to_all (0061), not by a
+    // seed widening his arrays. Re-running 0006 inside a transaction that is
+    // rolled back proves the live rows are the file's: an upsert that changes
+    // nothing but the bookkeeping leaves every compared column where it was.
+    const columns = `matrix_row, gate, capture, field_name, spec_field_id, local_key, dimension_slot, applies_to,
+                     applies_to_raw, applies_to_all, value_type, palette_key, palette_raw, conditional_on_key,
+                     conditional_on_value, notes`;
+    const before = await q(`select ${columns} from spec_field_gates where matrix_row <= 35 order by matrix_row`);
+    expect(before).toHaveLength(35);
+    const seed = readFileSync(path.join(process.cwd(), "db/seed/0006_spec_field_gates.sql"), "utf8");
+    await client.query("begin");
+    try {
+      await client.query(seed);
+      const after = await q(`select ${columns} from spec_field_gates where matrix_row <= 35 order by matrix_row`);
+      expect(after).toEqual(before);
+    } finally {
+      await client.query("rollback");
+    }
+    // And the phrase, not the array, is what widens: exactly his "All
+    // categories" rows reach every type.
+    const all = await q("select matrix_row from spec_field_gates where applies_to_all order by matrix_row");
+    expect(all.map((r) => r.matrix_row)).toEqual([1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 32, 33, 34, 35]);
+  });
+
+  it("refuses two rows for one field at one gate for a shared type, by the constraint's name", async () => {
+    // The per-TYPE identity rule that replaced 0026's global unique index.
+    // Row 18 is Timber finish 1 at TG0 for his nine; row 106 is the same field
+    // and gate for the eight cabinetry types, and both are allowed. A second
+    // row for a seating code is not.
+    await client.query("begin");
+    try {
+      await expect(
+        client.query(`
+          insert into spec_field_gates (matrix_row, gate, capture, field_name, spec_field_id, applies_to, applies_to_raw,
+                                        value_type, created_by, updated_by)
+          select 9001, 'TG0', 'input', '__QA timber twice', f.id, array['S'], 'S', 'free_text', 'qa', 'qa'
+            from spec_fields f where f.json_id = 4`),
+      ).rejects.toMatchObject({ code: "23514", constraint: "spec_field_gates_identity_overlap" });
+    } finally {
+      await client.query("rollback");
+    }
+    // An "All categories" row overlaps every type, a type it never named
+    // included.
+    await client.query("begin");
+    try {
+      await expect(
+        client.query(`
+          insert into spec_field_gates (matrix_row, gate, capture, field_name, spec_field_id, applies_to, applies_to_raw,
+                                        value_type, created_by, updated_by)
+          select 9002, 'TGQ', 'question', '__QA outdoor again', f.id, array['__QA'], '__QA', 'free_text', 'qa', 'qa'
+            from spec_fields f where f.json_id = 130`),
+      ).rejects.toMatchObject({ code: "23514", constraint: "spec_field_gates_identity_overlap" });
+    } finally {
+      await client.query("rollback");
+    }
+  });
+
+  it("every AI-drafted row says so in its notes, and its types carry the provisional note", async () => {
+    const sentence = "Provisional cabinetry gate model, drafted by AI on 20 Nov 2026, not yet confirmed by Matthew";
+    const unlabelled = await q(
+      `select matrix_row from spec_field_gates where matrix_row between 101 and 121 and position($1 in coalesce(notes, '')) <> 1`,
+      [sentence],
+    );
+    expect(unlabelled).toEqual([]);
+    const types = await q(
+      "select code, family, provisional_note from spec_matrix_categories order by sort_order",
+    );
+    expect(types.map((t) => t.code)).toEqual(["S", "A", "DC", "BS", "B", "D", "O", "BH", "BQ", "CD", "DT", "DS", "MR", "SB", "ST", "SD", "WR"]);
+    for (const type of types) {
+      if (type.family === "upholstery") expect(type.provisional_note).toBeNull();
+      else expect(type.provisional_note).toBe(sentence);
+    }
+    // His rows say nothing of the kind.
+    const his = await q(
+      `select matrix_row from spec_field_gates where matrix_row <= 35 and position('drafted by AI' in coalesce(notes, '')) > 0`,
+    );
+    expect(his).toEqual([]);
   });
 
   it("every row lands on a BWS field or names an app-local key, never neither", async () => {
@@ -65,7 +154,7 @@ describeIfDb("the seeded gate overlay", () => {
       select c.slug, f.json_id, f.name
         from spec_field_gates g
         join spec_fields f on f.id = g.spec_field_id
-        join spec_matrix_category_map m on g.applies_to && array[m.matrix_code]
+        join spec_matrix_category_map m on g.applies_to_all or g.applies_to && array[m.matrix_code]
         join item_categories c on c.id = m.item_category_id
        where not exists (
          select 1 from requirements r where r.category_id = c.id and r.spec_field_id = f.id)
@@ -78,12 +167,59 @@ describeIfDb("the seeded gate overlay", () => {
     expect(n).toBe(0);
   });
 
-  it("the eight cabinetry sheets get NO gate view, because his matrix does not cover them", async () => {
+  it("each of the eight cabinetry sheets is ONE provisional type, and answers every row that reaches it", async () => {
+    // 0014 (2026-11-20). Until then the cabinetry sheets had no gate view.
+    // Now each is exactly one AI-drafted type, so there is no union to widen.
     const mapped = await q(`
-      select c.slug from item_categories c
-       where c.family = 'cabinetry'
-         and exists (select 1 from spec_matrix_category_map m where m.item_category_id = c.id)`);
-    expect(mapped).toEqual([]);
+      select c.slug, array_agg(m.matrix_code order by m.matrix_code) as codes,
+             bool_and(t.provisional_note is not null) as provisional
+        from item_categories c
+        join spec_matrix_category_map m on m.item_category_id = c.id
+        join spec_matrix_categories t on t.code = m.matrix_code
+       where c.family = 'cabinetry' and c.created_by = 'seed'
+       group by c.slug order by c.slug`);
+    expect(mapped).toEqual([
+      { slug: "consoles-desks-dressing-tables", codes: ["CD"], provisional: true },
+      { slug: "dining-tables", codes: ["DT"], provisional: true },
+      { slug: "drinks-cabinets-service-stations", codes: ["DS"], provisional: true },
+      { slug: "mirrors", codes: ["MR"], provisional: true },
+      { slug: "shelves-bookcase", codes: ["SB"], provisional: true },
+      { slug: "side-coffee-bedside-tables", codes: ["ST"], provisional: true },
+      { slug: "sideboards-dressers", codes: ["SD"], provisional: true },
+      { slug: "wardrobes", codes: ["WR"], provisional: true },
+    ]);
+    // Every LOCAL-KEY row that reaches a cabinetry type has its readiness
+    // question too, so a controller is never "nowhere to record it". His four
+    // record-column rows (item name, designer reference, spec notes) and
+    // product code are read off the record or are the known gap (finding 7),
+    // not questions.
+    const localGaps = await q(`
+      select c.slug, g.local_key
+        from spec_field_gates g
+        join spec_matrix_category_map m on g.applies_to_all or g.applies_to && array[m.matrix_code]
+        join item_categories c on c.id = m.item_category_id
+       where c.family = 'cabinetry' and g.local_key is not null
+         and g.local_key not in ('product_code', 'item_name', 'designer_reference', 'spec_notes')
+         and not exists (select 1 from requirements r where r.category_id = c.id and r.local_key = g.local_key)
+       order by 1, 2`);
+    expect(localGaps).toEqual([]);
+  });
+
+  it("every conditional's controller is a TGQ row asked of every type its dependent reaches", async () => {
+    // Row 120 (socket / wire access) reaches dining tables, so row 103 (the
+    // lighting-or-power controller) must too, or a dining table's TG0 waits
+    // for ever on a question nobody asks it (design finding 3).
+    const orphans = await q(`
+      select d.matrix_row, code
+        from spec_field_gates d
+        cross join lateral unnest(d.applies_to) as code
+       where d.conditional_on_key is not null
+         and not exists (
+           select 1 from spec_field_gates c
+            where c.local_key = d.conditional_on_key and c.gate = 'TGQ'
+              and (c.applies_to_all or code = any(c.applies_to)))
+       order by 1, 2`);
+    expect(orphans).toEqual([]);
   });
 
   it("the two deliberate widenings are real, so changing the mapping fails here first", async () => {
@@ -192,7 +328,8 @@ describeIfDb("the seeded gate overlay", () => {
     // break the TGQ interview's hoist.
     // 62 from the cheat sheets, +6 from db/seed/0007 (BWS fields no sheet
     // asked for), +6 from db/seed/0009 (Matthew's rows with no BWS field at
-    // all). This number moves only when a seed adds a question, and it should
+    // all), +5 from db/seed/0014 (the four cabinetry controllers and socket /
+    // wire access; its lighting spec reuses 0009's wording). This number moves only when a seed adds a question, and it should
     // fail when one is paraphrased instead of reused.
     // ======================================================================
     // SEEDED ROWS ONLY, AND THAT IS THE POINT OF THE PREDICATE.
@@ -217,7 +354,7 @@ describeIfDb("the seeded gate overlay", () => {
         from requirements r
         join item_categories c on c.id = r.category_id
        where left(c.name, 5) <> '__QA '`);
-    expect(n).toBe(74);
+    expect(n).toBe(79);
     const perField = await q(`
       select f.json_id, count(distinct r.prompt)::int n
         from requirements r
