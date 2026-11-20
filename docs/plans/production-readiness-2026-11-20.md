@@ -269,18 +269,25 @@ see `after-intake-2026-11-20.md`. Each is a defect by anyone's measure:
   (`after-intake` §9d). That is a deliberate rule, and changing it is Max's
   decision.
 
-**Swept in by accident (17:15).** Another session had left a merge of its
-branch `intake-2026-11-20` in progress in this worktree. A doc commit here
-(`a47710f`) concluded it, so `prod-ready` also carries two of that session's
-commits:
+**Swept in by accident (17:15).** The intake session had given Max a
+command for when this session was done:
+`git -C ~/dev/worktrees/prod-ready merge intake-2026-11-20`. A run of it at
+about 17:07 stopped before committing and left the merge in progress
+(`MERGE_HEAD`). No session wrote in this worktree; the intake session
+confirmed it ran only read-only git there. A doc commit here (`a47710f`)
+then concluded the merge, so `prod-ready` also carries two commits from the
+intake branch:
 - `e0cb0f8`, "the file check is Haiku 5.5" (Max's decision of the same day,
   in the classify route and the upload panel);
 - `45bf924`, its plan `open-intake-2026-11-20.md`.
 
 The result is exactly a clean merge of the two sides; nothing on either side
 was lost. The four checks were re-run on the combined tip `8677936` and pass
-(5,388 tests, database tier required). `e0cb0f8` was not part of the
-pre-push review. Whether it ships in this push is Max's call. To take it out,
+(5,388 tests, database tier required). On its own branch, `e0cb0f8` also
+passed the four checks (5,374 tests), and live Haiku 5.5 calls filed every
+test file correctly, including the real Panther Apx 1a set (intake session,
+2026-11-20). The intake session wants it to ship. It was not part of the
+pre-push review, and whether it ships in this push is Max's call. To take it out,
 revert the merge's second-parent changes in a new commit; never rewrite
 `prod-ready`, because the intake branch is built on it.
 
