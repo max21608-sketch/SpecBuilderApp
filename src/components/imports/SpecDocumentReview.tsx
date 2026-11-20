@@ -36,6 +36,7 @@ import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import {
   classifyProposal,
   heldReading,
+  isConfirmable,
   proposalBlockers,
   type Proposal,
   type RecordEntry,
@@ -295,7 +296,9 @@ export default function SpecDocumentReview({
    * text. Four states of one document, a tab each.
    */
   const sections = {
-    pending: proposals.filter((p) => classifyProposal(p) === "pending"),
+    // `isConfirmable` is the confirm route's whole-card set too: one predicate,
+    // so the card this screen sends is the card the server expects.
+    pending: proposals.filter(isConfirmable),
     ambiguous: proposals.filter((p) => classifyProposal(p) === "ambiguous"),
     unassigned: proposals.filter((p) => classifyProposal(p) === "unassigned"),
     ignored: proposals.filter((p) => classifyProposal(p) === "ignored"),

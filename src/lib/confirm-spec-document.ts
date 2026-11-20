@@ -31,6 +31,7 @@ import {
   annotateHeld,
   hasPendingProposals,
   heldReading,
+  isConfirmable,
   occupantSince,
   proposalBlockers,
   SLOT_FILLED_MESSAGE,
@@ -308,12 +309,30 @@ export async function confirmSpecDocumentRecord(
   const chosen = taken.map((proposal) => annotated.get(proposal.id) ?? proposal);
   const lines = run.staged.lines.map((line) => annotated.get(line.id) ?? line);
 
-  // The whole card, or nothing. If the live set of pending proposals for this
-  // record is not exactly what was submitted, the reviewer is looking at a
+  // The whole card, or nothing. If the live set of CONFIRMABLE proposals for
+  // this record is not exactly what was submitted, the reviewer is looking at a
   // different card than the one they are about to commit.
+  //
+  // CONFIRMABLE IS `isConfirmable`, THE SCREEN'S OWN "To review"
+  // SPLIT (prod-ready E0, 2026-11-20). This compared against every PENDING row
+  // on the record, placed or not, while the screen sends only the placed ones —
+  // so a record holding one statement that found no question ("quantity",
+  // Question not matched) beside two placed specs was refused as "changed while
+  // you were reviewing" on a freshly loaded page, after a re-match, every time,
+  // and nothing on the screen said that ignoring the unplaced row was the way
+  // out. One predicate, the one the review's sections are built from: the
+  // placed rows commit as a whole card and the unplaced one stays pending for a
+  // later decision.
   const livePending = run.staged.lines.filter(
-    (line) => line.reviewStatus === "pending" && line.recordId === recordId,
+    (line) => line.recordId === recordId && isConfirmable(line),
   );
+  const notPlaced = taken.find((proposal) => !isConfirmable(proposal));
+  if (notPlaced) {
+    throw new DomainConflictError(
+      "not_placed",
+      `“${notPlaced.raw.attributeRaw ?? "That row"}” is not placed on a question yet. Place it or leave it out; nothing was written.`,
+    );
+  }
   const submitted = new Set(refs.map((ref) => ref.id));
   if (livePending.length !== submitted.size || livePending.some((line) => !submitted.has(line.id))) {
     throw new DomainConflictError(

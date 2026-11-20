@@ -668,6 +668,20 @@ whole. Any failure rolls back everything: three finishes written and the fourth
 refused looks finished, and the missing one is invisible until somebody notices
 the answer is wrong.
 
+**"Currently pending assigned" is `isConfirmable` (`spec-document.ts`), and
+the screen and the server both call it** (prod-ready E0, 2026-11-20). The
+server compared against every PENDING row on the record while the screen sent
+only the PLACED ones, so an email that said a bar stool's quantity (no question
+matches "quantity") beside its seat height and footrest was refused "The rows
+on this record changed while you were reviewing" on a freshly loaded page,
+after a re-match, every time — reloading could not fix it, and the only way out
+was to ignore the unplaced row, which nothing said. Now the placed rows commit
+as a whole card and an unplaced row on the same record stays pending for a
+later decision (the run stays `parsed`); an unplaced row SENT in a card is
+refused `not_placed` in words. The drawings confirm was checked and has no such
+mismatch: its card sends every pending observation and the server counts
+every pending observation.
+
 `status = 'confirmed'` on an intake run means **no pending proposals remain** —
 applied or explicitly ignored. Label it *Review complete*, never "complete":
 settled answers are a different question. Restore accepts **ignored only**; an

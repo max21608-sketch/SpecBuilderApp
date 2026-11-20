@@ -1772,6 +1772,19 @@ export function classifyProposal(proposal: Proposal): ProposalSection {
   return "unclassified";
 }
 
+/**
+ * WHAT A CONFIRM COMMITS: a pending row that is PLACED — on a record, and on
+ * a question where it needs one. The review screen's "To review" set and the
+ * confirm route's whole-card check are both this, so the screen cannot send
+ * one card and the server expect another (prod-ready E0, 2026-11-20: the
+ * server counted every pending row on the record, placed or not, and refused
+ * every confirm on a record that also held an unplaced statement). An
+ * unplaced row on the record stays pending for a later decision.
+ */
+export function isConfirmable(proposal: Proposal): boolean {
+  return classifyProposal(proposal) === "pending";
+}
+
 /** The per-record cards the review screen commits one at a time. */
 export function groupByRecord(proposals: Proposal[]): { recordId: string; recordLabel: string; proposals: Proposal[] }[] {
   const groups = new Map<string, { recordId: string; recordLabel: string; proposals: Proposal[] }>();
