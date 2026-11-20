@@ -136,7 +136,7 @@ sit in the checkout.
 node tools/localstack/init-env.mjs --anthropic-from=<path to .env.local>   # once; copies that ONE key
 createdb -h localhost specbuilder_local                                     # once
 npm run db:migrate:local && npm run db:seed:local                           # prints the host: read it
-node --env-file=.env.localstack.local tools/create-user.mjs <email> <name> admin <password>
+NEW_USER_PASSWORD='<12+ characters>' node --env-file=.env.localstack.local tools/create-user.mjs <email> <name> admin
 npm run dev:local           # stack server on 3101, next dev on 3100; Ctrl-C stops both
 VITEST_MAX_FORKS=4 npm run checks:local   # the four checks, database tier REQUIRED, against local
 ```
@@ -318,7 +318,9 @@ undelivered.
 
 1. `node --env-file=.env.pilot.local db/run-migrations.mjs --yes-pilot`
 2. `node --env-file=.env.pilot.local db/run-seed.mjs --yes-pilot`
-3. `node --env-file=.env.pilot.local tools/create-user.mjs --yes-pilot` — there is no
+3. `NEW_USER_PASSWORD='<12+ characters>' node --env-file=.env.pilot.local tools/create-user.mjs <email> <name> <role> --yes-pilot`
+   (the password from the environment, so it stays out of shell history; 12 characters at
+   least since 2026-11-20) — there is no
    self-signup, so Matthew's account is created here.
 
 Three things to say plainly, because each has a tempting wrong version:
@@ -332,6 +334,41 @@ Three things to say plainly, because each has a tempting wrong version:
   Matthew loads. The sandbox holds invented demo projects, `__QA` leftovers and
   real client documents staged for testing; none of it is his. The `qa:*`
   scripts and `db:qa-clean` refuse anything but sandbox for the same reason.
+
+## Creating production
+
+**Not created as of 2026-11-20.** The full checklist, the decisions that come
+before it and the go-live smoke test are in
+`docs/plans/production-readiness-2026-11-20.md` (§5, §8, §9); this section is
+the short version and the traps, mirroring *Creating the pilot environment*.
+
+- **Four decisions first** (that plan, §5 D1–D4): who sees which client
+  (there is no per-project access), whether the BWS file is imported at launch,
+  whose accounts hold production, and the backup destination. Each changes
+  what is built.
+- **Neon:** a NEW project in `aws-eu-west-2`, in the account D3 names. Its
+  default branch will be named `production` by Neon, which for once is right.
+  Record the point-in-time restore window in `docs/recovery.md`.
+- **Vercel:** a NEW project. Production Branch: `production` (created by Max;
+  CLAUDE.md forbids Claude creating it), which only ever fast-forwards to a SHA
+  pilot has run. **Scope every environment variable to Production ONLY** — a
+  variable scoped to all environments hands the production database to every
+  Preview build of every branch.
+- **`AUTH_SECRET` NEW and at least 32 characters** (`openssl rand -base64 48`):
+  since 2026-11-20 a production build with a shorter one answers 503 in words
+  on every request (staging and pilot need only one to be set). **`CRON_SECRET`
+  NEW.** `ANTHROPIC_API_KEY` its own key with a spend limit.
+- **Blob:** a new PRIVATE store; choose the London/EU region if offered.
+- **First run, in this order:** add the production host to
+  `KNOWN_HOSTS.production` in `db/script-env.mjs` (one commit, so every script
+  checks the host it prints); `db/run-migrations.mjs --yes-production` (read the
+  total); `db/run-seed.mjs --yes-production`; `create-user` with
+  `NEW_USER_PASSWORD`. Rehearsed on an empty local database on 2026-11-20: 60
+  migrations, 13 seed files, one admin.
+- **Proof without signing in:** `GET /api/health` answers
+  `{"ok":true,"commit":"<sha>"}` (public since 2026-11-20); signed in,
+  `/api/auth/me` reports `production`/`production`; production shows no chip
+  and no title marker.
 
 ## Deploying to production
 
@@ -412,9 +449,10 @@ defect.
    Neon project and its own `--yes-pilot` flag on every script that writes. The
    gap itself is unchanged — staging and local still share sandbox, and they
    always will until somebody separates them.
-2. **No blob store exists.** M1's BOQ upload needs one. Uploads will fail with
-   a missing-token error until it is created and connected.
-3. **Production is undefined beyond "a separate Neon project".** No Vercel
-   project, no domain, no branch, no authorization to create any of them.
+2. ~~**No blob store exists.**~~ Staging and pilot each have one (pilot's since
+   2026-09-19); production's is part of *Creating production*.
+3. **Production is defined but not created** (2026-11-20): the checklist is
+   *Creating production* above; no Vercel project, domain, branch or
+   authorization exists yet.
 4. **Backups are manual.** Nothing runs `db/backup.mjs` on a schedule, so the
    real recovery point is "whenever someone last remembered".
