@@ -374,6 +374,9 @@ export async function getProposalsReview(run: Row): Promise<Response> {
           select em.id, em.from_addr, em.from_name, em.subject, em.received_at,
                  em.to_addrs, em.cc_addrs, em.attachments_meta, em.has_attachments,
                  em.routing_reason, em.chase_match, em.triage, em.version,
+                 -- HOW IT CAME TO BE HERE (E2): uploaded by a person, or
+                 -- assigned by the router or by hand from the Inbox.
+                 em.origin, em.assignment_kind, em.assigned_by, em.created_by,
                  -- The PLAIN TEXT body, for the screen's own message tab. The
                  -- html body is deliberately not selected: it is markup a
                  -- stranger wrote, and the two routes that serve the raw .eml

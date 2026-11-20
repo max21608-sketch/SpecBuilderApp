@@ -32,6 +32,7 @@ import { VersionLedger } from "@/lib/acked-versions";
 import Spinner from "@/components/ui/Spinner";
 import { usePoll } from "@/lib/use-poll";
 import EmailEnvelope, { type EmailMessage } from "@/components/imports/EmailHeader";
+import { emailArrival } from "@/lib/email-arrival";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import {
   classifyProposal,
@@ -424,6 +425,7 @@ export default function SpecDocumentReview({
       ? `${message.from_name} <${message.from_addr ?? "unknown"}>`
       : (message.from_addr ?? "unknown sender")
     : null;
+  const arrival = message ? emailArrival(message) : null;
   const received = message?.received_at
     ? new Date(message.received_at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })
     : null;
@@ -443,11 +445,15 @@ export default function SpecDocumentReview({
             </Link>
             {/* WHY THIS MESSAGE IS ON THIS PROJECT, in the app's own words.
                 Routing never breaks its own tie, so a reader has to be able to
-                see which signal decided it and disagree with it. */}
-            {message?.routing_reason && (
+                see which signal decided it and disagree with it — and an
+                .eml a PERSON uploaded here was decided by nobody's routing,
+                so it says who uploaded it (E2, 2026-11-20; it read "auto"). */}
+            {arrival && (
               <>
                 {" "}
-                <Chip tone="info">auto · {message.routing_reason}</Chip>
+                <Chip wrap tone={message?.assignment_kind === "auto" ? "info" : "plain"} title={arrival.title ?? undefined}>
+                  {arrival.words}
+                </Chip>
               </>
             )}
             {" · "}
@@ -610,6 +616,8 @@ export default function SpecDocumentReview({
   }
 
   const runsWritten = new Set(rows.flatMap((row) => row.runs.map((member) => member.runName).filter(Boolean))).size;
+  // The number SAID, and its plural from that number (E3: "each landing on 1 phases").
+  const landing = runsWritten || 1;
   const needsAck = commitBlockers.filter((blocker) => blocker.code === "overwrite" || blocker.code === "replace").length;
 
   const tabs = (
@@ -640,9 +648,9 @@ export default function SpecDocumentReview({
       {tab === "pending" && rows.length > 0 && (
         <Note
           tone="info"
-          title={`${rows.length} ${rows.length === 1 ? "specification" : "specifications"}, each landing on ${
-            runsWritten || 1
-          } ${runsWritten === 1 ? "phase" : "phases"}.`}
+          title={`${rows.length} ${rows.length === 1 ? "specification" : "specifications"}, each landing on ${landing} ${
+            landing === 1 ? "phase" : "phases"
+          }.`}
         >
           {rows[0]?.distinctRuns.length ? (
             <>
@@ -742,7 +750,7 @@ export default function SpecDocumentReview({
                   {pendingPlaced} {pendingPlaced === 1 ? "spec" : "specs"}
                 </b>{" "}
                 · writes to {commits.length} {commits.length === 1 ? "record" : "records"} across{" "}
-                {runsWritten || 1} {runsWritten === 1 ? "phase" : "phases"}
+                {landing} {landing === 1 ? "phase" : "phases"}
               </span>
               {commitBlockers.length > 0 && (
                 <Chip tone="danger">

@@ -98,7 +98,16 @@ Five things are load-bearing:
   the store's own server-side `copy` OUTSIDE the transaction, because blob I/O
   inside one holds a row lock across a network call. Copied, never moved: the
   mailbox path is the arrival record and `unassignMessage` must leave the
-  message something to have come from. Found 2026-09-17 by fake mail staged
+  message something to have come from.
+- **The review's header says how the message got there** (prod-ready E2,
+  2026-11-20). It printed `auto · <routing reason>` over every email, so an
+  `.eml` a PERSON uploaded read "auto · Nothing in this message names a
+  project…" while the Inbox said "assigned by hand" for the same message,
+  and its back link went to the Inbox. `emailArrival` (`email-arrival.ts`)
+  reads `origin` and `assignment_kind`: "uploaded to this project by <who>",
+  "assigned automatically · <the router's first clause>", or "assigned by
+  hand by <who>", the whole reason on hover; an uploaded message's back link
+  goes to its pack, or to the project's Documents tab. Found 2026-09-17 by fake mail staged
   through the real Graph path; it would have been the first real message.
 - **`spec_answers.source_kind = 'email'`** has been allowed by 0002's CHECK
   since the beginning and had never been written. It puts the answer out of

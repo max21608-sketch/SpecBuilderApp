@@ -56,6 +56,11 @@ export type EmailMessage = {
   attachments_meta: { filename: string | null; contentType: string; size: number; isRfc822: boolean }[] | null;
   has_attachments: boolean;
   routing_reason: string | null;
+  /** How it came to be on the project (E2): `upload` or `graph`, and who or what assigned it. */
+  origin?: string | null;
+  assignment_kind?: string | null;
+  assigned_by?: string | null;
+  created_by?: string | null;
   chase_match: string | null;
   chase_subject: string | null;
   chase_sent_at: string | null;
