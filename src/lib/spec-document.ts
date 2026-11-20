@@ -695,19 +695,18 @@ function landingRuns(resolution: Resolution): RunGroup[] {
  * (`everyPairTwinned`), the phase lands on each line: one proposal per record,
  * sharing the observation's ordinal, each ignorable on its own. A set the
  * links do not wholly cover is still the person's question.
+ *
+ * ONE SENTENCE PER PHASE'S TWIN GROUP, ON THAT GROUP'S ROWS (prod-ready review
+ * F3, 2026-11-20). It was one sentence per statement, on every row: a twin
+ * pair in each of two phases read "A and B and C and D are twins: … one item
+ * on 4 lines", and a phase with no twins said it too.
  */
-function landOnTwins(runs: RunGroup[]): { runs: RunGroup[]; note: string | null } {
-  const settled: RecordEntry[] = [];
-  const out = runs.flatMap((run) => {
-    if (run.records.length < 2 || !everyPairTwinned(run.records)) return [run];
-    settled.push(...run.records);
-    return run.records.map((record) => ({ runId: run.runId, runName: run.runName, records: [record] }));
+function landOnTwins(runs: RunGroup[]): (RunGroup & { twinsNote: string | null })[] {
+  return runs.flatMap((run) => {
+    if (run.records.length < 2 || !everyPairTwinned(run.records)) return [{ ...run, twinsNote: null }];
+    const twinsNote = `${run.records.map((record) => record.label).join(" and ")} are twins: the bill lists one item on ${run.records.length} lines, so this goes on each. Ignore it on a line whose spec differs.`;
+    return run.records.map((record) => ({ runId: run.runId, runName: run.runName, records: [record], twinsNote }));
   });
-  if (settled.length === 0) return { runs, note: null };
-  return {
-    runs: out,
-    note: `${settled.map((record) => record.label).join(" and ")} are twins: the bill lists one item on ${settled.length} lines, so this goes on each. Ignore it on a line whose spec differs.`,
-  };
 }
 
 /**
@@ -868,7 +867,7 @@ export function resolveProposals(
     // GR-FUR-04 and PL-FUR-04 as two proposals sharing this observation's
     // ordinal, and MUR-FUR04, which the bill has no line for, is named on the
     // row in words (`landingRuns`, `unmatchedZonesNote`).
-    const { runs, note: twinsNote } = landOnTwins(landingRuns(resolution));
+    const runs = landOnTwins(landingRuns(resolution));
     const zonesNote = unmatchedZonesNote(resolution);
     if (runs.length === 0) {
       const unplaced = buildProposal(observation, index, null, [], registers, newId, null);
@@ -889,7 +888,7 @@ export function resolveProposals(
       // unanswerable question.
       const record = run.records.length === 1 ? run.records[0] ?? null : null;
       const placedBy = (proposal: Proposal, readingNote: string | null = null): Proposal => {
-        const said = [readingNote, zonesNote, twinsNote].filter((text): text is string => Boolean(text)).join(" ");
+        const said = [readingNote, zonesNote, run.twinsNote].filter((text): text is string => Boolean(text)).join(" ");
         return {
           ...proposal,
           ...(rowMatch ? { rowMatch } : {}),
