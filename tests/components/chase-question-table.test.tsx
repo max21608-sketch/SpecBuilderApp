@@ -84,6 +84,7 @@ function question(over: Partial<TableQuestion> = {}): TableQuestion {
     variantCount: 0,
     contactId: "c-1",
     contactName: "Claire Beaumont",
+    audience: over.audience ?? (over.requirementKind === "readiness" ? "in_house" : "client"),
     ...over,
   };
 }

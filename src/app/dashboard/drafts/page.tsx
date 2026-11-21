@@ -92,7 +92,7 @@ type Question = {
   prompt: string;
   requirementKind: "spec_field" | "readiness";
   /** Who it is for (0062). Only a client question may go to a designer. */
-  audience?: QuestionAudience;
+  audience: QuestionAudience;
   fieldLabel: string | null;
   state: AnswerState;
   tier: QuestionTier | null;

@@ -24,6 +24,7 @@ const question = (over: Partial<ItemTgqQuestion> & { requirement_id: string }): 
   section: "Build details",
   prompt: "A question",
   field_label: null,
+  audience: over.audience ?? (over.kind === "readiness" ? "in_house" : "client"),
   ...over,
 });
 const open = (over: Partial<ItemTgqOutstanding> & { requirementId: string }): ItemTgqOutstanding => ({

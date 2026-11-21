@@ -85,14 +85,14 @@ export function inProjectWideTgq(question: TgqCountable): boolean {
  * "Assembly guide required" fills a BWS field and is ours; "Floor plans" has
  * no column and is the client's.
  *
- * STAGE 1 FALLBACK: a caller whose payload carries no audience reads the kind
- * the way 0062 seeded it (readiness in-house, a spec field the client's), so
- * nothing reads differently until every payload carries it.
+ * REQUIRED, with no fallback to the kind (Stage 2): every payload carries it,
+ * so a caller that forgets it is a type error rather than a quiet reading of
+ * the old rule.
  */
-export type AudienceReadable = { requirementKind: "spec_field" | "readiness"; audience?: QuestionAudience | null };
+export type AudienceReadable = { audience: QuestionAudience };
 
 export function questionAudience(question: AudienceReadable): QuestionAudience {
-  return question.audience ?? (question.requirementKind === "spec_field" ? "client" : "in_house");
+  return question.audience;
 }
 
 /** May be put in a chase to a designer or a client. */
@@ -169,8 +169,8 @@ export type GroupableQuestion = {
   recordId: string;
   requirementId: string;
   requirementKind: "spec_field" | "readiness";
-  /** Who the question is for (0062). Optional until every payload carries it: `questionAudience`. */
-  audience?: QuestionAudience | null;
+  /** Who the question is for (0062). Only a client question reaches a designer. */
+  audience: QuestionAudience;
   tier: QuestionTier | null;
   /** The cheat sheet's section. Read by the TGQ rule: the project-wide section never counts in an item's TGQ. */
   section: string | null;

@@ -91,6 +91,7 @@ function question(over: Record<string, unknown> = {}) {
     area: "Dressing area",
     prompt: `Question ${n}`,
     requirementKind: "spec_field",
+    audience: "client",
     fieldLabel: "COM 1",
     state: "missing",
     tier: "to_quote",

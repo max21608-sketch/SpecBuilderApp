@@ -139,7 +139,7 @@ export type RecordItemTgq = { count: number | null; projectWide: number; rows: r
  */
 /** How many questions each audience answers. */
 export function countAudiences(
-  questions: readonly { audience?: QuestionAudience | null; requirementKind: "spec_field" | "readiness" }[],
+  questions: readonly { audience: QuestionAudience }[],
 ): Partial<Record<QuestionAudience, number>> {
   const counts: Partial<Record<QuestionAudience, number>> = {};
   for (const question of questions) {

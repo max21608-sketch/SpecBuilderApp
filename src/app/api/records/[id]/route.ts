@@ -153,7 +153,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // asked, as `missing`. An uncategorised record has no questions at all —
   // which is NOT the same as having none outstanding, and the screen says so.
   const answers = await sql`
-    select q.id as requirement_id, q.kind, q.prompt, q.help_text, q.section, q.sort_order,
+    select q.id as requirement_id, q.kind, q.audience, q.prompt, q.help_text, q.section, q.sort_order,
            q.tgq_levels, q.local_key,
            f.name as field_name, f.json_id, f.field_category,
            a.id as answer_id, a.value, a.qualifier,
@@ -394,6 +394,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       json_id: row.json_id === null || row.json_id === undefined ? null : Number(row.json_id),
       local_key: row.local_key === null || row.local_key === undefined ? null : String(row.local_key),
       kind: String(row.kind),
+      audience: String(row.audience),
       section: row.section === null || row.section === undefined ? null : String(row.section),
       prompt: String(row.prompt ?? ""),
       field_label: row.field_name === null || row.field_name === undefined ? null : String(row.field_name),

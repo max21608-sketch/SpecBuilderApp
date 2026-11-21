@@ -14,6 +14,8 @@ import type { TwinWithAttributes } from "@/lib/twin-offer";
 
 export type Answer = {
   requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;
+  /** Who answers it (0062): a client question is chased, an in-house or CAM one recorded here. */
+  audience: string;
   tgq_levels: string[] | null;
   field_name: string | null; json_id: number | null; field_category: string | null;
   answer_id: string | null; value: string | null; qualifier: string | null; state: AnswerState; version: number;

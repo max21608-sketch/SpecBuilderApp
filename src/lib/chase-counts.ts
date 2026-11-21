@@ -78,8 +78,8 @@ export type GateQuestion = {
   local_key: string | null;
   /** `requirements.kind`. Absent on a caller that does not carry it. */
   kind?: string | null;
-  /** `requirements.audience` (0062). Read before the kind where present. */
-  audience?: string | null;
+  /** `requirements.audience` (0062). Decides a chase row from one we record. */
+  audience: string;
   /** `requirements.section`. The project-wide section is answered on the project. */
   section?: string | null;
 };
@@ -129,10 +129,9 @@ export function gateRowRole(
   // Before readiness: a project-wide question is the PROJECT's work whatever
   // its kind, and it is answered once, on the project.
   if (question && question.section === PROJECT_WIDE_SECTION) return "project";
-  // Ours to record, never chased: an in-house or CAM question (0062,
-  // decision D). Where a caller carries no audience, the kind as 0062 seeded
-  // it.
-  if (question && (question.audience ? question.audience !== "client" : question.kind === "readiness")) return "readiness";
+  // Ours to record, never chased: an in-house or CAM question, whatever its
+  // kind (0062, decision D).
+  if (question && question.audience !== "client") return "readiness";
   if (row.field.localKey !== null && !question) return "details";
   if (row.field.dimensionSlot) return "slot";
   return "chase";

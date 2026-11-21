@@ -34,6 +34,7 @@ function question(over: Partial<Q>): Q {
     groupLabel: "AP364c-011",
     variantCount: 0,
     area: "Signature Suite",
+    audience: over.audience ?? (over.requirementKind === "readiness" ? "in_house" : "client"),
     ...over,
   };
 }

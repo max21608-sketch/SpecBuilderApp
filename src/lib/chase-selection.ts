@@ -66,7 +66,7 @@ export type SelectableQuestion = {
   requirementId: string;
   requirementKind: "spec_field" | "readiness";
   /** Who the question is for (0062). Only a client question is preselected. */
-  audience?: QuestionAudience | null;
+  audience: QuestionAudience;
   /** The server's reading. Null where the record has no level to read it at. */
   tier: QuestionTier | null;
   /** The cheat sheet's section. A project-wide question is answered once on the project, never asked per item. */

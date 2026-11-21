@@ -16,6 +16,8 @@ import {
 import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
 
 type Q = Parameters<typeof itemTgqCounts>[0][number] & {
+  /** What BWS has a column for; the audience decides the chase (0062). */
+  requirementKind?: "spec_field" | "readiness";
   requirementId: string;
   prompt: string;
   jsonId: number | null;
@@ -33,6 +35,7 @@ const q = (over: Partial<Q> = {}): Q => {
     tier: "to_quote",
     section: "Build details",
     requirementKind: "spec_field",
+    audience: over.audience ?? (over.requirementKind === "readiness" ? "in_house" : "client"),
     ...over,
   };
 };

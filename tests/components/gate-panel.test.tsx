@@ -83,8 +83,8 @@ const MATRIX: MatrixFieldRow[] = [SPEC_NOTES, PRODUCT_CODE, SWIVEL, DIMS_TGQ, DI
 }));
 
 const ANSWERS = [
-  { requirement_id: "r-notes", prompt: "Spec notes", json_id: 24, local_key: null, state: "missing" as const },
-  { requirement_id: "r-dims", prompt: "Dimensions?", json_id: 3, local_key: null, state: "confirmed" as const },
+  { requirement_id: "r-notes", prompt: "Spec notes", json_id: 24, local_key: null, audience: "client", state: "missing" as const },
+  { requirement_id: "r-dims", prompt: "Dimensions?", json_id: 3, local_key: null, audience: "client", state: "confirmed" as const },
 ];
 
 const renderPanel = (over: Partial<Parameters<typeof GatePanel>[0]> = {}) =>
@@ -172,6 +172,7 @@ describe("the gate panel", () => {
           json_id: null,
           local_key: "headboard_fitted",
           kind: "readiness",
+          audience: "in_house",
           state: "missing" as const,
         },
         {
@@ -180,6 +181,7 @@ describe("the gate panel", () => {
           json_id: 130,
           local_key: null,
           kind: "spec_field",
+          audience: "client",
           state: "missing" as const,
         },
       ],

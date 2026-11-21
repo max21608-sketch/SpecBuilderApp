@@ -35,6 +35,7 @@ const question = (over: Partial<GateQuestion> & { requirement_id: string }): Gat
   json_id: null,
   local_key: null,
   kind: "spec_field",
+  audience: over.audience ?? (over.kind === "readiness" ? "in_house" : "client"),
   ...over,
 });
 

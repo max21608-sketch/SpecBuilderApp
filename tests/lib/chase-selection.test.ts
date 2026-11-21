@@ -18,6 +18,7 @@ function question(over: Partial<SelectableQuestion> = {}): SelectableQuestion {
     section: null,
     waiting: null,
     contactId: "c-1",
+    audience: over.audience ?? (over.requirementKind === "readiness" ? "in_house" : "client"),
     ...over,
   };
 }

@@ -128,6 +128,8 @@ export type GateAnswer = {
    * never chased — from a spec-field one, and the row's label says which.
    */
   kind?: string | null;
+  /** `requirements.audience` (0062): an in-house or CAM row is ours to record, a client row is chased. */
+  audience: string;
   /** `requirements.section`. The project-wide section is answered once, on the project. */
   section?: string | null;
   state: AnswerState;

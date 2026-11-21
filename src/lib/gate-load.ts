@@ -45,7 +45,7 @@
 // it from a row number, so the day Matthew confirms the model is a re-seed.
 // ============================================================================
 import type { SqlLike } from "@/lib/record-atoms";
-import type { AnswerState } from "@/lib/spec-vocab";
+import { normaliseQuestionAudience, type AnswerState } from "@/lib/spec-vocab";
 import type { SheetTgqMatrix } from "@/lib/tgq";
 import { effectiveMatrixType } from "@/lib/matrix-type";
 import { itemTgq, type ItemTgq, type ItemTgqOutstanding, type ItemTgqQuestion } from "@/lib/item-tgq";
@@ -289,7 +289,7 @@ export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promi
     mapped.length === 0
       ? []
       : await exec`
-          select q.category_id, q.id, q.kind, q.prompt, q.section, q.local_key, f.json_id, f.name as field_name
+          select q.category_id, q.id, q.kind, q.audience, q.prompt, q.section, q.local_key, f.json_id, f.name as field_name
             from requirements q left join spec_fields f on f.id = q.spec_field_id
            where q.category_id = any(${mapped}::uuid[])
              and q.category_id = any(
@@ -303,6 +303,8 @@ export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promi
     list.push({
       requirement_id: String(row.id),
       kind: String(row.kind),
+      // Who answers it (0062): what decides a chase row from one we record.
+      audience: normaliseQuestionAudience(row.audience),
       prompt: String(row.prompt ?? ""),
       section: row.section === null || row.section === undefined ? null : String(row.section),
       local_key: row.local_key === null || row.local_key === undefined ? null : String(row.local_key),
