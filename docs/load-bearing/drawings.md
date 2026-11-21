@@ -678,6 +678,11 @@ equipped with a default set of things to fill in."*
   carried. A copied answer is `manual`; an answer that is a PROJECTION of the
   bill line's attributes is never offered, so an answer and its attribute are
   never both copied.
+  A fabric question with NO answer row (a seed added it after the
+  configuration was categorised) is open in `DifferingFields` like the rest
+  (L3, 2026-11-21): the save is `useChecklistSave`, whose `answerRequest`
+  sends it to the record's POST, which creates the row with the first answer.
+  Saving and refusals key on `checklistSaveKey`. `tests/components/differing-fields.test.tsx`.
 - **Every other phase carrying the same client ref is offered**, each from its
   OWN bill line's specs — never phase A's specs onto phase B. A ref on two lines
   of one phase (`SX11A`) offers nothing for that phase.

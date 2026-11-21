@@ -9,18 +9,27 @@
 // same field (where on the item it goes, 0029) beside it.
 //
 // They are the SAME checklist answers the Checklist tab shows, saved through
-// the same `PATCH /api/answers/[id]`. Nothing here writes a value on its own:
+// the same save (`useChecklistSave`). Nothing here writes a value on its own:
 // a blank stays `missing` until a person types one.
+//
+// A QUESTION WITH NO ANSWER ROW YET IS OPEN TOO (L3, 2026-11-21): a fabric
+// question a seed added after the configuration was categorised. Its box was
+// disabled, a dead end at the top of the screen; the save picks the record's
+// POST for it (`answerRequest`), which creates the row with the first answer.
+// Saving and refusals are keyed by `checklistSaveKey`, the Checklist tab's.
 import { useMemo } from "react";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import AnswerValue, { blurOnEnter } from "@/components/records/AnswerValue";
 import Chip from "@/components/ui/Chip";
 import { ANSWER_STATE_LABELS, answerStateTone, type AnswerState } from "@/lib/spec-vocab";
 import { DIFFERING_FIELD_JSON_IDS } from "@/lib/configuration-carry";
+import { checklistSaveKey } from "@/components/records/RecordChecklist";
 import type { Palette } from "@/lib/palettes";
 
 export type DifferingAnswer = {
   answer_id: string | null;
+  /** Keys a question with no answer row yet, for its save (`checklistSaveKey`). */
+  requirement_id: string;
   prompt: string;
   field_name: string | null;
   json_id: number | null;
@@ -96,21 +105,21 @@ export default function DifferingFields<A extends DifferingAnswer>({
       <ul className="divide-y divide-neutral-100 border-t border-neutral-100">
         {rows.map((answer) => (
           <li
-            key={answer.answer_id ?? `${answer.json_id}:${answer.prompt}`}
+            key={checklistSaveKey(answer)}
             className="grid gap-2 py-2 min-[760px]:grid-cols-[160px_minmax(0,1fr)_200px_90px] min-[760px]:items-start"
           >
             <span className="text-[12.5px] font-medium text-neutral-900">{fieldDisplayName(answer.field_name, answer.json_id) || answer.prompt}</span>
             <AnswerValue
               palette={paletteFor(answer)}
               value={answer.value}
-              disabled={!answer.answer_id || savingId === answer.answer_id}
-              inputKey={`diff:${answer.answer_id}:${answer.version}:${refusals[answer.answer_id ?? ""] ?? 0}`}
+              disabled={savingId === checklistSaveKey(answer)}
+              inputKey={`diff:${checklistSaveKey(answer)}:${answer.version}:${refusals[checklistSaveKey(answer)] ?? 0}`}
               onCommit={(next) => onSave(answer, next, next ? "confirmed" : "missing")}
             />
             <input
-              key={`q:${answer.answer_id}:${answer.version}:${refusals[answer.answer_id ?? ""] ?? 0}`}
+              key={`q:${checklistSaveKey(answer)}:${answer.version}:${refusals[checklistSaveKey(answer)] ?? 0}`}
               defaultValue={answer.qualifier ?? ""}
-              disabled={!answer.answer_id || savingId === answer.answer_id || !answer.value}
+              disabled={savingId === checklistSaveKey(answer) || !answer.value}
               placeholder="Where on the item"
               aria-label={`Where on the item — ${fieldDisplayName(answer.field_name, answer.json_id) || answer.prompt}`}
               onKeyDown={blurOnEnter}
