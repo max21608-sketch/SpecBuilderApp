@@ -23,7 +23,15 @@ vi.mock("@/lib/session", () => ({
 const databaseUrl = process.env.DATABASE_URL;
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 
-type Row = { recordId: string; requirementId: string; answerId: string | null; answerVersion: number | null; state: string; value: string | null };
+type Row = {
+  recordId: string;
+  requirementId: string;
+  answerId: string | null;
+  answerVersion: number | null;
+  state: string;
+  value: string | null;
+  specShips?: string | null;
+};
 type Question = { key: string; area: string | null; heading: string; rows: Row[]; items: number };
 
 describeIfDb("a question answered once for an area", () => {
@@ -200,6 +208,50 @@ describeIfDb("a question answered once for an area", () => {
       await mover.end();
       await client.query(`delete from spec_answers where record_id = any($1::uuid[])`, [[lounge1, lounge2]]);
       await client.query(`delete from spec_records where id = any($1::uuid[])`, [[lounge1, lounge2]]);
+    }
+  }, SLOW);
+
+  // CHASE REVIEW C1, 2026-11-21: the BWS file ships a record's SPEC before its
+  // checklist answer. A bill saying "Outdoor TBC" on an item made its answer a
+  // TBC projection, and "Indoor" on the card was written over it (TBC is not
+  // settled) — the checklist read "Indoor" while the file shipped "Outdoor
+  // TBC". Now such a row is listed with what the file ships, unticked, left
+  // alone; and after the fan-out the export cell and the checklist agree.
+  it("leaves an item whose field a spec holds alone, so the BWS cell and the checklist still agree", async () => {
+    const held = await record(31, "Bar");
+    const plain = await record(32, "Bar");
+    await client.query(
+      `insert into record_attributes (record_id, attr_group, label, value, spec_field_id, state, created_by, updated_by)
+       values ($1, 'note', 'Indoor / outdoor', 'Outdoor', (select id from spec_fields where json_id = 130), 'tbc', 'qa', 'qa')`,
+      [held],
+    );
+    const heldAnswer = await outdoor(held);
+    await client.query(`update spec_answers set state = 'tbc', value = 'Outdoor TBC', source_kind = 'attribute', updated_by = 'qa' where id = $1`, [heldAnswer.id]);
+    try {
+      const card = (await cards()).find((q) => q.area === "Bar")!;
+      expect(card.rows.find((r) => r.recordId === held)?.specShips).toBe("Outdoor TBC");
+
+      const result = await answer({ key: card.key, value: "Indoor", state: "confirmed", seen: seen(card) });
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ written: 1, overridden: 0, records: 1 });
+      expect((result.body.leftAlone as { recordLabel: string }[]).length).toBe(1);
+      expect(await outdoor(plain)).toMatchObject({ state: "confirmed", value: "Indoor" });
+      expect(await outdoor(held)).toMatchObject({ state: "tbc", value: "Outdoor TBC", source_kind: "attribute" });
+
+      // THE FILE AND THE CHECKLIST AGREE, read by the export's own composer.
+      const { sql } = await import("@/lib/db");
+      const { loadRecordAtoms, scopeForAtoms, exportAnswers } = await import("@/lib/record-atoms");
+      const { cellsByField } = await import("@/lib/bws-export");
+      for (const id of [held, plain]) {
+        const atoms = (await loadRecordAtoms(sql, [id])).get(id)!;
+        const cell = cellsByField(scopeForAtoms(atoms), atoms.record, atoms.attributes, exportAnswers(atoms)).get(130)!;
+        const checklist = await outdoor(id);
+        expect(cell.value, id === held ? "held" : "plain").toBe(checklist.value);
+      }
+    } finally {
+      await client.query(`delete from record_attributes where record_id = any($1::uuid[])`, [[held, plain]]);
+      await client.query(`delete from spec_answers where record_id = any($1::uuid[])`, [[held, plain]]);
+      await client.query(`delete from spec_records where id = any($1::uuid[])`, [[held, plain]]);
     }
   }, SLOW);
 });

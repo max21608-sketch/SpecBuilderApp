@@ -27,6 +27,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { ANSWER_STATE_LABELS, type AnswerState } from "@/lib/spec-vocab";
 import type { Palette } from "@/lib/palettes";
 import { TIER_LABELS, type QuestionTier } from "@/lib/tgq";
+import { heldBySpec, planProjectWide, type ProjectWideRow } from "@/lib/project-wide-plan";
 import AnswerValue from "@/components/records/AnswerValue";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
@@ -35,17 +36,9 @@ import Note from "@/components/ui/Note";
 import Spinner from "@/components/ui/Spinner";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 
-type Row = {
-  recordId: string;
-  recordLabel: string;
-  itemDescription: string;
-  requirementId: string;
-  answerId: string | null;
-  answerVersion: number | null;
-  state: AnswerState;
-  value: string | null;
-  tier: QuestionTier | null;
-};
+// The route's row, and the route's own plan (`project-wide-plan.ts`): the
+// card shows the decision the write makes, never a copy of its rule.
+type Row = ProjectWideRow;
 
 type Question = {
   key: string;
@@ -64,7 +57,6 @@ type Question = {
 };
 
 const COLUMNS = 5;
-const isSettled = (state: string) => state === "confirmed" || state === "na";
 
 /**
  * THE SAME CARD FOR AN AREA (decision C of 2026-11-20): `scope="area"` reads
@@ -314,19 +306,13 @@ function AnswerForm({
   const target = (value ?? "").trim();
   // TBC carries no value: it says the answer is not decided.
   const sending = state === "tbc" ? "" : target;
-  // THE SAME DECISION THE ROUTE MAKES (`planProjectWide`), shown before it.
+  // THE DECISION THE ROUTE MAKES — `planProjectWide` itself, shown before it.
+  // With nothing ticked, every row it would not write is one a person may
+  // tick: a settled different answer, or an item whose field a spec holds.
   const plan = useMemo(() => {
-    const write: Row[] = [];
-    const differ: Row[] = [];
-    let same = 0;
-    for (const row of question.rows) {
-      const already = row.state === state && (row.value ?? "").trim() === sending;
-      if (already) same += 1;
-      else if (!isSettled(row.state)) write.push(row);
-      else differ.push(row);
-    }
-    return { write, differ, same };
-  }, [question.rows, state, sending]);
+    const decided = planProjectWide(question, { value: sending || null, state, overrides: new Set() });
+    return { write: decided.write, differ: decided.leftAlone, same: decided.same.length };
+  }, [question, state, sending]);
 
   const ticked = plan.differ.filter((row) => row.answerId && overrides.has(row.answerId));
   const count = plan.write.length + ticked.length;
@@ -416,8 +402,8 @@ function AnswerForm({
       {plan.differ.length > 0 && (
         <div className="mt-3">
           <p className="text-xs font-medium text-amber-800">
-            {plan.differ.length} item{plan.differ.length === 1 ? " holds" : "s hold"} a different settled answer, and{" "}
-            {plan.differ.length === 1 ? "is" : "are"} left alone unless ticked:
+            {plan.differ.length} item{plan.differ.length === 1 ? " holds" : "s hold"} a different settled answer, or a
+            spec that fills this BWS field, and {plan.differ.length === 1 ? "is" : "are"} left alone unless ticked:
           </p>
           <ul className="mt-1 space-y-0.5">
             {plan.differ.map((row) => (
@@ -447,6 +433,20 @@ function AnswerForm({
                 <span className="text-neutral-500">
                   — “{row.state === "na" ? ANSWER_STATE_LABELS.na : (row.value ?? "")}”
                 </span>
+                {/* A SPEC HOLDS IT (review C1): the record checklist's own
+                    warning, said where the row is. */}
+                {heldBySpec(row) && (
+                  <span
+                    className="text-amber-800"
+                    title={
+                      (row.specShips ?? null) !== null
+                        ? `A spec on this item fills this BWS field, and the BWS file takes the spec over a checklist answer, so it ships “${row.specShips}”. Edit the spec to change the file; ticking this changes the checklist only.`
+                        : "This answer follows the item's specs. Edit the spec to change it; ticking this replaces it with a typed answer."
+                    }
+                  >
+                    {(row.specShips ?? null) !== null ? `· the file ships the spec, “${row.specShips}”` : "· follows the item's spec"}
+                  </span>
+                )}
               </li>
             ))}
           </ul>

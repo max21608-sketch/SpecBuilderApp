@@ -527,6 +527,18 @@ the one item with NO category. Max's ruling is the rule:
   - **Missing and TBC rows are written.** A settled answer with a DIFFERENT
     value is listed unticked, and replacing it needs a tick and a reason (or
     an open change).
+  - **An item whose field a SPEC holds is a settled answer too** (review C1,
+    2026-11-21), on the project card and the area card alike. The BWS file
+    ships a record's spec before its checklist answer, so a bill's "Outdoor
+    TBC" (a TBC projection) was overwritten by "Indoor" on the card and the
+    checklist read Indoor while the file shipped Outdoor TBC. A row whose
+    answer is a projection (`source_kind = 'attribute'`) or for whose field
+    the export's own composed cell comes from a spec (`specShips`, the cell
+    `specShipsInstead` reads) is listed with what the file ships, unticked,
+    and left alone; a tick takes the same reason. `planProjectWide` lives in
+    `project-wide-plan.ts` and the card imports IT, not a copy
+    (`tests/db/area-wide.test.ts` holds the cell and the checklist equal
+    after a fan-out).
   - **One change set, one version per record.** `spec_records.version` is
     untouched. A dimension is refused: it is per item, always.
 - **They still block every quote.** `readyToQuote` = categorised AND the

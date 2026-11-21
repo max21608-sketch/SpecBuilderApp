@@ -401,7 +401,8 @@ answers one question across many items.
 - **"By area — answered once for each area".** Indoor or outdoor, floor type,
   wall build and "fully outdoor or partially protected" are answered once for
   an area such as "Restaurant" and written to every item in it. An item that
-  already holds a different answer is left alone unless you tick it (and say
+  already holds a different answer — or has a spec that fills the field, shown
+  as "the file ships the spec, …" — is left alone unless you tick it (and say
   why). An item with no area is answered on its own.
 - "Provisional cabinetry gate model, drafted by AI…" at the top means some of
   the TGQ marks on this screen come from that draft.
