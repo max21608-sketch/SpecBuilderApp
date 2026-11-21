@@ -238,7 +238,10 @@ documents" → drop the files or "Choose files".
   buttons on its row: choose the kind in the box or press the right
   suggestion, then press "Read the 1 you have named". Nothing is read until
   you do. If the model's reading is a bill it must transcribe, the row says
-  so: one charged read.
+  so: one charged read. A file that "Could be the bill or an FF&E schedule"
+  is shown the same way: "— say which —" in the box, and "Bill of
+  quantities" offered as a button beside it with what was found ("Reads as
+  a bill: 26 lines; …").
 - **Nothing is read and nothing is charged until you press "Start intake
   (N)".** A bill from a spreadsheet is read by code and is free. Every other
   kind is a charged read.
