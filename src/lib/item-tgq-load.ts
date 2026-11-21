@@ -33,7 +33,7 @@ export async function loadMatrixItemTgq(projectIds: string[]): Promise<Map<strin
   const out = new Map<string, MatrixItemTgq>();
   if (projectIds.length === 0) return out;
   const records = await sql`
-    select r.id, r.project_id, r.category_id, coalesce(r.parent_id, r.id) as line_id
+    select r.id, r.project_id, r.category_id, r.matrix_type, coalesce(r.parent_id, r.id) as line_id
       from spec_records r
       join spec_runs run on run.id = r.run_id
      where r.project_id = any(${projectIds}::uuid[])
@@ -53,7 +53,12 @@ export async function loadMatrixItemTgq(projectIds: string[]): Promise<Map<strin
     const recordId = String(row.id);
     // No outstanding list is needed for the COUNT on the matrix: the gate rows
     // are the count. A screen that lists the rows passes its own.
-    const tgq = itemTgqForRecord(context, { id: recordId, categoryId: String(row.category_id) }, []);
+    // By the record's ACCEPTED type where a person accepted one (decision B).
+    const tgq = itemTgqForRecord(
+      context,
+      { id: recordId, categoryId: String(row.category_id), matrixType: row.matrix_type ? String(row.matrix_type) : null },
+      [],
+    );
     out.set(recordId, { ...tgq, recordId, projectId: String(row.project_id), lineId: String(row.line_id) });
   }
   return out;

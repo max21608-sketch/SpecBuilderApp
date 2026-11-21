@@ -180,6 +180,9 @@ const AtomSchema = z.object({
   // Added at schema 3. Optional on read, defaulted null, so a version written
   // before 0019 parses as "nobody had said" rather than failing the screen.
   level: z.string().nullable().optional().default(null),
+  // Added at schema 10 (0061). Named for the reason above -- Zod strips what
+  // it does not name -- and defaulted null: an older version was untyped.
+  matrixType: z.string().nullable().optional().default(null),
   productReference: z.string().nullable(),
   designer: z.string().nullable(),
   boqCategory: z.string().nullable(),
@@ -281,6 +284,9 @@ export const CORE_FIELDS: {
   { field: "boqCategory", label: "BOQ category", read: (a) => a.boqCategory },
   { field: "categoryName", label: "Category", read: (a) => a.categoryName },
   { field: "level", label: "Level", read: (a) => a.level },
+  // 0061: which of the sheet's types the item is judged as. "Type", because
+  // the screens say type; the code is what was decided.
+  { field: "matrixType", label: "Type", read: (a) => a.matrixType ?? null },
   // 0034. It is part of the composed Dimensions cell, so a change to it shows
   // TWICE on a version -- here as the note, and in `cells` as the cell moving.
   // Both are wanted: the cell says what BWS received, this says what somebody

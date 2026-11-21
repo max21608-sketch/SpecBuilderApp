@@ -4,6 +4,8 @@
 // apart and `nowhere` out; elsewhere the checklist's own questions.
 import { describe, expect, it } from "vitest";
 import { itemTgq, type ItemTgqGateRow, type ItemTgqOutstanding, type ItemTgqQuestion } from "@/lib/item-tgq";
+import { gatesForRecord, itemTgqForRecord, type GateContext } from "@/lib/gate-load";
+import type { GateField } from "@/lib/gates";
 
 const PW = "Project / commercial";
 const gate = (
@@ -111,5 +113,69 @@ describe("itemTgq on the placeholder: unchanged", () => {
     const result = itemTgq({ tgqGateRows: null, questions: [], outstanding: [open({ requirementId: "a", tier: null })] });
     expect(result.count).toBeNull();
     expect(result.rows).toEqual([]);
+  });
+});
+
+describe("an item's TGQ by its ACCEPTED type (decision B)", () => {
+  // The armchairs sheet maps S, A and B. Row 12, Swivel, reaches A and B (the
+  // union widening onto benches); Width reaches all three. A sofa somebody
+  // TYPED S is no longer asked Swivel; untyped it is, exactly as before 0061.
+  const gateField = (matrixRow: number, fieldName: string, specFieldJsonId: number, appliesTo: string[]): GateField => ({
+    matrixRow,
+    gate: "TGQ",
+    capture: "question",
+    fieldName,
+    specFieldJsonId,
+    localKey: null,
+    dimensionSlot: null,
+    valueType: "free_text",
+    paletteKey: null,
+    paletteRaw: null,
+    conditionalOnKey: null,
+    conditionalOnValue: null,
+    notes: null,
+    appliesTo,
+  });
+  const context: GateContext = {
+    fieldsByCategory: new Map([
+      ["armchairs", [gateField(9, "Outdoor", 130, ["A", "B", "S"]), gateField(12, "Swivel Mechs", 232, ["A", "B"])]],
+    ]),
+    typesByCategory: new Map([
+      [
+        "armchairs",
+        [
+          { code: "S", name: "Sofas", provisionalNote: null, suggestWords: ["sofa"], suggestDefault: false },
+          { code: "A", name: "Armchairs", provisionalNote: null, suggestWords: [], suggestDefault: true },
+          { code: "B", name: "Benches", provisionalNote: null, suggestWords: ["bench"], suggestDefault: false },
+        ],
+      ],
+    ]),
+    askedByCategory: new Map([["armchairs", new Set([130, 232])]]),
+    askedLocalKeysByCategory: new Map(),
+    answersByRecord: new Map(),
+    slotsByRecord: new Map(),
+    localsByRecord: new Map(),
+    questionsByCategory: new Map([
+      [
+        "armchairs",
+        [
+          question({ requirement_id: "env", json_id: 130, prompt: "Indoor/ Outdoor / Humid environment" }),
+          question({ requirement_id: "swv", json_id: 232, prompt: "Swivel?" }),
+        ],
+      ],
+    ]),
+  };
+  const labels = (matrixType: string | null) =>
+    itemTgqForRecord(context, { id: "sofa", categoryId: "armchairs", matrixType }, []).rows.map((row) => row.label);
+
+  it("typed S loses Swivel; untyped keeps it", () => {
+    expect(labels("S")).toEqual(["Indoor/ Outdoor / Humid environment"]);
+    expect(labels(null)).toEqual(["Indoor/ Outdoor / Humid environment", "Swivel?"]);
+  });
+
+  it("an accepted type the sheet does not map keeps the union, never an empty gate", () => {
+    expect(labels("D")).toEqual(["Indoor/ Outdoor / Humid environment", "Swivel?"]);
+    const gates = gatesForRecord(context, { id: "sofa", categoryId: "armchairs", matrixType: "S" });
+    expect(gates?.TGQ.fields.map((f) => f.field.matrixRow)).toEqual([9]);
   });
 });

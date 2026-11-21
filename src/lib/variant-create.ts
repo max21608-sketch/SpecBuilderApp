@@ -159,7 +159,7 @@ export async function insertVariant(
 ): Promise<{ recordId: string; recordNo: number; variantOrdinal: number }> {
   const parents = await txn`
     select project_id, run_id, category_id, item_description, product_reference, designer, area, boq_category,
-           level, level_suggested, level_suggested_reason
+           level, level_suggested, level_suggested_reason, matrix_type
       from spec_records where id = ${parentId}
   `;
   const parent = parents[0];
@@ -187,7 +187,7 @@ export async function insertVariant(
   const inserted = await txn`
     insert into spec_records
       (project_id, run_id, record_no, status, category_id, item_description, product_reference,
-       qty, designer, area, boq_category, level, level_suggested, level_suggested_reason,
+       qty, designer, area, boq_category, level, level_suggested, level_suggested_reason, matrix_type,
        parent_id, depth, split_reason, variant_label, dimension_note,
        created_by, updated_by)
     values
@@ -195,6 +195,9 @@ export async function insertVariant(
        ${parent.item_description}, ${parent.product_reference ?? null},
        null, ${parent.designer ?? null}, ${parent.area ?? null}, ${parent.boq_category ?? null},
        ${parent.level ?? null}, ${parent.level_suggested ?? null}, ${parent.level_suggested_reason ?? null},
+       -- 0061: the line's accepted type, as the level is inherited: a
+       -- configuration of a sofa is a sofa, decided one row up.
+       ${parent.matrix_type ?? null},
        ${parentId}, 1, ${splitReason}, ${label}, ${dimensionNote}, ${actor}, ${actor})
     -- ITS NUMBER UNDER THE LINE, the 3 in 12.3, is NOT written here: 0039's
     -- insert trigger allocates it, max + 1 over every sibling including the

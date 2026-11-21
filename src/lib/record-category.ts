@@ -71,8 +71,12 @@ export async function setRecordCategory(
     await txn`delete from spec_answers where record_id = ${recordId} and revision_no = 0`;
   }
 
+  // THE TYPE GOES WITH THE CATEGORY (0061). A type is one of the OLD
+  // sheet's types; on the new sheet it is either meaningless or, by
+  // coincidence, a code it also maps, and either way nobody chose it there.
+  // The new sheet's suggestion is shown afresh.
   const updated = await txn`
-    update spec_records set category_id = ${categoryId}, updated_by = ${actor}
+    update spec_records set category_id = ${categoryId}, matrix_type = null, updated_by = ${actor}
     where id = ${recordId} and version = ${expectedVersion}
     returning version
   `;

@@ -19,7 +19,15 @@ import {
   type OutstandingQuestion,
 } from "@/lib/chase-drafts";
 import { inItemTgq, projectWideTgqKeys, readyToQuote } from "@/lib/chase-grouping";
-import { gateSummary, gatesForRecord, itemTgqForRecord, loadGateContext } from "@/lib/gate-load";
+import {
+  gateSummary,
+  gatesForRecord,
+  itemTgqForRecord,
+  loadGateContext,
+  matrixTypeOf,
+  provisionalNoteFor,
+} from "@/lib/gate-load";
+import { suggestMatrixType } from "@/lib/matrix-type";
 import { EMPTY_SPEC_SUMMARY, loadSpecSummaries } from "@/lib/record-spec-summary";
 import { countOpenDisagreementsByRecord } from "@/lib/disagreements";
 import { requireWriter } from "@/lib/route-guards";
@@ -124,6 +132,9 @@ export async function GET(request: Request): Promise<Response> {
       -- tiers a question. See db/migrations/0025_level_suggestion.sql.
       r.level_suggested,
       r.level_suggested_reason,
+      -- 0061: the person's ACCEPTED gate-model type within a multi-type
+      -- sheet. The suggestion beside it is computed below, never stored.
+      r.matrix_type,
       -- The optimistic lock, so the spec table's inline level control can
       -- accept ONE row's suggestion through PATCH /api/records/[id] rather
       -- than accepting the whole run's. Accepting a suggestion is a person's
@@ -368,20 +379,33 @@ export async function GET(request: Request): Promise<Response> {
       // same bulk context the TG0/TG1 columns read, never a gate in SQL — and
       // the checklist's own questions where it does not. THE LIST IS THE
       // COUNT: the cell's list below is these rows.
-      const tgq = itemTgqForRecord(
-        gateContext,
-        { id: String(row.id), categoryId: row.category_id ? String(row.category_id) : null },
-        counts?.outstanding ?? [],
-      );
+      // BY THE ACCEPTED TYPE where a person accepted one (decision B): the
+      // same reference the gate columns, the overview and the record read.
+      const gateRef = {
+        id: String(row.id),
+        categoryId: row.category_id ? String(row.category_id) : null,
+        matrixType: row.matrix_type ? String(row.matrix_type) : null,
+      };
+      const tgq = itemTgqForRecord(gateContext, gateRef, counts?.outstanding ?? []);
+      // WHICH OF HIS TYPES, on a sheet covering several: the accepted one, or
+      // the suggestion with its reason (computed, never stored; accepting it
+      // is "Accept n suggested types", a person's press).
+      const sheetTypes = gateRef.categoryId ? (gateContext.typesByCategory.get(gateRef.categoryId) ?? []) : [];
+      const acceptedType = matrixTypeOf(gateContext, gateRef);
       const toQuote = Number(row.variant_count ?? 0) > 0 || !row.category_id ? null : tgq.count;
       return {
         ...row,
-        gates: gateSummary(
-          gatesForRecord(gateContext, {
-            id: String(row.id),
-            categoryId: row.category_id ? String(row.category_id) : null,
-          }),
-        ),
+        gates: gateSummary(gatesForRecord(gateContext, gateRef)),
+        matrix_type_name: acceptedType ? (sheetTypes.find((type) => type.code === acceptedType)?.name ?? acceptedType) : null,
+        // Only where the accept route would write it: a live item, never a
+        // split line's heading (its configurations are the items).
+        matrix_type_suggestion:
+          sheetTypes.length > 1 && !acceptedType && row.status === "active" && Number(row.variant_count ?? 0) === 0
+            ? suggestMatrixType(String(row.item_description ?? ""), sheetTypes)
+            : null,
+        // The seed's sentence where this row's gates and TGQ come from a
+        // provisional type (0061). Printed as it is, never a constant.
+        provisional_note: provisionalNoteFor(gateContext, gateRef),
         waiting: counts?.waiting ?? 0,
         // NULL, NOT 0, in three different cases, and the table prints them
         // differently because they are different answers:

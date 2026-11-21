@@ -110,6 +110,13 @@ export type ProjectSummary = {
   tgqFromMatrix: number;
   tgqFromFallback: number;
   /**
+   * Of `tgqFromMatrix`, the items judged on a PROVISIONAL type (0061: the
+   * AI-drafted cabinetry model, seed 0014), and the sentences those types
+   * carry. The screen prints the sentences, from the data, never a constant.
+   */
+  tgqFromProvisional: number;
+  provisionalNotes: string[];
+  /**
    * OPEN DISAGREEMENTS BETWEEN DOCUMENTS (0046), on live items on live phases:
    * a later document said something different from a value the record holds,
    * and nobody has decided which stands. Counted by `src/lib/disagreements.ts`,
@@ -143,6 +150,8 @@ export const EMPTY_SUMMARY: ProjectSummary = {
   documentsFailed: 0,
   tgqFromMatrix: 0,
   tgqFromFallback: 0,
+  tgqFromProvisional: 0,
+  provisionalNotes: [],
   disagreements: 0,
   disagreementRunId: null,
 };

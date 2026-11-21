@@ -7,6 +7,7 @@ import {
   questionTierOrNull,
   TIER_EMAIL_HEADINGS,
   TIER_LABELS,
+  tgqMatrixFor,
 } from "@/lib/tgq";
 import { ITEM_LEVELS, normaliseItemLevel } from "@/lib/spec-vocab";
 
@@ -181,5 +182,37 @@ describe("a record with no level on the fallback half (row d2)", () => {
     expect(NO_LEVEL_LABEL).toBe("Set level");
     expect(NO_LEVEL_EXPLANATION).toMatch(/blocks a quote/i);
     expect(NO_LEVEL_EXPLANATION).toMatch(/simple, complex or hero/i);
+  });
+});
+
+describe("tgqMatrixFor — the one lookup, by the record's accepted type", () => {
+  // The armchairs sheet receives S, A and B. His row 12 (Swivel, 232) is A
+  // and BS only; the union widens it onto the sheet, so an untyped sofa is
+  // asked it. A sofa a person has TYPED S is judged on S's rows.
+  const union = { fields: new Set([3, 130, 232]), localKeys: new Set<string>() };
+  const matrices = new Map([
+    [
+      "armchairs",
+      {
+        ...union,
+        byType: new Map([
+          ["S", { fields: new Set([3, 130]), localKeys: new Set<string>() }],
+          ["A", { fields: new Set([3, 130, 232]), localKeys: new Set<string>() }],
+        ]),
+      },
+    ],
+  ]);
+  const swivel = { tgqLevels: [], jsonId: 232 };
+
+  it("a sofa typed S is not held up by Swivel; untyped, it still is", () => {
+    expect(questionTierOrNull(swivel, null, tgqMatrixFor(matrices, "armchairs", "S"))).toBe("later");
+    expect(questionTierOrNull(swivel, null, tgqMatrixFor(matrices, "armchairs", null))).toBe("to_quote");
+    expect(questionTierOrNull(swivel, null, tgqMatrixFor(matrices, "armchairs", "A"))).toBe("to_quote");
+  });
+
+  it("a type the sheet does not map keeps the union, and an unmapped sheet stays absent", () => {
+    expect(tgqMatrixFor(matrices, "armchairs", "D")).toBe(matrices.get("armchairs"));
+    expect(tgqMatrixFor(matrices, "side-tables", "S")).toBeNull();
+    expect(tgqMatrixFor(matrices, null, null)).toBeNull();
   });
 });

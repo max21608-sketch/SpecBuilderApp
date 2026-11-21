@@ -30,6 +30,8 @@ export type SpecRecord = {
   source_line_no: number | null; version: number; category_id: string | null; level: string | null;
   /** A level this app guessed. Advisory until somebody accepts it. */
   level_suggested: string | null; level_suggested_reason: string | null;
+  /** 0061: a person's accepted gate-model type within the sheet. Read `matrixType` on the payload for what counts. */
+  matrix_type?: string | null;
   /** 0028's two free-text columns. `spec_description` is quote-facing;
    *  `internal_notes` never leaves this app. */
   spec_description: string | null; internal_notes: string | null;
@@ -183,4 +185,18 @@ export type Payload = {
   };
   /** Matthew's matrix rows for this category. Null where his matrix does not reach it. */
   matrixFields: MatrixFieldRow[] | null;
+  /**
+   * Which of his types this item is, where its sheet covers several (0061,
+   * decision B). Null on a one-type sheet. `suggestion` is computed from the
+   * name and never stored; `accepted` is a person's press.
+   */
+  matrixType?: MatrixTypeState | null;
+  /** The seed's sentence where the gate view or TGQ comes from a provisional type; null otherwise. */
+  provisionalNote?: string | null;
+};
+
+export type MatrixTypeState = {
+  accepted: { code: string; name: string } | null;
+  suggestion: { code: string; name: string; reason: string } | null;
+  options: { code: string; name: string }[];
 };

@@ -35,6 +35,9 @@ import { loadOutstanding } from "@/lib/chase-drafts";
 import { GET as recordsRoute } from "@/app/api/records/route";
 import { inItemTgq, inProjectWideTgq, projectWideTgqKeys } from "@/lib/chase-grouping";
 import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
+import { sql } from "@/lib/db";
+import { loadTgqMatrices } from "@/lib/gate-load";
+import { questionTierOrNull, tgqMatrixFor } from "@/lib/tgq";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -302,6 +305,73 @@ describeIfDb("project summary", () => {
       await client.query(`delete from spec_records where id = $1`, [extra.rows[0].id]);
       await fallbackCategory.drop();
     }
+  });
+
+  it("THE SQL IS THE TS RULE FOR A TYPED RECORD: a sofa typed S is tiered on S's rows (decision B)", async () => {
+    // tgq_questions carries one row per question for the sheet's union and
+    // one per type; the record picks its row by its own matrix_type. The TS
+    // reading is questionTierOrNull over tgqMatrixFor, the one lookup.
+    const sheet = await client.query(`select id from item_categories where slug = 'armchairs-benches-stools-sofas'`);
+    const sheetId = String(sheet.rows[0]!.id);
+    const before = await summary();
+    const sofa = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, status,
+                                 created_by, updated_by)
+       values ($1, $2, 7, $3, '__QA Three seat sofa', 'active', 'qa', 'qa') returning id`,
+      [projectId, runId, sheetId],
+    );
+    const sofaId = String(sofa.rows[0]!.id);
+    try {
+      const matrices = await loadTgqMatrices(sql);
+      const tsToQuote = async (matrixType: string | null) =>
+        (await loadOutstanding(projectId))
+          .filter((q) => q.recordId === sofaId && q.section !== PROJECT_WIDE_SECTION)
+          .filter(
+            (q) =>
+              questionTierOrNull(
+                { tgqLevels: q.tgqLevels, jsonId: q.jsonId, localKey: q.localKey },
+                q.level,
+                tgqMatrixFor(matrices, q.categoryId, matrixType),
+              ) === "to_quote",
+          ).length;
+
+      const untyped = await summary();
+      expect(untyped.toQuoteQuestions - before.toQuoteQuestions).toBe(await tsToQuote(null));
+
+      await client.query(`update spec_records set matrix_type = 'S', updated_by = 'qa' where id = $1`, [sofaId]);
+      const typed = await summary();
+      expect(typed.toQuoteQuestions - before.toQuoteQuestions).toBe(await tsToQuote("S"));
+      // Swivel (232) is A and BS only: typing the sofa S moves exactly that one
+      // question from TGQ to also-outstanding, and nothing else.
+      expect(untyped.toQuoteQuestions - typed.toQuoteQuestions).toBe(1);
+      expect(typed.missing - untyped.missing).toBe(1);
+
+      // A type the sheet does not map is ignored: the union applies.
+      await client.query(`update spec_records set matrix_type = 'D', updated_by = 'qa' where id = $1`, [sofaId]);
+      expect((await summary()).toQuoteQuestions).toBe(untyped.toQuoteQuestions);
+    } finally {
+      await client.query(`delete from spec_records where id = $1`, [sofaId]);
+    }
+  });
+
+  it("counts the items judged on a provisional type, and carries the seed's sentence", async () => {
+    const side = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, status,
+                                 created_by, updated_by)
+       select $1, $2, 8, c.id, '__QA Side table', 'active', 'qa', 'qa'
+         from item_categories c where c.slug = 'side-coffee-bedside-tables' returning id`,
+      [projectId, runId],
+    );
+    try {
+      const result = await summary();
+      expect(result.tgqFromProvisional).toBe(1);
+      expect(result.provisionalNotes).toEqual([
+        "Provisional cabinetry gate model, drafted by AI on 20 Nov 2026, not yet confirmed by Matthew",
+      ]);
+    } finally {
+      await client.query(`delete from spec_records where id = $1`, [side.rows[0]!.id]);
+    }
+    expect((await summary()).tgqFromProvisional).toBe(0);
   });
 
   // "READING N DOCUMENTS…" COUNTS WHAT IS IN FLIGHT, AND NOTHING ELSE (audit

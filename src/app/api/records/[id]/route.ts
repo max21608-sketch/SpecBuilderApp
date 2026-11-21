@@ -17,7 +17,9 @@ import {
 } from "@/lib/record-category";
 import { ITEM_LEVELS } from "@/lib/spec-vocab";
 import { editRecordDetails, type EditRecordDetailsResult } from "@/lib/manual-capture";
-import { gatesForRecord, loadGateContext, loadTgqMatrices } from "@/lib/gate-load";
+import { gatesForRecord, loadGateContext, loadTgqMatrices, matrixTypeOf, provisionalNoteFor } from "@/lib/gate-load";
+import { tgqMatrixFor } from "@/lib/tgq";
+import { suggestMatrixType } from "@/lib/matrix-type";
 import { loadPalettes } from "@/lib/palette-load";
 import { itemTgqCounts } from "@/lib/chase-grouping";
 import { itemTgq } from "@/lib/item-tgq";
@@ -53,6 +55,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            r.spec_description, r.internal_notes, r.dimension_note,
            r.boq_category, r.status, r.version, r.source_line_no, r.category_id, r.level,
            r.level_suggested, r.level_suggested_reason,
+           -- 0061: the person's accepted gate-model type within the sheet.
+           r.matrix_type,
            r.parent_id, r.variant_label, r.variant_ordinal,
            -- 0039: a configuration is titled by its line's number and its own
            -- under it, P18181-012.3, so the line's record_no comes with it.
@@ -232,19 +236,42 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // the version every extraction snapshot and chase coverage row is taken
   // against, which is the `chased_at` trap.
   const gateContext = await loadGateContext(sql, [id]);
-  const gates = gatesForRecord(gateContext, {
+  const gateRef = {
     id: String(record.id),
     categoryId: record.category_id ? String(record.category_id) : null,
-  });
+    matrixType: record.matrix_type ? String(record.matrix_type) : null,
+  };
+  const gates = gatesForRecord(gateContext, gateRef);
+
+  // ---- WHICH OF HIS TYPES THIS ITEM IS (decision B, 0061) ------------------
+  //
+  // Only where the sheet covers more than one type. `accepted` is the person's
+  // decision, and only a type the sheet maps counts (`matrixTypeOf`); the
+  // suggestion is computed here from the name, with its reason, and never
+  // stored — accepting it is a press on the screen (POST matrix-types).
+  const sheetTypes = gateRef.categoryId ? (gateContext.typesByCategory.get(gateRef.categoryId) ?? []) : [];
+  const acceptedType = matrixTypeOf(gateContext, gateRef);
+  const matrixType =
+    sheetTypes.length > 1
+      ? {
+          accepted: acceptedType
+            ? { code: acceptedType, name: sheetTypes.find((type) => type.code === acceptedType)?.name ?? acceptedType }
+            : null,
+          suggestion: acceptedType ? null : suggestMatrixType(String(record.item_description ?? ""), sheetTypes),
+          options: sheetTypes.map((type) => ({ code: type.code, name: type.name })),
+        }
+      : null;
+  // The seed's sentence, where the gate view or TGQ below comes from a type
+  // nobody has confirmed (0061). Printed as it is; never a constant.
+  const provisionalNote = provisionalNoteFor(gateContext, gateRef);
 
   // WHICH MODEL DECIDES THIS RECORD'S TGQ, sent as data rather than as a
   // verdict, so the screen runs the same `questionTier` the chase inventory
   // and the spec table run. Null means Matthew's matrix does not cover this
   // category and the 0019 placeholder applies — the fallback, never "nothing
   // blocks a quote". Serialised as arrays because a Set is not JSON.
-  const tgqMatrix = record.category_id
-    ? ((await loadTgqMatrices(sql)).get(String(record.category_id)) ?? null)
-    : null;
+  // By the record's accepted type (`tgqMatrixFor`, the one lookup).
+  const tgqMatrix = tgqMatrixFor(await loadTgqMatrices(sql), gateRef.categoryId, gateRef.matrixType);
 
   // ---- the fabric split, in both directions -------------------------------
   //
@@ -408,8 +435,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // does not cover the category — the `gatesForRecord` rule, and for its
   // reason: an empty list computes as "nothing outstanding" and would report a
   // cabinetry item ready against rules nobody has written.
+  // By the accepted type, as the gate panel judges them.
   const matrixFieldRows = record.category_id
-    ? (gateContext.fieldsByCategory.get(String(record.category_id)) ?? null)
+    ? ((gateContext.fieldsByCategory.get(String(record.category_id)) ?? null)?.filter(
+        (field) => !acceptedType || !field.appliesTo || field.appliesTo.includes(acceptedType),
+      ) ?? null)
     : null;
   const matrixFields =
     matrixFieldRows && matrixFieldRows.length > 0
@@ -536,6 +566,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     designerContactAmbiguous: matches.length > 1,
     quoteReadiness,
     matrixFields,
+    matrixType,
+    provisionalNote,
   });
 }
 

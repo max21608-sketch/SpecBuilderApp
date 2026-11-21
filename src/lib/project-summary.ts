@@ -160,9 +160,14 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
       -- THE EXPORT'S SCOPE. Duplicated from loadExportScope, asserted equal by
       -- a db-tier test: a summary over a different set of records from the file
       -- is worse than no summary.
-      select r.id, r.project_id, r.category_id, r.level, r.level_suggested
+      -- matrix_type is the person's ACCEPTED type where the sheet maps it,
+      -- null (the union of the sheet's types) otherwise: effectiveMatrixType,
+      -- in SQL. The map is unique on (type, sheet), so the join adds no row.
+      select r.id, r.project_id, r.category_id, r.level, r.level_suggested, tm.matrix_code as matrix_type
       from spec_records r
       join spec_runs run on run.id = r.run_id
+      left join spec_matrix_category_map tm
+        on tm.item_category_id = r.category_id and tm.matrix_code = r.matrix_type
       where r.project_id = any(${projectIds}::uuid[])
         and r.status = 'active'
         and run.status = 'active'
@@ -177,7 +182,7 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
     -- through the GENERATED applies_to_all (0061); the overlap alone gave the
     -- provisional cabinetry types none of his rows.
     tgq_map as (
-      select m.item_category_id, f.json_id, g.local_key
+      select m.item_category_id, m.matrix_code, f.json_id, g.local_key
         from spec_matrix_category_map m
         join spec_field_gates g
           on (g.applies_to_all or g.applies_to && array[m.matrix_code]) and g.gate = 'TGQ'
@@ -188,6 +193,20 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
     -- nothing happens to be at TGQ is a real answer, and a different one from a
     -- category he has never written.
     mapped_cats as (select distinct item_category_id from spec_matrix_category_map),
+    -- The types each sheet is mapped to, with the sentence a provisional one
+    -- carries (0061). A record's TGQ "comes from" a provisional type when its
+    -- accepted type is one, or, untyped, when any of its sheet's types is.
+    cat_types as (
+      select m.item_category_id, m.matrix_code, t.provisional_note
+        from spec_matrix_category_map m join spec_matrix_categories t on t.code = m.matrix_code
+    ),
+    provisional as (
+      select distinct s.id as record_id, s.project_id, ct.provisional_note
+        from scoped s
+        join cat_types ct on ct.item_category_id = s.category_id
+                         and ct.provisional_note is not null
+                         and (s.matrix_type is null or ct.matrix_code = s.matrix_type)
+    ),
     -- WHICH QUESTIONS HIS MATRIX PUTS AT TGQ, DECIDED ONCE PER QUESTION.
     --
     -- This is the same rule that used to sit inline as a correlated exists in
@@ -205,12 +224,19 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
     -- is kept because the defect being fixed WAS the planner inlining a
     -- once-referenced CTE, and pinning the shape costs nothing measurable while
     -- removing the one degree of freedom that produced it.
+    --
+    -- BY TYPE (decision B, 2026-11-20). One row per question for the UNION of
+    -- its sheet's types (matrix_code null: an untyped record) and one per type
+    -- that puts it at TGQ (a record a person typed). tgqMatrixFor, in SQL.
+    -- Still decided once per question and joined: the record picks its row by
+    -- its own matrix_type, so the shape the note above protects is unchanged.
     tgq_questions as materialized (
-      select distinct q.id as requirement_id
+      select distinct q.id as requirement_id, k.matrix_code
         from requirements q
         left join spec_fields f on f.id = q.spec_field_id
         join tgq_map t on t.item_category_id = q.category_id
                       and (t.json_id = f.json_id or t.local_key = q.local_key)
+        cross join lateral (values (t.matrix_code), (null::text)) as k(matrix_code)
     ),
     answers as materialized (
       select s.project_id,
@@ -257,7 +283,9 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
       join requirements q on q.category_id = s.category_id
       left join spec_fields f on f.id = q.spec_field_id
       left join mapped_cats mc on mc.item_category_id = s.category_id
-      left join tgq_questions tq on tq.requirement_id = q.id
+      -- coalesce rather than IS NOT DISTINCT FROM, so the join can still hash.
+      left join tgq_questions tq
+        on tq.requirement_id = q.id and coalesce(tq.matrix_code, '') = coalesce(s.matrix_type, '')
       left join spec_answers a
         on a.record_id = s.id and a.requirement_id = q.id and a.revision_no = 0
     ),
@@ -278,8 +306,15 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
              count(*) filter (
                where category_id is not null
                  and category_id not in (select item_category_id from mapped_cats)
-             )::int as tgq_from_fallback
+             )::int as tgq_from_fallback,
+             -- Of tgq_from_matrix, how many are judged on a PROVISIONAL type,
+             -- so the overview prints the seed's sentence beside the figure.
+             count(*) filter (where id in (select record_id from provisional))::int as tgq_from_provisional
         from scoped group by project_id
+    ),
+    prov_notes as (
+      select project_id, array_agg(distinct provisional_note order by provisional_note) as notes
+        from provisional group by project_id
     ),
     ans as (
       select project_id,
@@ -354,7 +389,8 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
     )
     select rec.project_id,
            rec.records, rec.uncategorised, rec.no_level, rec.level_suggested,
-           rec.tgq_from_matrix, rec.tgq_from_fallback,
+           rec.tgq_from_matrix, rec.tgq_from_fallback, rec.tgq_from_provisional,
+           coalesce(prov_notes.notes, '{}') as provisional_notes,
            coalesce(ans.to_quote, 0) as to_quote,
            coalesce(ans.to_quote_placeholder, 0) as to_quote_placeholder,
            coalesce(ans.to_quote_items_placeholder, 0) as to_quote_items_placeholder,
@@ -375,6 +411,7 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
       left join ans on ans.project_id = rec.project_id
       left join fin on fin.project_id = rec.project_id
       left join docs on docs.project_id = rec.project_id
+      left join prov_notes on prov_notes.project_id = rec.project_id
   `;
 }
 
@@ -402,6 +439,8 @@ function toSummary(row: SummaryRow): ProjectSummary {
     documentsFailed: Number(row.documents_failed ?? 0),
     tgqFromMatrix: Number(row.tgq_from_matrix ?? 0),
     tgqFromFallback: Number(row.tgq_from_fallback ?? 0),
+    tgqFromProvisional: Number(row.tgq_from_provisional ?? 0),
+    provisionalNotes: ((row.provisional_notes ?? []) as unknown[]).map(String),
     disagreements: 0,
     disagreementRunId: null,
   };

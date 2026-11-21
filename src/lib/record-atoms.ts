@@ -96,6 +96,11 @@ export type RecordAtoms = {
   categoryName: string | null;
   /** simple | complex | hero, or null where nobody has decided (0019). */
   level: string | null;
+  /**
+   * A person's accepted gate-model type within the sheet (0061, schema 10).
+   * Optional: a version older than 10 reads as untyped, which it was.
+   */
+  matrixType?: string | null;
   productReference: string | null;
   designer: string | null;
   boqCategory: string | null;
@@ -124,12 +129,15 @@ export type RecordAtoms = {
  *     a diff pairs a correction with what it corrected (audit E6). Older
  *     versions read as superseding nothing, and their corrections still show
  *     as a removed line and an added one.
+ * 10 — the record carries its accepted gate-model type (0061, decision B),
+ *     which decides which of a multi-type sheet's questions it is asked.
+ *     Older versions read as untyped.
  *
  * Bumped whenever a field is added, and every addition since 1 is optional on
  * read, so an older version still parses rather than reading as "everything
  * was deleted that day".
  */
-export const RECORD_ATOMS_SCHEMA_VERSION = 9;
+export const RECORD_ATOMS_SCHEMA_VERSION = 10;
 
 function text(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
@@ -242,7 +250,7 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
 
   const recordRows = await exec`
     select r.id, r.record_no, r.item_description, r.product_reference, r.qty, r.designer, r.area,
-           r.boq_category, r.status, r.category_id, r.level, r.run_id, r.parent_id, r.split_reason,
+           r.boq_category, r.status, r.category_id, r.level, r.matrix_type, r.run_id, r.parent_id, r.split_reason,
            r.variant_label, r.dimension_note, r.variant_ordinal,
            -- 0039: a configuration is NAMED by its bill line's number and its
            -- own under it (P18181-012.3), so the line's record_no comes too.
@@ -305,6 +313,7 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
       categoryId: text(row.category_id),
       categoryName: text(row.category_name),
       level: text(row.level),
+      matrixType: text(row.matrix_type),
       productReference: text(row.product_reference),
       designer: text(row.designer),
       boqCategory: text(row.boq_category),

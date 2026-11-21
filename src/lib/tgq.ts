@@ -72,6 +72,34 @@ export type TgqMatrix = {
   localKeys: ReadonlySet<string>;
 };
 
+/**
+ * His TGQ set per cheat sheet, as `loadTgqMatrices` returns it: the UNION of
+ * the sheet's types (what every record was judged on before 0061, and what an
+ * untyped record still is), and each type's own set beside it.
+ */
+export type SheetTgqMatrix = TgqMatrix & { byType?: ReadonlyMap<string, TgqMatrix> };
+
+/**
+ * THE ONE LOOKUP of a record's TGQ matrix (decision B, 2026-11-20).
+ *
+ * A record a person has TYPED (`spec_records.matrix_type`) is judged on its
+ * type's rows: a sofa typed S is not asked Swivel, which his row 12 asks of
+ * armchairs and bar stools and the union widened onto the whole sheet. An
+ * untyped record, or a type the sheet does not map, gets the union — never an
+ * empty set, which would read as "nothing blocks a quote". An unmapped sheet
+ * stays null: the placeholder decides, as it always has.
+ */
+export function tgqMatrixFor(
+  matrices: ReadonlyMap<string, SheetTgqMatrix>,
+  categoryId: string | null,
+  matrixType: string | null | undefined,
+): SheetTgqMatrix | TgqMatrix | null {
+  if (!categoryId) return null;
+  const sheet = matrices.get(categoryId);
+  if (!sheet) return null;
+  return (matrixType ? sheet.byType?.get(matrixType) : undefined) ?? sheet;
+}
+
 /** A checklist question, as both models need to see it. */
 export type TgqRequirement = {
   /** 0019's per-level seed. The fallback, and only the fallback. */

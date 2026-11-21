@@ -46,7 +46,8 @@
 // ============================================================================
 import type { SqlLike } from "@/lib/record-atoms";
 import type { AnswerState } from "@/lib/spec-vocab";
-import type { TgqMatrix } from "@/lib/tgq";
+import type { SheetTgqMatrix } from "@/lib/tgq";
+import { effectiveMatrixType } from "@/lib/matrix-type";
 import { itemTgq, type ItemTgq, type ItemTgqOutstanding, type ItemTgqQuestion } from "@/lib/item-tgq";
 import {
   chainGates,
@@ -328,12 +329,35 @@ export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promi
  * where every type deciding it is one Matthew wrote. The words are the seed's
  * (`spec_matrix_categories.provisional_note`), never a constant.
  */
-export function provisionalNoteFor(context: GateContext, record: { categoryId: string | null }): string | null {
+export function provisionalNoteFor(
+  context: GateContext,
+  record: { categoryId: string | null; matrixType?: string | null },
+): string | null {
   if (!record.categoryId) return null;
+  const type = matrixTypeOf(context, record);
   const notes = (context.typesByCategory.get(record.categoryId) ?? [])
-    .map((type) => type.provisionalNote)
+    .filter((candidate) => !type || candidate.code === type)
+    .map((candidate) => candidate.provisionalNote)
     .filter((note): note is string => Boolean(note));
   return notes[0] ?? null;
+}
+
+/**
+ * A record as the gate functions need it. `matrixType` is the person's
+ * accepted type (`spec_records.matrix_type`); absent or null is the union.
+ */
+export type GateRecordRef = { id: string; categoryId: string | null; matrixType?: string | null };
+
+/**
+ * The type this record is judged as: its accepted type where its sheet maps
+ * it, null (the union) otherwise. `effectiveMatrixType` over the context.
+ */
+export function matrixTypeOf(
+  context: GateContext,
+  record: { categoryId: string | null; matrixType?: string | null },
+): string | null {
+  if (!record.categoryId) return null;
+  return effectiveMatrixType(record.matrixType ?? null, context.typesByCategory.get(record.categoryId) ?? []);
 }
 
 /**
@@ -343,7 +367,7 @@ export function provisionalNoteFor(context: GateContext, record: { categoryId: s
  */
 export function itemTgqForRecord(
   context: GateContext,
-  record: { id: string; categoryId: string | null },
+  record: GateRecordRef,
   outstanding: readonly ItemTgqOutstanding[],
 ): ItemTgq {
   const gates = gatesForRecord(context, record);
@@ -365,11 +389,18 @@ export function itemTgqForRecord(
  */
 export function gatesForRecord(
   context: GateContext,
-  record: { id: string; categoryId: string | null },
+  record: GateRecordRef,
 ): Record<Gate, GateStatus> | null {
   if (!record.categoryId) return null;
-  const fields = context.fieldsByCategory.get(record.categoryId);
-  if (!fields || fields.length === 0) return null;
+  const sheetFields = context.fieldsByCategory.get(record.categoryId);
+  if (!sheetFields || sheetFields.length === 0) return null;
+  // BY THE ACCEPTED TYPE where a person has accepted one the sheet maps; the
+  // union of the sheet's types otherwise, which is today's reading.
+  const type = matrixTypeOf(context, record);
+  const typed = type ? sheetFields.filter((field) => !field.appliesTo || field.appliesTo.includes(type)) : sheetFields;
+  // A type reaching no row at all is a seed fault, never "nothing to check":
+  // judge it on the union rather than on an empty list.
+  const fields = typed.length > 0 ? typed : sheetFields;
 
   const input = {
     answers: context.answersByRecord.get(record.id) ?? [],
@@ -444,9 +475,10 @@ export function gateSummary(
  * has not written it".
  * ==========================================================================
  */
-export async function loadTgqMatrices(exec: SqlLike): Promise<Map<string, TgqMatrix>> {
+export async function loadTgqMatrices(exec: SqlLike): Promise<Map<string, SheetTgqMatrix>> {
   const rows = await exec`
     select m.item_category_id,
+           m.matrix_code,
            f.json_id,
            g.local_key,
            g.gate
@@ -455,14 +487,28 @@ export async function loadTgqMatrices(exec: SqlLike): Promise<Map<string, TgqMat
         on (g.applies_to_all or g.applies_to && array[m.matrix_code]) and g.gate = 'TGQ'
       left join spec_fields f on f.id = g.spec_field_id
   `;
-  const out = new Map<string, { fields: Set<number>; localKeys: Set<string> }>();
+  type Sets = { fields: Set<number>; localKeys: Set<string> };
+  const empty = (): Sets => ({ fields: new Set<number>(), localKeys: new Set<string>() });
+  const out = new Map<string, Sets & { byType: Map<string, Sets> }>();
   for (const row of rows) {
     const key = String(row.item_category_id);
-    const entry = out.get(key) ?? { fields: new Set<number>(), localKeys: new Set<string>() };
+    const entry = out.get(key) ?? { ...empty(), byType: new Map<string, Sets>() };
+    // EACH TYPE'S OWN SET beside the union, for `tgqMatrixFor`: a record a
+    // person typed is judged on its type's rows (decision B). Every mapped
+    // type gets an entry, empty or not, for the reason the union does.
+    const code = String(row.matrix_code);
+    const own = entry.byType.get(code) ?? empty();
     // The left joins mean a mapped category with no TGQ row of its own still
     // arrives here, with both columns null. That is what puts it in the map.
-    if (row.json_id !== null && row.json_id !== undefined) entry.fields.add(Number(row.json_id));
-    if (row.local_key !== null && row.local_key !== undefined) entry.localKeys.add(String(row.local_key));
+    if (row.json_id !== null && row.json_id !== undefined) {
+      entry.fields.add(Number(row.json_id));
+      own.fields.add(Number(row.json_id));
+    }
+    if (row.local_key !== null && row.local_key !== undefined) {
+      entry.localKeys.add(String(row.local_key));
+      own.localKeys.add(String(row.local_key));
+    }
+    entry.byType.set(code, own);
     out.set(key, entry);
   }
   return out;
