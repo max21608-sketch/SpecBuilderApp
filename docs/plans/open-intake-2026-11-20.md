@@ -216,6 +216,28 @@ run. What it says:
 4. **Every prompt change is run twice against all six keys before it lands.**
    One run cannot tell a change from the ±1 part a pack moves by between runs.
 
+#### The survey's own genre wording, measured (2026-11-21): no change
+
+Item 3 above, done as item 4 says: three wordings, each run twice over all six
+keys (labels `c2a-*`, `c2b-*`, `c2c-*` in `~/dev/localstack/survey-eval/`;
+about $0.77 in all). Parts found per run, against today's (`v1b`/`real`):
+
+| Pack (parts) | Today | Own words, no price cue | + price cue | File check's less the clause |
+|---|---|---|---|---|
+| Harbour House separate (8) | 8, 8 | 5 (3 held) | 8, 8 | 8, 8 |
+| Harbour House mixed (8) | 8, 8 | 7 (1 held) | 7, 7 (1 missed) | 8, 8 |
+| Panther merged (3) | 3, 3 | 2 | 3, 2 | 2, 2 |
+| Panther (14) | 12, 11 | 9 | 12, 12 | 12, 12 |
+| Aman (40) | 34, 34 | 35 | 34, 34 | 34, 34 |
+| Ronnie Scott's (7) | 0, 0 (7 held) | 0 | 0, 0 | 0, 0 |
+
+Nothing went to the wrong reader in any run. The Aman tracker never split
+into its finishes and furniture parts, and every wording cost a pack on at
+least one run, so **today's wording stays** (the reasons are in the header
+of `pack-survey.ts`). The first attempt ran once: its bill sheets held on
+every workbook was reason enough. "Bill or schedule goes to CODE" (item 2)
+is built and does not depend on the wording.
+
 ### Stage 1 — the survey (medium)
 
 Replaces the per-file classify. Same model (Haiku 5.5), same place in the

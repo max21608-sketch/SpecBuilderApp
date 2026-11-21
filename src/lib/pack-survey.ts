@@ -114,6 +114,23 @@ export const SURVEY_TOOL_NAME = "record_file_parts";
 // THE GENRE, CERTAIN AND WEIGHED-AGAINST WORDS ARE THE FILE CHECK'S, read off
 // its tool rather than written twice. Two descriptions of one vocabulary drift,
 // and then the survey and the file check disagree about what a preamble is.
+//
+// GIVING THE SURVEY ITS OWN GENRE WORDS WAS MEASURED, AND LOST (2026-11-21,
+// `eval:survey` twice over all six keys per attempt, about $0.77 in all). The
+// aim was to drop the file check's one-kind-per-file clause ("even where it
+// also tracks some furniture") so the Aman tracker splits into its finishes
+// and furniture parts. It never split, and every attempt cost a pack:
+//   - one sentence per genre, no pricing cue: every Panther and Harbour House
+//     bill sheet HELD as bill-or-schedule (the pricing cue is what makes a
+//     priced bill certain);
+//   - the same with the pricing cue back: the invented bill sheet LOST twice
+//     (rows past the sheet's end, dropped by code), 26 of 46 item codes;
+//   - the file check's words less that one clause: the merged Panther pack
+//     came back 2 of 3 on both runs (an extra spec-sheet cut, then the
+//     preamble cut seven ways against the bible), where today's is 3 of 3.
+// Nothing went to the wrong reader in any run. The Aman tracker is a job for
+// code or for a person's part split, not for this vocabulary; a fourth wording
+// is the change to resist without a new reason.
 const CLASSIFY_FIELDS = CLASSIFY_TOOL.input_schema.properties;
 
 const pageField = (end: "first" | "last") => ({
