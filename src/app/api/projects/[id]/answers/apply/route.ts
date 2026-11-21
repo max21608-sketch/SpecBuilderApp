@@ -51,6 +51,19 @@
 //    The screen does not offer the tick there; this refuses the row as well,
 //    because the client does not get to decide what kind a question is — the
 //    `questionTier` rule, in another place.
+//
+// ---- AN ITEM WITH NO ANSWER ROW YET IS TICKED LIKE ANY OTHER (L2) --------
+//
+// A seed that adds a question to a sheet leaves every record already on it
+// with no row for that question (`answer-rows.ts`). Such a row arrives here as
+// (record, question) with a null id and version, and the batch creates its row
+// through `insertMissingAnswerRows`, narrowed to those pairs, AFTER the change
+// is open and under the record locks — so the insert belongs to the press's one
+// change set and its record gets the press's one version. It is refused, and
+// named, where the question is not on the item's CURRENT checklist (no row is
+// ever made for a question its category does not ask) and where a row has
+// appeared since the screen loaded (the screen did not show what it would
+// replace). One route, not a second one beside it (2026-11-21).
 // ============================================================================
 import { json, sql } from "@/lib/db";
 import { z } from "zod";
@@ -60,7 +73,7 @@ import { changeSetForEdit, findOpenChangeSet } from "@/lib/change-sets";
 import { editAnswer } from "@/lib/answer-edit";
 import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { snapshotRecords } from "@/lib/record-snapshot";
-import { lockRecordsOfAnswers } from "@/lib/record-lock";
+import { insertMissingAnswerRows } from "@/lib/answer-rows";
 import { DIMENSIONS_JSON_ID } from "@/lib/promote-answers";
 import { isAnswerState, type AnswerState } from "@/lib/spec-vocab";
 import { requireUuid, requireWriter } from "@/lib/route-guards";
@@ -86,10 +99,12 @@ const Body = z
           .object({
             recordId: z.string().uuid(),
             requirementId: z.string().uuid(),
-            answerId: z.string().uuid(),
-            version: z.number().int().nonnegative(),
+            /** Null, with `version`, where the item has no answer row for this question yet (L2). */
+            answerId: z.string().uuid().nullable(),
+            version: z.number().int().nonnegative().nullable(),
           })
-          .strict(),
+          .strict()
+          .refine((row) => (row.answerId === null) === (row.version === null)),
       )
       .min(1)
       .max(MAX_ROWS),
@@ -134,6 +149,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   const asked = parsed.data.rows;
+  const answerIds = asked.flatMap((row) => (row.answerId ? [row.answerId] : []));
+  const rowless = asked.filter((row) => row.answerId === null);
 
   // The project has to exist before anything says how many rows it refused.
   const projects = await sql`select id from projects where id = ${projectId}`;
@@ -146,10 +163,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       // at the end — the reverse of every confirm, which locks records and
       // then writes answers — so a press here and a drawings confirm on one
       // of these items could deadlock. `record-lock.ts` carries the contract.
-      await lockRecordsOfAnswers(
-        txn,
-        asked.map((row) => row.answerId),
-      );
+      //
+      // A row-less item (L2) names its record directly; only THIS project's
+      // records are locked on its word. One statement, so the whole set is
+      // locked in one id order.
+      await txn`
+        select r.id from spec_records r
+         where r.id in (select a.record_id from spec_answers a where a.id = any(${answerIds}::uuid[]))
+            or (r.id = any(${rowless.map((row) => row.recordId)}::uuid[]) and r.project_id = ${projectId})
+         order by r.id
+           for update
+      `;
       // ONE read, locked in a deterministic order so two people pressing this
       // at once cannot interleave into a deadlock. The join is what makes the
       // row's PROJECT, its question and its BWS field the server's own reading
@@ -175,11 +199,44 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           join projects pr on pr.id = r.project_id
           join requirements q on q.id = a.requirement_id
           left join spec_fields f on f.id = q.spec_field_id
-         where a.id = any(${asked.map((row) => row.answerId)}::uuid[])
+         where a.id = any(${answerIds}::uuid[])
          order by a.id
            for update of a
       `;
       const live = new Map(rows.map((row) => [String(row.id), row]));
+
+      // THE ROW-LESS ITEMS, read under their record locks: the record, the
+      // question, and whether a row has appeared since the screen loaded.
+      const rowlessRows =
+        rowless.length === 0
+          ? []
+          : await txn`
+              select r.id as record_id,
+                     q.id as requirement_id,
+                     r.project_id,
+                     r.status as record_status,
+                     r.category_id as record_category_id,
+                     q.category_id as question_category_id,
+                     r.record_no,
+                     r.variant_label,
+                     r.variant_ordinal,
+                     (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
+                     pr.bws_project_number,
+                     q.prompt,
+                     f.json_id,
+                     (select a.id from spec_answers a
+                       where a.record_id = r.id and a.requirement_id = q.id and a.revision_no = 0) as existing_id
+                from unnest(${rowless.map((row) => row.recordId)}::uuid[], ${rowless.map((row) => row.requirementId)}::uuid[])
+                     as p(record_id, requirement_id)
+                join spec_records r on r.id = p.record_id
+                join projects pr on pr.id = r.project_id
+                join requirements q on q.id = p.requirement_id
+                left join spec_fields f on f.id = q.spec_field_id
+            `;
+      const pairKey = (row: { recordId: string; requirementId: string }) => `${row.recordId}:${row.requirementId}`;
+      const liveRowless = new Map(
+        rowlessRows.map((row) => [pairKey({ recordId: String(row.record_id), requirementId: String(row.requirement_id) }), row]),
+      );
 
       const filed: {
         recordId: string;
@@ -190,10 +247,54 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         version: number;
       }[] = [];
       const skipped: Skipped[] = [];
-      const plan: { asked: (typeof asked)[number]; row: Record<string, unknown> }[] = [];
+      const plan: { asked: (typeof asked)[number]; row: Record<string, unknown>; created?: boolean }[] = [];
       const seen = new Set<string>();
 
       for (const entry of asked) {
+        if (entry.answerId === null) {
+          const row = liveRowless.get(pairKey(entry));
+          const named = (why: string) =>
+            skipped.push({
+              recordId: entry.recordId,
+              requirementId: entry.requirementId,
+              label: row ? labelOf(row) : "That item",
+              why,
+            });
+          if (!row) {
+            named("there is no such item or question any more");
+            continue;
+          }
+          if (String(row.project_id) !== projectId) {
+            named("it belongs to another project");
+            continue;
+          }
+          if (String(row.record_status) !== "active") {
+            named("the item has been retired");
+            continue;
+          }
+          // NEVER A ROW FOR A QUESTION THE ITEM'S CATEGORY DOES NOT ASK: a
+          // stale screen after a category change, or a crafted request.
+          if (String(row.record_category_id ?? "") !== String(row.question_category_id)) {
+            named("the question is not on that item's checklist any more");
+            continue;
+          }
+          if (seen.has(pairKey(entry))) {
+            named("it was ticked twice");
+            continue;
+          }
+          if (Number(row.json_id) === DIMENSIONS_JSON_ID) {
+            named("a dimension is recorded per item, not in a batch");
+            continue;
+          }
+          if (row.existing_id) {
+            named("somebody answered it since this screen loaded");
+            continue;
+          }
+          seen.add(pairKey(entry));
+          plan.push({ asked: entry, row, created: true });
+          continue;
+        }
+
         const row = live.get(entry.answerId);
         const named = (why: string) =>
           skipped.push({
@@ -222,7 +323,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           named("the item has been retired");
           continue;
         }
-        if (seen.has(entry.answerId)) {
+        if (seen.has(pairKey(entry))) {
           named("it was ticked twice");
           continue;
         }
@@ -245,7 +346,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           named("it is already answered — change that one on its own");
           continue;
         }
-        seen.add(entry.answerId);
+        seen.add(pairKey(entry));
         plan.push({ asked: entry, row });
       }
 
@@ -273,12 +374,31 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             : `Recorded “${prompt}” as “${value}” on ${plan.length} item${plan.length === 1 ? "" : "s"}.`,
       });
 
-      for (const { asked: entry, row } of plan) {
+      // THE MISSING ROWS, created `missing` inside the change just opened and
+      // under the locks taken first (L2): the one insert, narrowed to exactly
+      // the pairs planned, so no row is made for anything else.
+      const toCreate = plan.filter((entry) => entry.created).map((entry) => entry.asked);
+      const createdFor = new Map(
+        (
+          await insertMissingAnswerRows(
+            txn,
+            toCreate.map((row) => row.recordId),
+            user.email,
+            { only: toCreate.map((row) => ({ recordId: row.recordId, requirementId: row.requirementId })) },
+          )
+        ).map((row) => [pairKey(row), row]),
+      );
+
+      for (const { asked: entry, row, created } of plan) {
+        const made = created ? createdFor.get(pairKey(entry)) : undefined;
+        // Checked under the locks above, so this cannot happen; if it does,
+        // the whole press rolls back rather than skipping a row silently.
+        if (created && !made) throw new Error(`no answer row was created for ${pairKey(entry)}`);
         const written = await editAnswer(txn, {
-          answerId: entry.answerId,
+          answerId: made ? made.id : entry.answerId!,
           value,
           state,
-          expectedVersion: entry.version,
+          expectedVersion: made ? made.version : entry.version!,
           actor: user.email,
           // The change is already open and carries the why for the whole act.
           changeSetId,

@@ -49,6 +49,9 @@
 //
 //  - **A SETTLED ANSWER CANNOT BE TICKED.** The route skips it and names it;
 //    the row says so rather than offering a tick that will be refused.
+//    An item with NO ANSWER ROW yet (a question a seed added after it was
+//    categorised) CAN be ticked: the route creates its row inside the press's
+//    one change set (L2, 2026-11-21).
 //
 //  - **THE SELECTION IS PER HEADING AND SURVIVES A FILTER CHANGE.** Untick two
 //    of 28, then narrow by area, and the two stay unticked — the bar counts
@@ -326,7 +329,8 @@ const EMPTY: ReadonlySet<string> = new Set<string>();
 /** Why a row cannot join a batch, or null where it can. */
 function blockedReason(row: InfillQuestion, kind: ReturnType<typeof rowKind>): string | null {
   if (kind === "dimension") return "a dimension is recorded per item, not in a batch";
-  if (row.answerId === null || row.answerVersion === null) return "there is no checklist row to write to yet";
+  // NO ANSWER ROW YET is NOT a reason (L2, 2026-11-21): the batch creates
+  // the row inside its one change set, as a first answer on its own does.
   if (row.state === "confirmed") return "already answered — change that one on its own";
   return null;
 }

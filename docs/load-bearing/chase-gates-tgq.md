@@ -465,6 +465,21 @@ disagree about what is outstanding because both read `loadOutstanding` and
   confirmed values and the library's description of a finish code print as
   text with no button that copies them — M8's rule that a value is never
   filled from a sister item.
+- **A question with no answer row yet joins a batch** (L2, 2026-11-21). A seed
+  that adds a question to a sheet leaves the records already on it with no row
+  (`src/lib/answer-rows.ts`). "Select all shown" → "Record on n items" used to
+  refuse to tick such an item; now `POST /api/projects/[id]/answers/apply`
+  takes it as (record, question) with a null id and version — one route, not a
+  second — and creates the row through `insertMissingAnswerRows`, narrowed to
+  the planned pairs, AFTER the change opens and under the record locks (one
+  statement, id order, this project's records only on a row-less item's word).
+  So the insert's audit row carries the press's change set and its record gets
+  the press's one version. It is skipped and NAMED where the question is not
+  on the item's current checklist (no row is ever made for a question its
+  category does not ask) and where a row has appeared since the screen loaded.
+  The screen patches the created id onto the row, so its next edit is that
+  row's PATCH. `tests/db/infill-apply.test.ts`,
+  `tests/components/infill-page.test.tsx`.
 - **By question keys on the FIELD, not on `requirements.id`.** `requirements`
   is per category, so "Dimensions" is 17 rows and keying on the id showed four
   Dimensions headings on the 300-line project, where clearing one read as done.

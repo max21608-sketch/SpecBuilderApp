@@ -15,9 +15,10 @@ import { COMPONENT_TIMEOUT_MS } from "./tier-timeout";
 
 vi.setConfig({ testTimeout: COMPONENT_TIMEOUT_MS });
 
+const url = vi.hoisted(() => ({ search: "" }));
 vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "p1" }),
-  useSearchParams: () => new URLSearchParams(""),
+  useSearchParams: () => new URLSearchParams(url.search),
   usePathname: () => "/dashboard/projects/p1/infill",
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
 }));
@@ -99,11 +100,24 @@ const areaQuestion = {
   phases: [{ runId: "run-1", name: "MAIN RUN", items: 1 }],
 };
 
+const accessGroup = {
+  key: "field:6",
+  requirementIds: ["req-6"],
+  heading: "Access",
+  fieldLabel: "Access",
+  toQuote: 1,
+  rows: 1,
+  records: 1,
+  areas: ["Restaurant"],
+};
+
+const rowlessAccess = { ...question, requirementId: "req-6", prompt: "Access", fieldLabel: "Access", jsonId: 6, questionKey: "field:6", answerId: null, answerVersion: null };
+
 const summary = {
   project: { id: "p1", bws_project_number: "T1", name: "Test" },
   provisionalNotes: [],
   lines: [lineSummary],
-  questions: [],
+  questions: [accessGroup],
   questionAreas: [],
   phases: [
     { id: "run-1", name: "MAIN RUN" },
@@ -124,10 +138,18 @@ vi.mock("@/lib/api-fetch", () => ({
       if (target === "/api/projects/p1/infill") return { ok: true, status: 200, data: summary };
       if (target === "/api/projects/p1/infill?line=line-1") return { ok: true, status: 200, data: { questions: [question] } };
       if (target.startsWith("/api/projects/p1/area-wide")) return { ok: true, status: 200, data: { questions: [areaQuestion] } };
+      if (target === "/api/projects/p1/infill?requirements=req-6") return { ok: true, status: 200, data: { questions: [rowlessAccess] } };
       if (target === "/api/projects/p1/changes") return { ok: true, status: 200, data: { open: null } };
     }
     if (method === "POST" && target === "/api/projects/p1/area-wide") {
       return { ok: true, status: 200, data: { written: 1, overridden: 0, records: 1 } };
+    }
+    if (method === "POST" && target === "/api/projects/p1/answers/apply") {
+      return {
+        ok: true,
+        status: 200,
+        data: { filed: [{ recordId: "line-1", requirementId: "req-6", answerId: "ans-new", value: "Approved", state: "confirmed", version: 2 }], skipped: [] },
+      };
     }
     if (method === "PATCH" && target === "/api/answers/ans-1") {
       return { ok: true, status: 200, data: { answer: { id: "ans-1", version: 2, value: "Velvet", state: "confirmed" } } };
@@ -140,6 +162,7 @@ const count = (url: string, method = "GET") => calls.filter((call) => call.url =
 
 beforeEach(() => {
   calls.length = 0;
+  url.search = "";
 });
 
 describe("the fill-in page", () => {
@@ -182,5 +205,30 @@ describe("the fill-in page", () => {
     await user.selectOptions(await screen.findByLabelText("Filter by phase"), "run-2");
     await waitFor(() => expect(count("/api/projects/p1/area-wide?runId=run-2")).toBe(1));
     expect(await screen.findByText(/Filtered to the phase MUR/)).toBeInTheDocument();
+  });
+
+  // L2: a row-less item is sent to the batch as (record, question), and the
+  // row comes back with the id the batch created for it.
+  it("sends a row-less item to the batch as (record, question), and keeps the id that comes back", async () => {
+    const user = userEvent.setup();
+    url.search = "tab=by-question";
+    render(<InfillPage />);
+    await user.click(await screen.findByText("Access", { selector: "span.font-medium" }));
+    await user.click(await screen.findByLabelText("Select every item shown under Access"));
+    const boxes = screen.getAllByPlaceholderText("Value");
+    await user.type(boxes[boxes.length - 2]!, "Approved");
+    await user.click(screen.getByRole("button", { name: "Record on 1 item" }));
+    await waitFor(() => expect(count("/api/projects/p1/answers/apply", "POST")).toBe(1));
+    const sent = calls.find((call) => call.url === "/api/projects/p1/answers/apply")!.body as { rows: unknown[] };
+    expect(sent.rows).toEqual([{ recordId: "line-1", requirementId: "req-6", answerId: null, version: null }]);
+
+    // The row now carries the created id: its next edit is that row's PATCH,
+    // not a second "create the row" POST that would be refused.
+    const rowBox = screen.getAllByPlaceholderText("Value").at(-1)!;
+    await user.clear(rowBox);
+    await user.type(rowBox, "Refused");
+    await user.tab();
+    await waitFor(() => expect(count("/api/answers/ans-new", "PATCH")).toBe(1));
+    expect(count("/api/records/line-1/answers", "POST")).toBe(0);
   });
 });

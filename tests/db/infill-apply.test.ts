@@ -295,4 +295,99 @@ describeIfDb("applying one value to several items", () => {
       await client.query(`delete from projects where id = $1`, [other]);
     }
   }, SLOW);
+
+  // L2, 2026-11-21: a question with no answer row yet (a seed added it after
+  // the item was categorised) could not be ticked into a batch — the route
+  // needed an answer id per item. It now takes (record, question) for such an
+  // item and creates the row through `insertMissingAnswerRows`, inside the
+  // press's ONE change set, one version per record — and names what it cannot
+  // write rather than creating a row nobody asked about.
+  it("creates the missing rows for row-less items inside its one change set, one version each, and names what it cannot write", async () => {
+    const { POST } = await import("@/app/api/projects/[id]/answers/apply/route");
+    const [third, foreign] = [
+      (
+        await client.query(
+          `select q.id from requirements q
+             left join spec_fields f on f.id = q.spec_field_id
+            where q.category_id = $1 and coalesce(f.json_id, 0) <> 3
+            order by q.sort_order offset 2 limit 1`,
+          [categoryId],
+        )
+      ).rows[0].id as string,
+      (
+        await client.query(
+          `select q.id from requirements q join item_categories c on c.id = q.category_id
+            where c.slug = 'dining-chair' order by q.sort_order limit 1`,
+        )
+      ).rows[0].id as string,
+    ];
+    // Records 1 and 2 never got a row for `third`; record 3 has one.
+    await client.query(`delete from spec_answers where record_id = any($1::uuid[]) and requirement_id = $2`, [
+      [recordIds[0], recordIds[1]],
+      third,
+    ]);
+    const before = Number(
+      (await client.query(`select count(*)::int as n from change_sets where project_id = $1`, [projectId])).rows[0].n,
+    );
+    const withRow = await rowFor(recordIds[2]!, third);
+    const rowless = (recordId: string, requirement = third) => ({ recordId, requirementId: requirement, answerId: null, version: null });
+
+    const res = await POST(
+      post({
+        value: "__QA Row made",
+        state: "confirmed",
+        rows: [rowless(recordIds[0]!), rowless(recordIds[1]!), withRow, rowless(recordIds[0]!, foreign)],
+      }),
+      params(projectId),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      filed: (Filed & { answerId: string })[];
+      skipped: Skipped[];
+      changeSetId: string;
+    };
+    expect(body.filed.map((row) => row.recordId).sort()).toEqual([...recordIds].sort());
+    // The question another category asks is NAMED, and no row is made for it.
+    expect(body.skipped).toHaveLength(1);
+    expect(body.skipped[0]!.why).toMatch(/not on that item's checklist/);
+    expect(
+      (await client.query(`select count(*)::int as n from spec_answers where record_id = $1 and requirement_id = $2`, [recordIds[0], foreign])).rows[0].n,
+    ).toBe(0);
+
+    const written = await client.query(
+      `select id, record_id, value, state, source_kind, version from spec_answers
+        where requirement_id = $1 and record_id = any($2::uuid[]) and revision_no = 0`,
+      [third, recordIds],
+    );
+    expect(written.rows).toHaveLength(3);
+    for (const row of written.rows) expect(row).toMatchObject({ value: "__QA Row made", state: "confirmed", source_kind: "manual" });
+    // The screen patches the rows it was given: a created row comes back with its id.
+    for (const row of written.rows) {
+      expect(body.filed.find((entry) => entry.recordId === row.record_id)).toMatchObject({ answerId: row.id, version: Number(row.version) });
+    }
+
+    // ONE change set; ONE version per record; the inserts under that change too.
+    const after = Number(
+      (await client.query(`select count(*)::int as n from change_sets where project_id = $1`, [projectId])).rows[0].n,
+    );
+    expect(after - before).toBe(1);
+    const versions = await client.query(
+      `select record_id, count(*)::int as n from record_snapshots where change_set_id = $1 group by record_id`,
+      [body.changeSetId],
+    );
+    expect(versions.rows.map((row) => row.record_id).sort()).toEqual([...recordIds].sort());
+    for (const row of versions.rows) expect(row.n).toBe(1);
+    const created = written.rows.filter((row) => row.record_id !== recordIds[2]).map((row) => row.id);
+    const inserts = await client.query(
+      `select row_id, change_set_id from audit_log where table_name = 'spec_answers' and action = 'insert' and row_id = any($1::text[])`,
+      [created],
+    );
+    expect(inserts.rows).toHaveLength(2);
+    for (const row of inserts.rows) expect(row.change_set_id).toBe(body.changeSetId);
+
+    // A row that appeared since the screen loaded is not written over unseen.
+    const again = await POST(post({ value: "__QA Over it", state: "tbc", rows: [rowless(recordIds[0]!)] }), params(projectId));
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toMatch(/since this screen loaded/);
+  }, SLOW);
 });

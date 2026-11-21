@@ -275,6 +275,31 @@ describe("QuestionGroups — one value on the ticked items", () => {
     expect(screen.getByText(/Dimensions are recorded one item at a time/)).toBeInTheDocument();
   });
 
+  // L2, 2026-11-21: a first answer creates the row, so an item with no answer
+  // row yet is ticked into a batch like any other (the route creates its row
+  // inside the press's one change set).
+  it("ticks an item with no answer row yet into the batch, like any other", async () => {
+    const user = userEvent.setup();
+    const apply = vi.fn<ApplyToRows>(async () => ({ ok: true as const, message: "Recorded." }));
+    render(
+      <Harness
+        questions={[access()]}
+        rowsByQuestion={{
+          "field:6": [
+            row({ recordId: "rec-1", requirementId: "req-a", recordLabel: "DEMO-300-001", jsonId: 6 }),
+            row({ recordId: "rec-2", requirementId: "req-a", recordLabel: "DEMO-300-002", jsonId: 6, answerId: null, answerVersion: null }),
+          ],
+        }}
+        onApply={apply}
+      />,
+    );
+    await user.click(screen.getByText("Access"));
+    expect(screen.getByLabelText("Include DEMO-300-002")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("Select every item shown under Access"));
+    await user.click(screen.getByRole("button", { name: "Record on 2 items" }));
+    expect(apply.mock.calls[0]![0].map((entry) => entry.recordId)).toEqual(["rec-1", "rec-2"]);
+  });
+
   it("offers no tick on an answer already settled", async () => {
     const user = userEvent.setup();
     render(

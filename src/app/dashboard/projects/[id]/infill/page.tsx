@@ -329,19 +329,26 @@ function InfillView() {
       rows: InfillQuestion[],
       input: { value: string | null; state: "confirmed" | "tbc" },
     ): Promise<{ ok: true; message: string } | { ok: false; error: string }> => {
-      const payload = rows
-        .filter((row) => row.answerId && row.answerVersion !== null)
-        .map((row) => ({
-          recordId: row.recordId,
-          requirementId: row.requirementId,
-          answerId: row.answerId!,
-          version: row.answerVersion!,
-        }));
+      // A ROW WITH NO ANSWER ROW YET goes as (record, question) with a null id
+      // and version (L2): the route creates it inside the press's one change.
+      const payload = rows.map((row) => ({
+        recordId: row.recordId,
+        requirementId: row.requirementId,
+        answerId: row.answerId ?? null,
+        version: row.answerId ? row.answerVersion : null,
+      }));
       if (payload.length === 0) return { ok: false, error: "Nothing was ticked." };
 
       const res = await enqueue(() =>
         apiFetch<{
-          filed: { recordId: string; requirementId: string; value: string | null; state: string; version: number }[];
+          filed: {
+            recordId: string;
+            requirementId: string;
+            answerId: string;
+            value: string | null;
+            state: string;
+            version: number;
+          }[];
           skipped: { recordId: string; requirementId: string; label: string; why: string }[];
         }>(`/api/projects/${encodeURIComponent(projectId)}/answers/apply`, {
           method: "POST",
@@ -356,7 +363,10 @@ function InfillView() {
       );
       const patch = (row: InfillQuestion) => {
         const hit = written.get(`${row.recordId}:${row.requirementId}`);
-        return hit ? { ...row, state: hit.state, currentValue: hit.value, answerVersion: hit.version } : row;
+        // The id too: a row the batch created has one only now.
+        return hit
+          ? { ...row, state: hit.state, currentValue: hit.value, answerId: hit.answerId, answerVersion: hit.version }
+          : row;
       };
       setQuestionsByLine((prev) =>
         Object.fromEntries(Object.entries(prev).map(([key, list]) => [key, list.map(patch)])),
