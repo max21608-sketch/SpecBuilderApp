@@ -150,7 +150,7 @@ export default function InfillTable({
       }
       return true;
     });
-  }, [lines, filters, text]);
+  }, [lines, filters, text, audience]);
 
   function toggle(lineId: string) {
     const wasOpen = open.has(lineId);

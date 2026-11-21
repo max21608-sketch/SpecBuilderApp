@@ -43,6 +43,7 @@ import Spinner from "@/components/ui/Spinner";
 import Tabs from "@/components/ui/Tabs";
 import OpenChangeBar from "@/components/history/OpenChangeBar";
 import InfillTable, { NO_FILTERS, type Filters } from "@/components/infill/InfillTable";
+import AreaWideCard from "@/components/infill/AreaWideCard";
 import UncategorisedBlock, { type UncategorisedRecord } from "@/components/infill/UncategorisedBlock";
 import QuestionGroups, { type QuestionSummary } from "@/components/infill/QuestionGroups";
 import type { SaveOutcome } from "@/components/infill/InfillRow";
@@ -570,6 +571,13 @@ function InfillView() {
             onChanged={() => void load()}
           />
         )}
+
+        {/* ONCE PER AREA (decision C): Indoor / Outdoor, floor and wall,
+            answered for "Restaurant" and written to every item in it. Above the
+            list, because one answer here clears a row on every line below. */}
+        <div className="mt-4">
+          <AreaWideCard projectId={project.id} onChanged={() => void load()} />
+        </div>
 
         {tab === "by-question" ? (
           <QuestionGroups

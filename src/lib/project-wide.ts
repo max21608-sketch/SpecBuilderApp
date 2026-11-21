@@ -49,6 +49,31 @@ import { editAnswer } from "@/lib/answer-edit";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { lockRecords } from "@/lib/record-lock";
 import { DIMENSIONS_JSON_ID } from "@/lib/promote-answers";
+import { foldArea } from "@/lib/area-filter";
+
+/**
+ * WHERE ONE ANSWER FANS OUT (decision C of 2026-11-20).
+ *
+ *   project   the "Project / commercial" SECTION, answered once per project
+ *             (Stage 2.8, 2026-10-12).
+ *   area      `requirements.answer_scope = 'area'` (0062, seed 0015): Indoor /
+ *             Outdoor, Floor type, Wall build, fully outdoor. Answered once for
+ *             "Restaurant" and written to every item in it. The area is folded
+ *             by case and whitespace only (`foldArea`), never anything
+ *             cleverer, or two rooms a bill kept apart become one; an item with
+ *             NO area is on no card and is asked on its own.
+ *
+ * ONE mechanism, the same four traps above, one level down: the area's set is
+ * re-derived under the PROJECT lock and refused whole if it moved, and the
+ * questions stay in the item's own TGQ count (the design's finding 12: a
+ * third, per-area count is how TGQ came to mean four numbers).
+ */
+export type FanOutScope = "project" | "area";
+
+/** The card key of an area question: the folded area, then the question. */
+export function areaQuestionKey(area: string, questionKey: string): string {
+  return `area:${area}\u0000${questionKey}`;
+}
 
 type Exec = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Row[]>;
 
@@ -68,8 +93,10 @@ export type ProjectWideRow = {
 };
 
 export type ProjectWideQuestion = {
-  /** `questionGroupKey`: BWS field, then local key, then folded prompt. */
+  /** `questionGroupKey`: BWS field, then local key, then folded prompt. An area card prefixes its folded area. */
   key: string;
+  /** The area as the document first spelled it, on an area card; null on a project card. */
+  area: string | null;
   heading: string;
   prompt: string;
   fieldLabel: string | null;
@@ -100,8 +127,18 @@ const sameAnswer = (row: { state: string; value: string | null }, value: string 
  * the write re-reads it inside its transaction.
  */
 export async function loadProjectWide(exec: Exec, projectId: string): Promise<ProjectWideQuestion[]> {
+  return loadFanOut(exec, projectId, "project");
+}
+
+/** Every area question an item in scope asks, one card per (area, question). Items with no area are on none. */
+export async function loadAreaWide(exec: Exec, projectId: string): Promise<ProjectWideQuestion[]> {
+  return loadFanOut(exec, projectId, "area");
+}
+
+async function loadFanOut(exec: Exec, projectId: string, scope: FanOutScope): Promise<ProjectWideQuestion[]> {
+  const projectScope = scope === "project";
   const rows = await exec`
-    select r.id as record_id, r.record_no, r.variant_ordinal, r.item_description, r.level, r.category_id,
+    select r.id as record_id, r.record_no, r.variant_ordinal, r.item_description, r.level, r.category_id, r.area,
            (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
            p.bws_project_number,
            q.id as requirement_id, q.prompt, q.tgq_levels, q.local_key, q.sort_order,
@@ -121,7 +158,8 @@ export async function loadProjectWide(exec: Exec, projectId: string): Promise<Pr
        -- a live configuration is a heading, and its configurations are the
        -- items that ask. (No backticks in here: one closes the template.)
        and not exists (select 1 from spec_records v where v.parent_id = r.id and v.status = 'active')
-       and q.section = ${PROJECT_WIDE_SECTION}
+       and ((${projectScope}::boolean and q.section = ${PROJECT_WIDE_SECTION})
+            or (not ${projectScope}::boolean and q.answer_scope = 'area'))
      order by q.sort_order, coalesce((select p2.record_no from spec_records p2 where p2.id = r.parent_id), r.record_no),
               r.variant_ordinal nulls first, r.id
   `;
@@ -133,7 +171,12 @@ export async function loadProjectWide(exec: Exec, projectId: string): Promise<Pr
     const localKey = row.local_key === null || row.local_key === undefined ? null : String(row.local_key);
     const prompt = String(row.prompt ?? "");
     const requirementId = String(row.requirement_id);
-    const key = questionGroupKey({ requirementId, prompt, jsonId, localKey });
+    const questionKey = questionGroupKey({ requirementId, prompt, jsonId, localKey });
+    const rawArea = row.area === null || row.area === undefined ? null : String(row.area);
+    const folded = projectScope ? null : foldArea(rawArea);
+    // NO AREA, NO CARD: an item nobody placed is asked on its own.
+    if (!projectScope && folded === null) continue;
+    const key = folded === null ? questionKey : areaQuestionKey(folded, questionKey);
     const tier = questionTierOrNull(
       { tgqLevels: Array.isArray(row.tgq_levels) ? row.tgq_levels.map(String) : [], jsonId, localKey },
       normaliseItemLevel(row.level),
@@ -144,6 +187,7 @@ export async function loadProjectWide(exec: Exec, projectId: string): Promise<Pr
       const fieldLabel = row.field_name === null || row.field_name === undefined ? null : String(row.field_name);
       group = {
         key,
+        area: folded === null ? null : (rawArea ?? "").replace(/\s+/g, " ").trim(),
         // The prompt is the question as a person reads it; the BWS field's
         // name is a column heading. The checklist leads with the prompt too.
         heading: prompt.trim() || fieldLabel || "Unnamed question",
@@ -248,8 +292,30 @@ export type ApplyProjectWideResult = {
  *
  * Refused WHOLE (409, nothing written) when the set differs from `seen`.
  */
-export async function applyProjectWide(
+export async function applyProjectWide(txn: TxnSql, input: FanOutInput): Promise<ApplyProjectWideResult> {
+  return applyFanOut(txn, "project", input);
+}
+
+/** Answer one area question on every item in that area that asks it. The same rules, refused WHOLE if the set moved. */
+export async function applyAreaWide(txn: TxnSql, input: FanOutInput): Promise<ApplyProjectWideResult> {
+  return applyFanOut(txn, "area", input);
+}
+
+export type FanOutInput = {
+  projectId: string;
+  key: string;
+  value: string | null;
+  state: "confirmed" | "tbc";
+  seen: SeenRow[];
+  /** Answer ids of settled, differing rows the person ticked to replace. */
+  overrides: string[];
+  reason: string | null;
+  actor: string;
+};
+
+async function applyFanOut(
   txn: TxnSql,
+  scope: FanOutScope,
   {
     projectId,
     key,
@@ -271,22 +337,30 @@ export async function applyProjectWide(
     actor: string;
   },
 ): Promise<ApplyProjectWideResult> {
-  // THE PROJECT LOCK, first. Two people answering the same question, or a bill
+  // THE PROJECT LOCK, first — for an area too, because what moves an area's
+  // set (an item added, retired, moved to another area) is a write to the
+  // project's records. Two people answering the same question, or a bill
   // confirm adding the 29th item, queue behind it rather than interleave.
   const project = await txn`select id from projects where id = ${projectId} for update`;
   if (!project[0]) throw new DomainConflictError("not_found", "No such project.", { status: 404 });
 
-  const question = (await loadProjectWide(txn, projectId)).find((group) => group.key === key);
+  const question = (await loadFanOut(txn, projectId, scope)).find((group) => group.key === key);
+  // What the card says the answer is FOR, in every sentence below.
+  const forWhat = scope === "area" ? `for ${question?.area ?? "the area"}` : "for the project";
   if (!question) {
     throw new DomainConflictError(
       "project_wide_gone",
-      "No item on this project asks that question any more. Nothing was written — reload.",
+      scope === "area"
+        ? "No item in that area asks that question any more. Nothing was written — reload."
+        : "No item on this project asks that question any more. Nothing was written — reload.",
     );
   }
   if (question.jsonId === DIMENSIONS_JSON_ID) {
-    throw new DomainConflictError("dimension", "A dimension is recorded per item, never once for the project.", {
-      status: 400,
-    });
+    throw new DomainConflictError(
+      "dimension",
+      `A dimension is recorded per item, never once ${scope === "area" ? "for an area" : "for the project"}.`,
+      { status: 400 },
+    );
   }
 
   // THE SET THE SCREEN SHOWED, row for row and version for version.
@@ -301,7 +375,7 @@ export async function applyProjectWide(
   if (moved) {
     throw new DomainConflictError(
       "project_wide_moved",
-      `The items asking “${question.heading}” changed since this card loaded — an item was added or retired, or one of their answers moved. Nothing was written. Reload and check the list again.`,
+      `The items asking “${question.heading}”${scope === "area" ? ` in ${question.area}` : ""} changed since this card loaded — an item was added, retired or moved, or one of their answers moved. Nothing was written. Reload and check the list again.`,
       { diff: { live: question.rows.length, shown: seen.length } },
     );
   }
@@ -340,8 +414,8 @@ export async function applyProjectWide(
   const n = new Set(targets.map((row) => row.recordId)).size;
   const sentence =
     state === "tbc"
-      ? `Recorded “${question.heading}” as TBC for the project, on ${n} item${n === 1 ? "" : "s"}.`
-      : `Recorded “${question.heading}” as “${value}” for the project, on ${n} item${n === 1 ? "" : "s"}.`;
+      ? `Recorded “${question.heading}” as TBC ${forWhat}, on ${n} item${n === 1 ? "" : "s"}.`
+      : `Recorded “${question.heading}” as “${value}” ${forWhat}, on ${n} item${n === 1 ? "" : "s"}.`;
   const typed = reason?.trim() ? reason.trim() : null;
   const { changeSetId, attached } = await changeSetForEdit(txn, {
     projectId,

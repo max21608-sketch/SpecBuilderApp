@@ -49,6 +49,8 @@ type Row = {
 
 type Question = {
   key: string;
+  /** The area as the document spelled it, on an area card (0062). */
+  area?: string | null;
   heading: string;
   fieldLabel: string | null;
   rows: Row[];
@@ -64,14 +66,46 @@ type Question = {
 const COLUMNS = 5;
 const isSettled = (state: string) => state === "confirmed" || state === "na";
 
+/**
+ * THE SAME CARD FOR AN AREA (decision C of 2026-11-20): `scope="area"` reads
+ * and writes `/area-wide`, one row per (area, question), with the area named
+ * beside the question. Every rule — the plan shown before the save, the tick
+ * and the reason for a settled different answer, the refusal reloading first
+ * — is the project card's, because the route's rules are the same function.
+ */
+const SCOPE_WORDS = {
+  project: {
+    route: "project-wide",
+    anchor: "project-wide",
+    title: "Project-wide — answered once for every item",
+    intro:
+      "The same questions are asked of every item — TOE, access, assembly guide and the rest. They do not count in an item’s own TGQ; they block every quote until they are answered here, once. An answer is written to every item that asks it, and an item that already holds a different answer is left alone unless you tick it.",
+    reading: "Reading the project-wide questions",
+    none: "No item in the export’s scope asks a project-wide question yet — they come with an item’s category.",
+  },
+  area: {
+    route: "area-wide",
+    anchor: "area-wide",
+    title: "By area — answered once for each area",
+    intro:
+      "Indoor or outdoor, the floor and the wall are the same for every item in one area. Answer them once for “Restaurant” and the answer is written to every item in it; an item that already holds a different answer is left alone unless you tick it. They still count in each item’s own TGQ. An item with no area is answered on its own.",
+    reading: "Reading the area questions",
+    none: "No item with an area asks an area question yet.",
+  },
+} as const;
+
 export default function ProjectWideCard({
   projectId,
   onChanged,
+  scope = "project",
 }: {
   projectId: string;
   /** The overview's own numbers move when this writes; it reloads them. */
   onChanged?: () => void;
+  /** `area` is the fill-in screen's card (0062). */
+  scope?: "project" | "area";
 }) {
+  const words = SCOPE_WORDS[scope];
   const [questions, setQuestions] = useState<Question[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -79,14 +113,14 @@ export default function ProjectWideCard({
   const [showSettled, setShowSettled] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await apiFetch<{ questions: Question[] }>(`/api/projects/${projectId}/project-wide`);
+    const res = await apiFetch<{ questions: Question[] }>(`/api/projects/${projectId}/${words.route}`);
     if (!res.ok) {
       setError(res.error);
       return;
     }
     setError(null);
     setQuestions(res.data.questions);
-  }, [projectId]);
+  }, [projectId, words.route]);
 
   useEffect(() => {
     void load();
@@ -96,21 +130,21 @@ export default function ProjectWideCard({
   // screen all link here as `#project-wide`; the card renders after its data,
   // so the browser's own jump has already happened by then.
   useEffect(() => {
-    if (!questions || typeof window === "undefined" || window.location.hash !== "#project-wide") return;
-    document.getElementById("project-wide")?.scrollIntoView?.({ block: "start" });
-  }, [questions]);
+    if (!questions || typeof window === "undefined" || window.location.hash !== `#${words.anchor}`) return;
+    document.getElementById(words.anchor)?.scrollIntoView?.({ block: "start" });
+  }, [questions, words.anchor]);
 
   const blocking = (questions ?? []).filter((question) => question.toQuoteOutstanding > 0).length;
   const listed = (questions ?? []).filter((question) => showSettled || question.outstanding > 0);
   const hidden = (questions ?? []).length - listed.length;
 
   return (
-    <div id="project-wide" className="scroll-mt-6">
+    <div id={words.anchor} className="scroll-mt-6">
       <Card
         flush
         title={
           <>
-            Project-wide — answered once for every item
+            {words.title}
             <CardHeadingNote>
               {questions === null
                 ? ""
@@ -128,22 +162,15 @@ export default function ProjectWideCard({
           ) : undefined
         }
       >
-        <p className="px-4 pt-3 text-[12.5px] text-neutral-600">
-          The same questions are asked of every item — TOE, access, assembly guide and the rest. They do not count in
-          an item&rsquo;s own TGQ; they block every quote until they are answered here, once. An answer is written to
-          every item that asks it, and an item that already holds a different answer is left alone unless you tick it.
-        </p>
+        <p className="px-4 pt-3 text-[12.5px] text-neutral-600">{words.intro}</p>
         {error && <Note tone="danger" className="mx-4">{error}</Note>}
         {notice && <Note tone="good" className="mx-4">{notice}</Note>}
         {questions === null && !error ? (
           <div className="px-4 py-3">
-            <Spinner label="Reading the project-wide questions" />
+            <Spinner label={words.reading} />
           </div>
         ) : questions && questions.length === 0 ? (
-          <p className="px-4 py-3 text-sm text-neutral-600">
-            No item in the export&rsquo;s scope asks a project-wide question yet — they come with an item&rsquo;s
-            category.
-          </p>
+          <p className="px-4 py-3 text-sm text-neutral-600">{words.none}</p>
         ) : (
           <Table>
             <thead>
@@ -159,6 +186,7 @@ export default function ProjectWideCard({
               {listed.map((question) => (
                 <QuestionRows
                   key={question.key}
+                  route={words.route}
                   projectId={projectId}
                   question={question}
                   open={open === question.key}
@@ -186,6 +214,7 @@ export default function ProjectWideCard({
 }
 
 function QuestionRows({
+  route,
   projectId,
   question,
   open,
@@ -193,6 +222,7 @@ function QuestionRows({
   onSaved,
   onRefused,
 }: {
+  route: string;
   projectId: string;
   question: Question;
   open: boolean;
@@ -206,6 +236,7 @@ function QuestionRows({
       <Tr className="cursor-pointer" onClick={onToggle}>
         <Td>
           <span className="mr-1.5 text-neutral-500">{open ? "▾" : "▸"}</span>
+          {question.area && <span className="mr-1.5 font-semibold text-neutral-900">{question.area}</span>}
           <span className="text-neutral-900">{fieldDisplayName(question.heading)}</span>
           {question.fieldLabel && fieldDisplayName(question.fieldLabel) !== fieldDisplayName(question.heading) && (
             <span className="block pl-4 text-[11px] text-neutral-500">BWS: {fieldDisplayName(question.fieldLabel)}</span>
@@ -249,7 +280,7 @@ function QuestionRows({
       {open && (
         <tr>
           <td colSpan={COLUMNS} className="border-b border-neutral-100 bg-[#fcfcfc] px-4 py-3">
-            <AnswerForm projectId={projectId} question={question} onSaved={onSaved} onRefused={onRefused} />
+            <AnswerForm route={route} projectId={projectId} question={question} onSaved={onSaved} onRefused={onRefused} />
           </td>
         </tr>
       )}
@@ -258,11 +289,13 @@ function QuestionRows({
 }
 
 function AnswerForm({
+  route,
   projectId,
   question,
   onSaved,
   onRefused,
 }: {
+  route: string;
   projectId: string;
   question: Question;
   onSaved: (message: string) => Promise<void>;
@@ -311,7 +344,7 @@ function AnswerForm({
     setError(null);
     try {
       const res = await apiFetch<{ written: number; overridden: number; records: number }>(
-        `/api/projects/${projectId}/project-wide`,
+        `/api/projects/${projectId}/${route}`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
