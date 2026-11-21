@@ -666,7 +666,9 @@ silently.
   all of them.
 - **The sentence is DATA** (`spec_matrix_categories.provisional_note`), carried
   in the gate context and printed by `ProvisionalModelNote` on the gate panel,
-  the record header, the phase table and the overview. Never a constant, never
+  the record header, the phase table, the overview and the projects list (its
+  figures and total read as the confirmed model until review 1 found it, the
+  summary's `provisionalNotes` loaded and unused). Never a constant, never
   `matrix_row >= 101`: the day Matthew confirms the model is a re-seed setting
   the column null, and every label goes with it.
 - **A readiness question the sheet asks is a question, answered or not.** 0014

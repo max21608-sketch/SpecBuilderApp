@@ -16,6 +16,7 @@ import {
 import { EMPTY_SUMMARY, type ProjectSummary } from "@/lib/project-summary-shape";
 import { daysUntilSpecsAgreed, todayLocal } from "@/lib/project-programme";
 import Tip from "@/components/ui/Tip";
+import ProvisionalModelNote from "@/components/ui/ProvisionalModelNote";
 import Pill from "@/components/ui/Pill";
 import StatTile from "@/components/ui/StatTile";
 import PageBody from "@/components/ui/PageBody";
@@ -218,8 +219,18 @@ function ProjectsView() {
     let waiting = 0;
     let overdue = 0;
     let withWork = 0;
+    // WHICH FIGURES COME FROM A PROVISIONAL MODEL (review 1, finding 2): the
+    // projects whose TGQ counts items on one, and the seed's sentences.
+    const provisionalProjects: string[] = [];
+    const provisionalNotes: string[] = [];
+    let provisionalItems = 0;
     for (const project of rows) {
       const summary = project.summary ?? EMPTY_SUMMARY;
+      if ((summary.tgqFromProvisional ?? 0) > 0) {
+        provisionalProjects.push(project.bws_project_number);
+        provisionalItems += summary.tgqFromProvisional;
+        provisionalNotes.push(...(summary.provisionalNotes ?? []));
+      }
       toQuote += summary.toQuote;
       projectWide += summary.projectWide ?? 0;
       waiting += project.waiting ?? 0;
@@ -227,7 +238,7 @@ function ProjectsView() {
       const days = project.specs_agreed_by ? daysUntilSpecsAgreed(project.specs_agreed_by, today) : null;
       if (days !== null && days < 0) overdue += 1;
     }
-    return { toQuote, projectWide, waiting, overdue, withWork };
+    return { toQuote, projectWide, waiting, overdue, withWork, provisionalProjects, provisionalNotes, provisionalItems };
   }, [shown]);
 
   return (
@@ -341,6 +352,19 @@ function ProjectsView() {
           />
         </div>
       )}
+      {/* WHERE A TGQ FIGURE COMES FROM AN AI-DRAFTED MODEL, the seed's own
+          sentence (0061, seed 0014; review 1, finding 2). It was loaded here
+          and unused, so the total and a cabinetry project's figure read as the
+          confirmed model. Over the LISTED rows, like the tiles above it. */}
+      {totals.provisionalItems > 0 && (
+        <ProvisionalModelNote
+          className="mt-3"
+          notes={totals.provisionalNotes}
+          suffix={`the TGQ of ${listedNumbers(totals.provisionalProjects)} counts ${totals.provisionalItems} item${
+            totals.provisionalItems === 1 ? "" : "s"
+          } on it`}
+        />
+      )}
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <input
@@ -387,7 +411,7 @@ function ProjectsView() {
                   TGQ
                   <Tip>
                     Questions blocking a quotation — counted by the category&rsquo;s gate model where it has one, and by
-                    the provisional per-level checklist where it has not.
+                    the placeholder per-level checklist where it has not.
                   </Tip>
                 </Th>
                 <Th className="w-[15%]">
@@ -468,6 +492,14 @@ function ProjectsView() {
                         >
                           {(project.summary ?? EMPTY_SUMMARY).toQuote.toLocaleString()}
                         </Link>
+                        {(project.summary ?? EMPTY_SUMMARY).tgqFromProvisional > 0 && (
+                          <span
+                            className="block whitespace-nowrap text-[11px] text-amber-800"
+                            title={[...new Set((project.summary ?? EMPTY_SUMMARY).provisionalNotes)].join(". ")}
+                          >
+                            {(project.summary ?? EMPTY_SUMMARY).tgqFromProvisional} on a provisional model
+                          </span>
+                        )}
                         {((project.summary ?? EMPTY_SUMMARY).projectWide ?? 0) > 0 && (
                           <Link
                             href={`/dashboard/projects/${project.id}?tab=overview#project-wide`}
@@ -538,4 +570,11 @@ export default function ProjectsPage() {
       <ProjectsView />
     </Suspense>
   );
+}
+
+/** "P1, P2 and P3": the projects a note covers, named, because the note sits above all of them. */
+function listedNumbers(numbers: string[]): string {
+  if (numbers.length <= 1) return numbers[0] ?? "";
+  if (numbers.length > 4) return `${numbers.slice(0, 3).join(", ")} and ${numbers.length - 3} more`;
+  return `${numbers.slice(0, -1).join(", ")} and ${numbers[numbers.length - 1]}`;
 }

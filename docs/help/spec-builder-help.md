@@ -145,7 +145,10 @@ pilot is where real work goes.
 
 **Projects list.** Every project, with tiles for TGQ, Overdue, Waiting on a
 reply and Unplaced mail. "Add a project" (number, name, optional client). Each
-row has "Chase" and "Export".
+row has "Chase" and "Export". Where a project's TGQ counts items on the AI-drafted
+cabinetry gate model, its row says "N on a provisional model" under the figure
+(hover for the model's sentence), and the sentence itself sits above the table,
+naming those projects.
 
 **Project page.** Header buttons: "Start a change", "Inbox N", "Fill in
 ourselves", "Chase N", the outputs ("Spec upload", "Quote lines", "Costing
