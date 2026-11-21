@@ -11,7 +11,7 @@
 // finish line, the rows it had itself written a moment before included. So a
 // revision listing the fabric the item already held AND a second one refused
 // the whole bill ("fabric_changed"), while the review, planning on its own,
-// said "→ COM 2". Now one planner decides, the review shows it, and the
+// said "→ Fabric 2". Now one planner decides, the review shows it, and the
 // confirm executes it: the second fabric lands in COM 2, and the refusal is
 // kept for the case it was meant for — a held fabric the revision no longer
 // lists, named.
@@ -152,7 +152,7 @@ describeIfDb("a revision's finish lines, planned once", () => {
     );
     const shown = await review(revision);
     expect(shown[1]).toMatchObject({ goesTo: "→ nothing written" });
-    expect(shown[2]?.goesTo).toBe("→ COM 2");
+    expect(shown[2]?.goesTo).toBe("→ Fabric 2");
     expect(shown[2]?.refusal).toBeUndefined();
 
     const done = await confirm(revision);

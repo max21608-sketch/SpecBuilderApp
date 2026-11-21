@@ -148,18 +148,18 @@ describeIfDb("a COM line naming a code on two lines of one phase", () => {
     const line = async (row: number) => body.fabricFilings[0]?.[await indexOf(row)];
 
     // Names no code: its own item only.
-    expect(await line(4)).toMatchObject({ goesTo: "→ COM 1" });
+    expect(await line(4)).toMatchObject({ goesTo: "→ Fabric 1" });
     expect((await line(4))?.forRows).toBeUndefined();
     // Names ZC-03 by its own code: both lines, the next free COM on each.
     const both = await line(5);
-    expect(both?.goesTo).toBe("→ COM 1 on row 2, COM 2 on row 3");
+    expect(both?.goesTo).toBe("→ Fabric 1 on row 2, Fabric 2 on row 3");
     expect(both?.forRows?.rows).toEqual([2, 3]);
     expect(both?.forRows?.sentence).toBe(
       "For rows 2 and 3 — ZC-03, both: its code ZB-ZC-03 names it, and row 2 carries ZC-03 with no finish line of its own.",
     );
     // ZC-02's two lines each have their own COM line: each keeps its own.
     for (const row of [7, 9]) {
-      expect((await line(row))?.goesTo).toBe("→ COM 1");
+      expect((await line(row))?.goesTo).toBe("→ Fabric 1");
       expect((await line(row))?.forRows).toBeUndefined();
     }
   });

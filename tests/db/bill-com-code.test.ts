@@ -165,7 +165,7 @@ describeIfDb("a bill that names its cloths by a COM code", () => {
     };
     const line = async (row: number) => body.fabricFilings[0]?.[await indexOf(row)];
     expect(await line(3)).toMatchObject({
-      goesTo: "→ COM 1",
+      goesTo: "→ Fabric 1",
       filing: "new library entry ZB_04, by its COM CODE — described when the finishes schedule is read",
       writes: { value: "NAME: EXAMPLE VELVET CODE: 1234.56 COLOUR: IVORY", qualifier: "POUFFE DEPTH" },
     });
