@@ -42,7 +42,7 @@ import {
 import { partReader, surveyFile, SURVEY_MODEL } from "@/lib/pack-survey";
 import type { PartPlace, SurveyPart } from "@/lib/pack-survey-types";
 import { parseBoqSheets } from "@/lib/boq-import";
-import { BILL_OR_SCHEDULE_HELD, billProbeEvidence, isBillOrScheduleDoubt, probeOfPdfBill, probeOfSheets, type BillProbe } from "@/lib/bill-probe";
+import { billProbeEvidence, billProbeHeld, isProbedForBill, probeOfPdfBill, probeOfSheets, settleBillTabs, type BillProbe } from "@/lib/bill-probe";
 import { partOfPlace, type ClassifiedPart, type PdfBillNote } from "@/lib/upload-reads";
 import { partPageCount } from "@/lib/source-part";
 import type { ClassifyFailureCode } from "@/lib/classify-failure";
@@ -290,11 +290,11 @@ export async function POST(request: Request): Promise<Response> {
         answer.held = SHEET_HOLDS_TWO_KINDS;
         continue;
       }
-      if (isBillOrScheduleDoubt(part)) {
+      if (isProbedForBill(part)) {
         const tried = await probeBill(part);
         const found = billProbeEvidence(tried.probe);
         if (found) {
-          answer.held = BILL_OR_SCHEDULE_HELD;
+          answer.held = billProbeHeld(part);
           answer.suggestion = KIND_FROM_GENRE.bill_of_quantities;
           answer.pdfBill = tried.pdfBill;
           answer.evidence = [found, part.evidence].filter(Boolean).join(" ");
@@ -372,7 +372,12 @@ export async function POST(request: Request): Promise<Response> {
   // drift. TWO OR MORE is a mixed file, answered per part, and the name rule
   // does not apply: a filename cannot describe a mix.
   // ============================================================================
-  const surveyParts = surveyed.survey.parts;
+  // ONE TAB OF A BILL IS NOT HELD FOR ITS DOUBT beside a certain bill tab
+  // (`settleBillTabs`): the Panther bill's VE tab, "uncertain only because it
+  // is a variant", held the whole workbook on every upload. Settled before
+  // anything below reads the parts, so a workbook whose every sheet is then
+  // the bill is the single whole-file bill it always was.
+  const surveyParts = source.type === "spreadsheet" ? settleBillTabs(surveyed.survey.parts) : surveyed.survey.parts;
   // THE MODEL'S OWN NOTE, AND ONLY THAT, goes to the row. Code's bookkeeping
   // — "merged from 11 parts", "Pages 25–30 are in no part" — is in
   // `survey.note` for the eval; on a screen it is developer voice, and an
@@ -407,7 +412,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // BILL OR SCHEDULE GOES TO CODE (`bill-probe.ts`). Held either way; where
   // the cells read as a bill's, the box says Bill and the evidence says why.
-  if (sole && isBillOrScheduleDoubt(sole)) {
+  if (sole && isProbedForBill(sole)) {
     const tried = await probeBill(sole);
     const found = billProbeEvidence(tried.probe);
     if (found) {
@@ -419,7 +424,7 @@ export async function POST(request: Request): Promise<Response> {
           genre: result.genre,
           decision: null,
           unsupported: null,
-          held: BILL_OR_SCHEDULE_HELD,
+          held: billProbeHeld(sole),
           suggestion: KIND_FROM_GENRE.bill_of_quantities,
           pdfBill: tried.pdfBill,
           titleText: null,

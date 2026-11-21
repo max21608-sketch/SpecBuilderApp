@@ -238,8 +238,8 @@ documents" → drop the files or "Choose files".
   buttons on its row: choose the kind in the box or press the right
   suggestion, then press "Read the 1 you have named". Nothing is read until
   you do. If the model's reading is a bill it must transcribe, the row says
-  so: one charged read. A file that "Could be the bill or an FF&E schedule"
-  is shown the same way: "— say which —" in the box, and "Bill of
+  so: one charged read. A file that "Could be the bill or an FF&E schedule",
+  or was "Read as a bill, but not for certain", is shown the same way: "— say which —" in the box, and "Bill of
   quantities" offered as a button beside it with what was found ("Reads as
   a bill: 26 lines; …").
 - **A file with several documents in it is shown in parts.** A PDF that

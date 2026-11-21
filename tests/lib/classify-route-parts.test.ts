@@ -513,3 +513,90 @@ describe("bill or schedule goes to code", () => {
     expect(parts[1]).toMatchObject({ suggestion: { importType: "boq", documentKind: null }, pdfBill: { lines: 2, pages: 1 } });
   });
 });
+
+describe("one tab of a bill beside a certain bill tab (the pilot's Panther bill, 2026-11-21)", () => {
+  const VE = "uncertain only because it is a variant";
+  const bill = (sheet: string, certain: boolean, over: Record<string, unknown> = {}) => ({
+    sheet,
+    genre: "bill_of_quantities",
+    evidence: certain ? "Code / Qty" : VE,
+    certain,
+    ...over,
+  });
+
+  it("answers two certain bill sheets and an uncertain one as the single whole-file bill, not held", async () => {
+    stored.contentType = XLSX;
+    stored.bytes = await workbook({ MUR: BILL_ROWS, "MAIN RUN": BILL_ROWS, "MAIN RUN - VE": BILL_ROWS });
+    create.mockImplementation(surveyAnswer([bill("MUR", true), bill("MAIN RUN", true), bill("MAIN RUN - VE", false)]));
+    const { body } = await classify("QA Seating BOQ.xlsx");
+    expect(body).not.toHaveProperty("parts");
+    expect(body).toMatchObject({ ok: true, genre: "bill_of_quantities", decision: { importType: "boq", documentKind: null }, certain: true });
+    expect(body.held ?? null).toBeNull();
+  });
+
+  it("keeps the two bill sheets on the bill, unheld, and a finishes sheet on its own", async () => {
+    stored.contentType = XLSX;
+    stored.bytes = await workbook({ MAIN: BILL_ROWS, VE: BILL_ROWS, Finishes: [["Code", "Finish"], ["QA-TIM-01", "Oak"]] });
+    create.mockImplementation(
+      surveyAnswer([
+        bill("MAIN", true),
+        bill("VE", false, { weighedAgainst: "ffe_schedule" }),
+        { sheet: "Finishes", genre: "finishes_schedule", evidence: "Code / Finish", certain: true },
+      ]),
+    );
+    const { body } = await classify("QA Bill and Finishes.xlsx");
+    const parts = body.parts as Record<string, unknown>[];
+    expect(parts.map((part) => [part.decision, part.held])).toEqual([
+      [{ importType: "boq", documentKind: null }, null],
+      [{ importType: "boq", documentKind: null }, null],
+      [{ importType: "spec_document", documentKind: "finishes_schedule" }, null],
+    ]);
+  });
+
+  it("still holds a lone uncertain bill sheet, with the bill offered where it reads as one", async () => {
+    stored.contentType = XLSX;
+    stored.bytes = await workbook({ VE: BILL_ROWS });
+    create.mockImplementation(surveyAnswer([bill("VE", false)]));
+    const { body } = await classify("QA VE.xlsx");
+    expect(body).toMatchObject({
+      decision: null,
+      suggestion: { importType: "boq", documentKind: null },
+      held: "Read as a bill, but not for certain. If it is the bill, accept Bill of quantities; if not, choose what it is.",
+    });
+    expect(String(body.evidence)).toMatch(/^Reads as a bill: 3 lines; code and quantity columns found\./);
+  });
+
+  it("holds a lone uncertain bill sheet with nothing offered where it does not read as one", async () => {
+    stored.contentType = XLSX;
+    stored.bytes = await workbook({ Rooms: [["Room", "Product"], ["Lobby", "Lamp"]] });
+    create.mockImplementation(surveyAnswer([bill("Rooms", false)]));
+    const { body } = await classify("QA Rooms.xlsx");
+    expect(body.decision).toBeNull();
+    expect(body).not.toHaveProperty("suggestion");
+  });
+
+  it("still holds an uncertain sheet whose genre is not a bill beside a certain bill sheet", async () => {
+    stored.contentType = XLSX;
+    stored.bytes = await workbook({ MAIN: BILL_ROWS, Notes: [["General"], ["All timber FSC certified."]] });
+    create.mockImplementation(
+      surveyAnswer([bill("MAIN", true), { sheet: "Notes", genre: "preamble", evidence: "General", certain: false, weighedAgainst: "bill_of_quantities" }]),
+    );
+    const { body } = await classify("QA Bill.xlsx");
+    const parts = body.parts as Record<string, unknown>[];
+    expect(parts[0]).toMatchObject({ decision: { importType: "boq", documentKind: null } });
+    expect(parts[1]).toMatchObject({ decision: null });
+  });
+
+  it("never settles an uncertain bill PART of a PDF beside a certain one", async () => {
+    stored.bytes = buildPdf([schedulePage(), schedulePage()]);
+    create.mockImplementation(
+      surveyAnswer([
+        { firstPage: 1, lastPage: 1, genre: "bill_of_quantities", evidence: "CODE / QTY", certain: true },
+        { firstPage: 2, lastPage: 2, genre: "bill_of_quantities", evidence: VE, certain: false },
+      ]),
+    );
+    const { body } = await classify("QA Bill.pdf");
+    const parts = body.parts as Record<string, unknown>[];
+    expect(parts[1]).toMatchObject({ decision: null, suggestion: { importType: "boq", documentKind: null } });
+  });
+});

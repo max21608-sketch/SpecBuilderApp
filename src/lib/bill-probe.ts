@@ -19,6 +19,22 @@
 // what code found, so the person's one press is informed rather than a choice
 // from nothing. Widening `isBillOrScheduleDoubt` to "any doubt", or letting a
 // good reading clear the hold, are the two changes this file exists to refuse.
+//
+// A PART THE SURVEY ITSELF CALLS A BILL, NOT CERTAIN, IS PROBED TOO
+// (`isProbedForBill`, 2026-11-21): its doubt need not be against a schedule —
+// on the Panther bill the VE tab was "uncertain only because it is a variant"
+// and was held with an empty box and no reason. Probing it only informs: it
+// stays held, the bill offered beside its box with what code found.
+//
+// AND ONE TAB OF A BILL IS NOT HELD FOR ITS DOUBT WHEN ANOTHER TAB IS A
+// CERTAIN BILL (`settleBillTabs`). The bill reader stages EVERY sheet of a
+// workbook as a tab, nothing is written until the bill's Confirm, and the
+// bill's review is where a tab is dropped ("Drop this sheet"): a wrong tab
+// costs nothing and is seen. That is the whole of the exception. A lone
+// sheet, a PDF part, and a workbook with no certain bill sheet keep the hold,
+// because a spreadsheet that could be a bill or a schedule is still the
+// costly mistake — a schedule filed as a bill is a project's worth of wrong
+// records, where an extra tab beside a real bill is one sheet to drop.
 // ============================================================================
 import { foldHeading } from "@/lib/boq-roles";
 import { REFERENCE_BOQ_ALIASES, type BoqAlias, type BoqParseResult } from "@/lib/boq-import";
@@ -95,3 +111,47 @@ export function probeOfSheets(parsed: BoqParseResult): BillProbe | null {
 /** The sentence a held part that reads as a bill carries above its box. */
 export const BILL_OR_SCHEDULE_HELD =
   "Could be the bill or an FF&E schedule. If it is the bill, accept Bill of quantities; if not, choose what it is.";
+
+/** The same, for a part the survey read as a bill without being sure, its doubt not a schedule. */
+export const BILL_UNCERTAIN_HELD =
+  "Read as a bill, but not for certain. If it is the bill, accept Bill of quantities; if not, choose what it is.";
+
+type Judged = Pick<SurveyPart, "genre" | "certain" | "weighedAgainst" | "nothingToRead">;
+
+/** Called a bill by the survey, and not certain — weighed against anything or nothing. */
+const uncertainBill = (part: Judged) => !part.nothingToRead && !part.certain && part.genre === "bill_of_quantities";
+
+/**
+ * Is this part tried by the bill reader before a person is asked? The torn
+ * bill-or-schedule case, and any part the survey called a bill without being
+ * sure. Never a certain part, and never one with nothing to read.
+ */
+export function isProbedForBill(part: Judged): boolean {
+  return isBillOrScheduleDoubt(part) || uncertainBill(part);
+}
+
+/** The sentence above a probed part that reads as a bill. */
+export function billProbeHeld(part: Judged): string {
+  return isBillOrScheduleDoubt(part) ? BILL_OR_SCHEDULE_HELD : BILL_UNCERTAIN_HELD;
+}
+
+/**
+ * A workbook's parts with every uncertain bill SHEET made a certain bill tab
+ * where another sheet of the same workbook is a certain bill (see the header:
+ * the bill review drops a wrong tab, nothing is written before Confirm). The
+ * same objects where nothing changes; only sheet parts are ever touched, so a
+ * PDF's parts pass through, and a lone sheet has no other sheet to lean on.
+ */
+export function settleBillTabs(parts: SurveyPart[]): SurveyPart[] {
+  const certainBills = new Set(
+    parts.flatMap((part) =>
+      part.place.kind === "sheet" && part.genre === "bill_of_quantities" && part.certain && !part.nothingToRead ? [part.place.sheet] : [],
+    ),
+  );
+  return parts.map((part) => {
+    if (part.place.kind !== "sheet" || !uncertainBill(part)) return part;
+    const sheet = part.place.sheet;
+    if (![...certainBills].some((other) => other !== sheet)) return part;
+    return { ...part, certain: true, weighedAgainst: null };
+  });
+}
