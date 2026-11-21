@@ -44,6 +44,7 @@ import Tabs from "@/components/ui/Tabs";
 import OpenChangeBar from "@/components/history/OpenChangeBar";
 import InfillTable, { NO_FILTERS, type Filters } from "@/components/infill/InfillTable";
 import AreaWideCard from "@/components/infill/AreaWideCard";
+import ProvisionalModelNote from "@/components/ui/ProvisionalModelNote";
 import UncategorisedBlock, { type UncategorisedRecord } from "@/components/infill/UncategorisedBlock";
 import QuestionGroups, { type QuestionSummary } from "@/components/infill/QuestionGroups";
 import type { SaveOutcome } from "@/components/infill/InfillRow";
@@ -57,6 +58,8 @@ type Category = { id: string; slug: string; family: string; name: string; requir
 
 type Summary = {
   project: { id: string; bws_project_number: string; name: string };
+  /** The provisional gate models' own sentences, where an item here is judged on one (0061). */
+  provisionalNotes?: string[];
   lines: InfillLineSummary[];
   questions: QuestionSummary[];
   /** The areas, counted in item rows, for the by-question tab's filter. */
@@ -560,6 +563,12 @@ function InfillView() {
             <span className="text-green-700"> · {recorded} recorded in this sitting</span>
           )}
         </p>
+
+        <ProvisionalModelNote
+          notes={data.provisionalNotes}
+          suffix="it decides which of these count as TGQ"
+          className="mt-3"
+        />
 
         {/* A RECORD WITH NO CATEGORY HAS NO QUESTIONS, so it would simply not
             appear — and an item nobody has classified is exactly the one a

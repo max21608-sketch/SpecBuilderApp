@@ -64,6 +64,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import Tabs from "@/components/ui/Tabs";
 import Card from "@/components/ui/Card";
 import Note from "@/components/ui/Note";
+import ProvisionalModelNote from "@/components/ui/ProvisionalModelNote";
 import Tip from "@/components/ui/Tip";
 import Chip from "@/components/ui/Chip";
 import SuggestButton from "@/components/ui/SuggestButton";
@@ -145,6 +146,8 @@ type Inventory = {
   settledLines?: number;
   /** Lines with no category: no questions at all, never "done". */
   uncategorisedLines?: number;
+  /** The provisional gate models' own sentences, where an item here is judged on one (0061). */
+  provisionalNotes?: string[];
   blocked: Blocked[];
   /** `itemTgq` per record on Matthew's matrix: the line counts and the not-asked rows. */
   itemTgq?: Record<string, ChaseItemTgq>;
@@ -817,6 +820,10 @@ function DraftsView() {
       />
 
       <PageBody width="wide">
+        {/* WHOSE TGQ THIS CHASE ASKS BY. A question is "needed before we can
+            quote" because a gate model says so, and where that model is the
+            AI-drafted cabinetry one the screen says so in the seed's words. */}
+        <ProvisionalModelNote notes={inventory.provisionalNotes} suffix="it decides which questions this chase marks as needed to quote" />
         {error && (
           <Note tone="danger">
             {error}

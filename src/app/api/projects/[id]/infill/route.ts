@@ -54,6 +54,7 @@ import { areaOptions } from "@/lib/area-filter";
 import { normaliseFinishCode } from "@/lib/finishes";
 import { loadPalettes } from "@/lib/palette-load";
 import { requireUuid } from "@/lib/route-guards";
+import { loadProjectSummary } from "@/lib/project-summary";
 
 export const dynamic = "force-dynamic";
 
@@ -84,7 +85,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (requirements.length > 0) return detail(projectId, { requirementIds: requirements });
 
   // ---- the summary ---------------------------------------------------------
-  const [outstanding, uncategorised, coverage, matrix] = await Promise.all([
+  const [outstanding, uncategorised, coverage, matrix, provisionalNotes] = await Promise.all([
     loadOutstanding(projectId),
     loadUncategorisedRecords(projectId),
     loadSentCoverage(projectId),
@@ -92,6 +93,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     // gate's rows — slots and record columns included — which no list of
     // questions can count. The overview adds the same half.
     loadMatrixItemTgq([projectId]),
+    // The provisional gate models' own sentences (0061), as the overview
+    // reads them: the screen prints them over a TGQ that comes from one.
+    loadProjectSummary(projectId).then((summary) => summary.provisionalNotes),
   ]);
   const waiting = waitingByQuestion(outstanding, coverage);
   const withWaiting = outstanding.map((question) => ({
@@ -185,6 +189,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     categories,
     palettes,
     paletteByQuestion,
+    provisionalNotes,
   });
 }
 

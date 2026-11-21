@@ -269,6 +269,10 @@ export async function GET(request: Request): Promise<Response> {
       // at all and is counted apart, never as done.
       settledLines: summary.settledItems,
       uncategorisedLines: summary.uncategorised,
+      // The seed's own sentence for every provisional gate model an item here
+      // is judged on (0061), so the chase screen says whose TGQ it is asking
+      // by — the overview's figure, read off the same summary.
+      provisionalNotes: summary.provisionalNotes,
       // Grouped by the contact each record's designer resolves to.
       ...(() => {
         // Each question carries its waiting state once, whichever shape ships.

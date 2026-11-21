@@ -88,4 +88,35 @@ describeIfDb("a typed record, chased on its type's rows", () => {
       vi.resetModules();
     }
   });
+
+  it("gives the chase and fill-in screens the provisional model's own sentence where an item is on it", async () => {
+    // A side table: the AI-drafted cabinetry model (seed 0014).
+    const runId = (await client.query(`select id from spec_runs where project_id = $1 limit 1`, [projectId])).rows[0].id;
+    const side = (await client.query(`select id from item_categories where slug = 'side-coffee-bedside-tables'`)).rows[0].id;
+    const note = (
+      await client.query(
+        `select t.provisional_note from spec_matrix_categories t join spec_matrix_category_map m on m.matrix_code = t.code where m.item_category_id = $1`,
+        [side],
+      )
+    ).rows[0].provisional_note as string;
+    expect(note).toMatch(/drafted by AI/);
+    await client.query(
+      `insert into spec_records (project_id, run_id, record_no, status, category_id, item_description, created_by, updated_by)
+       values ($1, $2, 9, 'active', $3, '__QA Side table', 'qa', 'qa')`,
+      [projectId, runId, side],
+    );
+    vi.doMock("@/lib/session", () => ({ getSessionUser: async () => ({ id: "x", email: "__qa@example.test", name: "QA", role: "admin" }) }));
+    vi.resetModules();
+    try {
+      const { GET: infill } = await import("@/app/api/projects/[id]/infill/route");
+      const filled = await (await infill(new Request(`http://localhost/api/projects/${projectId}/infill`), { params: Promise.resolve({ id: projectId }) })).json();
+      expect(filled.provisionalNotes).toEqual([note]);
+      const { GET: drafts } = await import("@/app/api/drafts/route");
+      const chase = await (await drafts(new Request(`http://localhost/api/drafts?projectId=${projectId}&questions=once`))).json();
+      expect(chase.inventory.provisionalNotes).toEqual([note]);
+    } finally {
+      vi.doUnmock("@/lib/session");
+      vi.resetModules();
+    }
+  });
 });
