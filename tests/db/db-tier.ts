@@ -115,3 +115,66 @@ export function qaNumber(base: string): string {
 
 /** This process's suffix, for a test that needs to reason about it. */
 export const QA_RUN_SUFFIX = RUN_SUFFIX;
+
+// ============================================================================
+// THE PLACEHOLDER IS A FIXTURE NOW, BECAUSE THE SEED NO LONGER HOLDS ONE.
+//
+// Five files picked "a seeded category that is not on the gate matrix" as the
+// placeholder half of TGQ — the model where a record needs a level and
+// `tgq_levels` decides. Until seed 0014 (2026-11-20) the eight cabinetry
+// sheets were exactly that. 0014 maps every one of them to a provisional type,
+// so after it NO seeded category is unmapped: every one of those lookups found
+// no row and the files failed in `beforeAll` with "Cannot read properties of
+// undefined (reading 'id')". The placeholder model is still live — a category
+// added tomorrow, before anybody maps it, is on it — so it is still tested,
+// on a category the fixture makes.
+//
+// The questions are a COPY of a real sheet's (dining tables by default):
+// both kinds, the project-wide section and the item's own, with each row's
+// own `tgq_levels`, which is the shape the placeholder tests assert on. The
+// name starts `__QA ` exactly, so `db:qa-clean` sweeps a leftover and the
+// seed assertions in `spec-field-gates.test.ts` never read it as seed.
+// ============================================================================
+type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> };
+
+/**
+ * An unmapped `__QA ` category carrying a copy of a seeded sheet's questions.
+ * `drop()` removes it and its questions; delete the records on it first
+ * (`spec_records.category_id` is `on delete restrict`).
+ */
+export async function qaPlaceholderCategory(
+  client: Queryable,
+  label: string,
+  copyFromSlug = "dining-tables",
+): Promise<{ id: string; drop: () => Promise<void> }> {
+  const name = qaNumber(`Placeholder ${label}`);
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const created = await client.query(
+    `insert into item_categories (slug, family, name, requirements_authored, sort_order, created_by, updated_by)
+     select $1, c.family, $2, true, 9000, 'qa', 'qa' from item_categories c where c.slug = $3
+     returning id`,
+    [slug, name, copyFromSlug],
+  );
+  if (created.rows.length !== 1) throw new Error(`qaPlaceholderCategory: no seeded sheet "${copyFromSlug}" to copy`);
+  const id = String(created.rows[0].id);
+  await client.query(
+    `insert into requirements (category_id, kind, spec_field_id, local_key, prompt, help_text, section, sort_order,
+                               tgq_levels, created_by, updated_by)
+     select $1, q.kind, q.spec_field_id, q.local_key, q.prompt, q.help_text, q.section, q.sort_order,
+            q.tgq_levels, 'qa', 'qa'
+       from requirements q join item_categories c on c.id = q.category_id
+      where c.slug = $2`,
+    [id, copyFromSlug],
+  );
+  return {
+    id,
+    drop: async () => {
+      await client.query(
+        `delete from spec_answers where requirement_id in (select id from requirements where category_id = $1)`,
+        [id],
+      );
+      await client.query(`delete from requirements where category_id = $1`, [id]);
+      await client.query(`delete from item_categories where id = $1`, [id]);
+    },
+  };
+}

@@ -15,7 +15,7 @@
 // takes its change sets and versions with it (0014/0013 refuse a direct
 // delete, and a teardown that tries one leaves its fixture behind).
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb, qaNumber } from "./db-tier";
+import { describeIfDb, qaNumber, qaPlaceholderCategory } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -72,6 +72,7 @@ describeIfDb("record payload — waiting, who to ask, and quote readiness", () =
   /** A category Matthew's matrix does NOT cover, so `tgq_levels` decides — the
       half of the model that refuses to answer without a level. */
   let placeholderCategoryId = "";
+  let placeholderCategory: Awaited<ReturnType<typeof qaPlaceholderCategory>> | undefined;
   let chasedRecordId = "";
   let levellessRecordId = "";
   let chasedRequirementId = "";
@@ -113,16 +114,10 @@ describeIfDb("record payload — waiting, who to ask, and quote readiness", () =
     // spec_matrix_category_map: absence from that map is what makes
     // `questionTierOrNull` fall back to `tgq_levels`, which is the model that
     // needs a level. A mapped category would answer without one and the
-    // level-less assertion below would pass for the wrong reason.
-    const category = await client.query(
-      `select c.id from item_categories c
-         join requirements q on q.category_id = c.id
-        where not exists (select 1 from spec_matrix_category_map m where m.item_category_id = c.id)
-          and c.created_by = 'seed'
-        group by c.id having count(q.id) >= 3
-        order by c.slug limit 1`,
-    );
-    placeholderCategoryId = category.rows[0].id;
+    // level-less assertion below would pass for the wrong reason. The
+    // fixture makes its own: since seed 0014 the seed holds none.
+    placeholderCategory = await qaPlaceholderCategory(client, "record-payload");
+    placeholderCategoryId = placeholderCategory.id;
 
     const chased = await client.query(
       `insert into spec_records (project_id, run_id, record_no, status, category_id, level,
@@ -241,6 +236,7 @@ describeIfDb("record payload — waiting, who to ask, and quote readiness", () =
     await client.query(`delete from project_contacts where project_id = $1`, [projectId]);
     // The change sets go with the project. 0014 refuses a direct delete.
     await client.query(`delete from projects where id = $1`, [projectId]);
+    await placeholderCategory?.drop();
     await client.end();
   });
 

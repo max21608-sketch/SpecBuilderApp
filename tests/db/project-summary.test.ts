@@ -27,7 +27,7 @@ import { it, expect, beforeAll, afterAll, vi } from "vitest";
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({ id: "00000000-0000-0000-0000-000000000001", email: "__qa@example.test", name: "QA User", role: "viewer" }),
 }));
-import { describeIfDb, qaNumber } from "./db-tier";
+import { describeIfDb, qaNumber, qaPlaceholderCategory } from "./db-tier";
 import pg from "pg";
 import { EMPTY_SUMMARY, loadProjectSummary } from "@/lib/project-summary";
 import { isScopeFailure, loadExportScope } from "@/lib/export-scope";
@@ -250,18 +250,11 @@ describeIfDb("project summary", () => {
     // question is to_quote, so it carries item readiness questions AND the
     // project-wide section, spec fields and readiness both. That is the case
     // the walk of 2026-10-12 found counted four ways.
-    const fallback = await client.query(
-      `select q.category_id as id
-         from requirements q
-        where q.category_id not in (select item_category_id from spec_matrix_category_map)
-        group by q.category_id
-       having count(*) filter (where q.kind = 'readiness' and q.section is distinct from $1) > 0
-          and count(*) filter (where q.section = $1 and q.kind = 'readiness') > 0
-          and count(*) filter (where q.section = $1 and q.kind = 'spec_field') > 0
-        order by (select c.slug from item_categories c where c.id = q.category_id and c.created_by = 'seed') nulls last
-        limit 1`,
-      [PROJECT_WIDE_SECTION],
-    );
+    // The fixture's own unmapped sheet, a copy of dining tables' questions:
+    // since seed 0014 every seeded sheet is on a gate model, so the seed holds
+    // no fallback category to pick.
+    const fallbackCategory = await qaPlaceholderCategory(client, "project-summary");
+    const fallback = { rows: [{ id: fallbackCategory.id }] };
     const extra = await client.query(
       `insert into spec_records (project_id, run_id, record_no, category_id, level, item_description, status,
                                  created_by, updated_by)
@@ -308,6 +301,7 @@ describeIfDb("project summary", () => {
       );
     } finally {
       await client.query(`delete from spec_records where id = $1`, [extra.rows[0].id]);
+      await fallbackCategory.drop();
     }
   });
 

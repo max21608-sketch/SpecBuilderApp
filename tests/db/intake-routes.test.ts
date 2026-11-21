@@ -6,7 +6,7 @@
 // Every row is prefixed `__QA ` and deleted in FK-safe order. audit_log is left
 // alone: it is append-only by design.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb, qaNumber } from "./db-tier";
+import { describeIfDb, qaNumber, qaPlaceholderCategory } from "./db-tier";
 import { withShownTargets } from "./shown-targets";
 import pg from "pg";
 import { measuredRows, type DrawingItem, type SpecFieldEntry } from "@/lib/drawing-document";
@@ -45,6 +45,7 @@ describeIfDb("intake routes", () => {
   let mainRunId = "";
   let veRunId = "";
   let categoryId = "";
+  let placeholderCategory: Awaited<ReturnType<typeof qaPlaceholderCategory>> | undefined;
   let fields: SpecFieldEntry[] = [];
 
   beforeAll(async () => {
@@ -78,14 +79,13 @@ describeIfDb("intake routes", () => {
     // tables is a cabinetry sheet his matrix does not map (seed 0005), which
     // is what those tests are about: the placeholder half of TGQ, where a
     // record needs a level before anything is tiered.
-    categoryId = (
-      await client.query(
-        `select c.id from item_categories c
-          where c.slug = 'dining-tables'
-            and exists (select 1 from requirements q where q.category_id = c.id)
-            and not exists (select 1 from spec_matrix_category_map m where m.item_category_id = c.id)`,
-      )
-    ).rows[0].id;
+    //
+    // Since seed 0014 (2026-11-20) dining tables IS on a gate model (the
+    // provisional cabinetry one) and no seeded sheet is unmapped, so the
+    // fixture makes its own placeholder sheet: a `__QA ` copy of dining
+    // tables' questions, on no gate model.
+    placeholderCategory = await qaPlaceholderCategory(client, "intake-routes");
+    categoryId = placeholderCategory.id;
     const fieldRows = await client.query(`select id, json_id, name from spec_fields order by sort_order`);
     fields = fieldRows.rows.map((row: { id: string; json_id: number; name: string }) => ({
       id: row.id,
@@ -118,6 +118,7 @@ describeIfDb("intake routes", () => {
     await client.query(`delete from intake_runs where project_id = $1`, [projectId]);
     await client.query(`delete from intake_batches where project_id = $1`, [projectId]);
     await client.query(`delete from projects where id = $1`, [projectId]);
+    await placeholderCategory?.drop();
     await client.end();
   });
 

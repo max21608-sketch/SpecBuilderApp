@@ -15,7 +15,7 @@
 // takes its change sets with it (0014 refuses a direct delete).
 import { inItemTgq } from "@/lib/chase-grouping";
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb, qaNumber } from "./db-tier";
+import { describeIfDb, qaNumber, qaPlaceholderCategory } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -68,6 +68,7 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
   let runId = "";
   let contactId = "";
   let categoryId = "";
+  let placeholderCategory: Awaited<ReturnType<typeof qaPlaceholderCategory>> | undefined;
 
   async function nextRecordNo(): Promise<number> {
     const row = await client.query(
@@ -104,16 +105,10 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
     // level-less bucket below exists only where a level is what the tier
     // needs; on Matthew's matrix a record with no level is tiered and chased
     // as it stands. This picked "the first category by id", which happened to
-    // be a placeholder one.
-    const category = await client.query(
-      `select c.id from item_categories c
-         join requirements q on q.category_id = c.id
-        where c.id not in (select item_category_id from spec_matrix_category_map)
-          and c.created_by = 'seed'
-        group by c.id having count(q.id) >= 3
-        order by c.slug limit 1`,
-    );
-    categoryId = category.rows[0].id;
+    // be a placeholder one. Since seed 0014 the seed holds none, so the
+    // fixture makes its own.
+    placeholderCategory = await qaPlaceholderCategory(client, "project-payload");
+    categoryId = placeholderCategory.id;
 
     // One record this contact owes us answers on.
     const owed = await client.query(
@@ -172,6 +167,7 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
     await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
     await client.query(`delete from project_contacts where project_id = $1`, [projectId]);
     await client.query(`delete from projects where id = $1`, [projectId]);
+    await placeholderCategory?.drop();
     await client.end();
   });
 

@@ -15,7 +15,7 @@
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb, qaNumber } from "./db-tier";
+import { describeIfDb, qaNumber, qaPlaceholderCategory } from "./db-tier";
 import pg from "pg";
 import { loadProjectSummary } from "@/lib/project-summary";
 
@@ -38,6 +38,7 @@ describeIfDb("an item's TGQ, and totals equal to their lines", () => {
   let answeredId = "";
   let openId = "";
   let placeholderId = "";
+  let placeholderCategory: Awaited<ReturnType<typeof qaPlaceholderCategory>> | undefined;
 
   async function record(no: number, categoryId: string, description: string): Promise<string> {
     return (
@@ -70,14 +71,9 @@ describeIfDb("an item's TGQ, and totals equal to their lines", () => {
            join item_categories c on c.id = m.item_category_id order by c.slug limit 1`,
       )
     ).rows[0].id as string;
-    const placeholder = (
-      await client.query(
-        `select c.id from item_categories c
-          where c.id not in (select item_category_id from spec_matrix_category_map)
-            and exists (select 1 from requirements q where q.category_id = c.id)
-          order by c.sort_order limit 1`,
-      )
-    ).rows[0].id as string;
+    // The fixture's own unmapped sheet: since seed 0014 the seed holds none.
+    placeholderCategory = await qaPlaceholderCategory(client, "item-tgq-totals");
+    const placeholder = placeholderCategory.id;
     answeredId = await record(1, mapped, "__QA Every question answered");
     openId = await record(2, mapped, "__QA Nothing answered");
     placeholderId = await record(3, placeholder, "__QA On the placeholder");
@@ -99,6 +95,7 @@ describeIfDb("an item's TGQ, and totals equal to their lines", () => {
     await client.query(`delete from spec_records where project_id = $1`, [projectId]);
     await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
     await client.query(`delete from projects where id = $1`, [projectId]);
+    await placeholderCategory?.drop();
     await client.end();
   });
 
