@@ -272,7 +272,7 @@ reasoning.
 | `requirements` | The cheat sheet as a checklist: `kind` (`spec_field`/`readiness`), `prompt`, `section`, `required_at_gate` (**null everywhere** until TG0/TG1/TG2 are authored), `tgq_levels` (0019: the levels at which the question blocks a QUOTE; all three on every row until Matthew's workbook is re-seeded) |
 | `spec_answers` | Per record × requirement × `revision_no`: value, `value_raw`, state, source, confirmed_by/at |
 | `email_drafts` / `email_draft_items` | A chase and the questions it asked, each with the context snapshot it froze and its `tier` (0020) |
-| `intake_runs` | Staging for any document intake. Generic, not BOQ-shaped. `batch_id` groups a pack; `document_kind` selects the prompt, the tool AND the staged shape |
+| `intake_runs` | Staging for any document intake. Generic, not BOQ-shaped. `batch_id` groups a pack; `document_kind` selects the prompt, the tool AND the staged shape. `source_part` (0065) is the PLACE in its file a read covers — some pages of a PDF or some sheets of a workbook; null is the whole file, which every read before 2026-11-21 is. Several reads may share one stored file |
 | `change_sets` | One entry in the trail (0012): who, when, why, the kind, and a link to the document or the uploaded email that caused it. Append-only; `closed_at` is the only column that may be set later |
 | `record_snapshots` | A VERSION of one record (0012): `snapshot_no` per record, the export's own atoms, and the composed cells as they were that day |
 | `baseline_members` | A named point's exact membership (0013). Materialised under the project lock, because transaction start time does not order commits |
@@ -369,6 +369,7 @@ traps. A new section goes in its area's file and gets one line here.**
 - [An email is a specification document whose page is a sentence](docs/load-bearing/email-and-inbox.md#an-email-is-a-specification-document-whose-page-is-a-sentence)
 - [One email, one code, three runs — and one row per spec](docs/load-bearing/email-and-inbox.md#one-email-one-code-three-runs-and-one-row-per-spec)
 - [The upload works out what each file is](docs/load-bearing/email-and-inbox.md#the-upload-works-out-what-each-file-is)
+- [A file is surveyed into parts, and a read is a file, a reader and a place](docs/load-bearing/email-and-inbox.md#a-file-is-surveyed-into-parts-and-a-read-is-a-file-a-reader-and-a-place)
 
 **Extraction attempts, slots and the queue** — `docs/load-bearing/extraction-and-model.md`
 - [Registering a specification document SPENDS MONEY](docs/load-bearing/extraction-and-model.md#registering-a-specification-document-spends-money)
@@ -720,17 +721,24 @@ tier required (5,386 tests); CI's db-tier job was rehearsed on a fresh
 database. Production itself does not exist; the decisions that come first are
 Max's (plan §5). Human acceptance is outstanding on every screen it touched.
 
-**Open intake (2026-11-20).** Max approved `docs/plans/open-intake-2026-11-20.md`
-whole: a cheap SURVEY maps every file of a pack into PARTS (page ranges,
-sheets), each part goes to the reader that suits it, and a text-only pass joins
-the readings up, a person confirming at every gate. Stage 0 (measure first) is
-built and NOT wired into any route or screen: `src/lib/pack-survey.ts`,
-`npm run eval:survey`, answer keys outside the repo. First measurement, six
-packs, two runs: no part went to the wrong reader; the merged 44-page Panther
-PDF came back as exactly its three documents; Ronnie Scott's procurement
-schedules were held (bill or schedule) every time. The four real keys await
-Max's check. Next: Stages 1–2 (the survey on the upload; reading by part);
-Stage 3 waits for the item-review design.
+**Open intake (2026-11-20/21).** Max approved
+`docs/plans/open-intake-2026-11-20.md` whole and then asked for it built
+("plan and then build the taking in a mix of documents … to really high
+quality"). **Stages 0–2 are built** (`docs/plans/open-intake-build-2026-11-20.md`):
+the upload SURVEYS each file into parts (Haiku 5.5, one look per file); a file
+with more than one kind of document shows a row per part; one press registers
+one READ per reader per file, and each read takes in only its part
+(`intake_runs.source_part`, migration 0065). A PDF holding a bill, drawings and
+a preamble becomes three reads; a workbook with a bill sheet and a finishes
+sheet becomes two; a single-kind file is registered exactly as before. An
+independent review found nine defects, all fixed with tests; two browser walks
+on the local stack with real reads (the invented Harbour House pack mixed into
+three files, and the real merged 44-page Panther PDF) staged the right content
+with the file's own page numbers. **Not built:** model-proposed links between
+documents (Stage 3, waiting for the item-review design); email attachments as
+parts; a row range of a sheet as a part. **Before this code runs on the
+sandbox or pilot, migration 0065 must be applied there** (Max's to run). Human
+acceptance is outstanding on the upload screen and everything it feeds.
 
 **Explicitly excluded, so it is not built speculatively:** a BWS *import*
 file carrying job numbers; images and scanned documents other than a bill; M6
@@ -759,7 +767,7 @@ diary and the README):
   design; the gate model's assumptions (`docs/plans/matrix-assumptions.md`,
   Max standing in for him since 2026-09-17); the level guess rules; the
   question-to-BWS-field mapping; Q4/Q6/Q7/Q8 from the Ronnie Scott's plan.
-- **Max:** the production-readiness decisions D1–D12 (`docs/plans/production-readiness-2026-11-20.md` §5 — who sees which client, BWS import at launch, company accounts and a spend limit, backups, retention, the production branch and domain, residency, decimal quantities, pilot data, mail, CSP, which document describes a finish); reading CI and the staging deployment on `72a69fe` (the production-readiness build, pushed 2026-11-20) before pilot; reading the first CI run on the review build (pushed 2026-11-18);
+- **Max:** applying migration 0065 to the sandbox and to pilot before the open-intake build deploys to either; checking the four real survey answer keys (`docs/docs for building/survey-key-check-2026-11-20.md`, seven decisions first); the production-readiness decisions D1–D12 (`docs/plans/production-readiness-2026-11-20.md` §5 — who sees which client, BWS import at launch, company accounts and a spend limit, backups, retention, the production branch and domain, residency, decimal quantities, pilot data, mail, CSP, which document describes a finish); reading CI and the staging deployment on `72a69fe` (the production-readiness build, pushed 2026-11-20) before pilot; reading the first CI run on the review build (pushed 2026-11-18);
   whether a preamble note's retire belongs in the change trail; deleting the
   65 merged local branches; `origin/production` (delete or record); whether to enforce the full
   CSP after the browser walk; reclaiming pilot's audit-log space; a chased

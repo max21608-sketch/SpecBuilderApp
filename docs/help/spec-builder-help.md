@@ -242,6 +242,18 @@ documents" → drop the files or "Choose files".
   is shown the same way: "— say which —" in the box, and "Bill of
   quantities" offered as a button beside it with what was found ("Reads as
   a bill: 26 lines; …").
+- **A file with several documents in it is shown in parts.** A PDF that
+  holds a bill, then drawings, then a preamble — or a workbook with a bill
+  sheet and a finishes sheet — gets a row per part under its name ("pages
+  1–5", "sheet “Finishes”"), each with its own "What is this part?" box
+  and what the app saw there. Check each part's kind as you would a file's.
+  "Don't read this part" leaves a part out (a cover or an index starts that
+  way). Parts of one file that are the same kind are read together, so a
+  drawing and its specification sheet stay one item even with other pages
+  between them. A part that needs you ("Say which") holds its whole file:
+  answer it and press "Read the N you have named". Afterwards each part is
+  listed as its own document, named with its place: "Pack.pdf — pages 1–11
+  and 31–44".
 - **Nothing is read and nothing is charged until you press "Start intake
   (N)".** A bill from a spreadsheet is read by code and is free. Every other
   kind is a charged read.
@@ -483,6 +495,11 @@ copy it exactly. "Ref" below means an 8-character reference code (like
 | "This PDF is X MB; one read takes at most 20 MB" / "has N pages; one read takes at most 600" | Split the PDF into smaller files and upload them |
 | "N pages — this may be too large to read in one go" | A warning. Go ahead; if the read fails, split it |
 | "Not identified" / "Say which" | Choose the kind from "What is this?" yourself |
+| "N files have a part that needs you — say what it is and press again." | One part of the file is waiting for its kind. Choose it in that part's box (or press the suggestion beside it), then "Read the N you have named". Nothing of that file has been read yet |
+| "N files are partly read — say what the rest of them is and press again." | Some parts were added and are being read; one was refused or still needs its kind. Set that part's kind (or "Don't read this part") and press again. The parts already added are not read twice |
+| "No part of the file covers these pages — say what they are, or don't read them." | The app could not place those pages. Open the PDF at those pages, then choose their kind or "Don't read this part" |
+| "This sheet seems to hold two kinds of document. A sheet is read whole…" | Choose the one kind the sheet should be read as, or "Don't read this part". To read both, split the sheet into two sheets and upload again |
+| "Nothing read from this file." | Every part was set to "Don't read this part". If that was a mistake, remove the file and add it again |
 | "The model is overloaded right now — these files were not identified, and they are stored." | Nothing lost. Choose each kind by hand, or "Try identifying again" in a minute |
 | Upload does nothing or fails at once for every file | Check the connection, reload, try one small file. Still failing → email Max |
 

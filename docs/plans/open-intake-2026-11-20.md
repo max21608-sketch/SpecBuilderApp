@@ -238,6 +238,12 @@ of `pack-survey.ts`). The first attempt ran once: its bill sheets held on
 every workbook was reason enough. "Bill or schedule goes to CODE" (item 2)
 is built and does not depend on the wording.
 
+> **Stages 1 and 2 were built on 2026-11-20/21** (Max: "plan and then build
+> the taking in a mix of documents … to really high quality"). The design and
+> what the build verified are in `open-intake-build-2026-11-20.md`; the traps
+> are in `docs/load-bearing/email-and-inbox.md`. Stage 3 and Stage 4 below are
+> not started.
+
 ### Stage 1 — the survey (medium)
 
 Replaces the per-file classify. Same model (Haiku 5.5), same place in the

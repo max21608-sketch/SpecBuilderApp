@@ -215,3 +215,57 @@ cards, and the record's Documents list.
 5. The four checks with the database tier required.
 
 Human acceptance is outstanding until Max has walked it.
+
+## What the build did, and what was verified (2026-11-21)
+
+Built by four Opus coders in sequence on `intake-2026-11-20` (sixteen
+commits, about 6,000 lines with tests), reviewed by an agent that wrote none
+of it, and walked in a browser on the local stack with real reads.
+
+- **The four checks pass** with the database tier required (5,629 tests at
+  the last full run before the final three screen fixes; the number after them
+  is in `docs/plans/README.md`).
+- **The independent review found nine defects, all fixed, each with a test.**
+  The three that mattered: changing a part's kind after other parts were
+  registered re-registered the same pages (a second charged read); a
+  single-kind file with a cover and a blank divider stopped being one
+  whole-file read; and a part the survey dropped could collapse a mixed
+  workbook into one wrong whole-file read with no press.
+- **Walk 1, invented Harbour House pack mixed into three files** (project
+  `T20122`, local stack): one press, 78 seconds, EIGHT reads and nothing held —
+  the combined PDF as bill (pages 1–5), finishes (6), drawings (7–8) and
+  preamble (9); the workbook as its bill sheet, its finishes sheet and its
+  notes sheet (a preamble); the drawings PDF whole. Every read stayed inside
+  its part (the model's own notes say "Page 9 only", "Other pages of the file
+  … not read for this document"), every page number was the file's. The
+  workbook's bill sheet confirmed into 32 records on one phase with the other
+  two sheets left out, and the drawings read of pages 7–8 then found its
+  records and recognised the sizes the bill had already recorded.
+- **Walk 2, the real merged Panther PDF (44 pages) with its bill workbook**
+  (project `T20123`): the survey gave drawings 1–11, preamble 12–24, pages
+  25–30 uncovered (shown as their own held row, answered "preamble" by hand)
+  and specification sheets 31–44. ONE drawings read of pages 1–11 and 31–44
+  returned exactly ten items, each joining its drawing to its sheet (S-100 on
+  pages 1, 31, 32; S-200 on 3, 4, 34, 35; S-301 on 8–11, 39, 40), with the
+  sizes this pack is known to have (S-100 W1900 D790 H720 SH440; S-200 W840
+  D790 H720 SH460; S-203 80 × 70 × 90 as printed in centimetres). The
+  preamble read of pages 12–30 returned 114 notes. The bill's
+  value-engineering sheet was held with "Reads as a bill: 14 lines; code and
+  quantity columns found."
+- **Survey wording: no change.** Three rewordings, twice each over all six
+  keys, each made a pack worse; the table is in `open-intake-2026-11-20.md`.
+
+**Known limits, worth being honest about**
+
+- The PDF bill inside the invented combined pack went to the model for
+  transcription ("This PDF's columns change from page to page"): its three
+  sections print different columns. That is the bill reader's existing rule,
+  not new, and it is a charged read where a workbook is free.
+- Where two parts claim the same pages, both are shown but nothing on the row
+  says they overlap.
+- The survey holds real procurement schedules as "bill or schedule" every
+  time. The code probe now puts the bill and its line count beside the box,
+  so it is one press, but it is a press on every such file.
+- The four real answer keys are still Claude's drafts (`verified: false`);
+  Max is checking them (`docs/docs for building/survey-key-check-2026-11-20.md`).
+- Nothing here has been walked by Max, Matthew or Claudia.

@@ -269,3 +269,66 @@ each file, asks what it is, fills the box in and reads it.
   extraction model: Haiku 5.5 since 2026-11-20 (it was Haiku 4.5), one model
   for every file whatever its length (`CLASSIFY_MODEL`). The blob is addressed by PATHNAME and scoped to the project
   before a byte is read.
+
+### A file is surveyed into parts, and a read is a file, a reader and a place
+
+`src/lib/pack-survey.ts`, `src/lib/source-part.ts`, `src/lib/part-filter.ts`,
+`src/lib/upload-reads.ts`, `src/lib/bill-probe.ts`,
+`src/app/api/imports/classify/route.ts`, `src/app/api/imports/route.ts`,
+`src/lib/extraction-run.ts`, `src/components/projects/UploadFileParts.tsx`,
+`db/migrations/0065_intake_run_source_part.sql`,
+`docs/plans/open-intake-build-2026-11-20.md`, `npm run eval:survey`
+
+Built 2026-11-20/21 (Max: *"we can be given stuff in whatever format. It could
+all be mixed into one document. It could be in 3, 5, 10 separate documents.
+Doesn't matter."*). Until then a file had ONE kind, so a PDF holding a bill,
+its drawings and a preamble was read as one of them, and a tracker's furniture
+was left out of its finishes read.
+
+- **The survey is the one look, and it answers in PARTS.** One Haiku call per
+  file (`surveyFile`) says which pages or sheets are which kind of document.
+  Code then drops a place that cannot exist, merges adjacent PDF parts that go
+  to the same reader (the model splits a drawing set one part per item: the
+  merged Panther pack came back as 29 parts and is 3), sets aside covers and
+  blank pages, and RECORDS what it dropped, what no part covers and what two
+  parts claim. A gap is never read silently: uncovered pages become their own
+  held row.
+- **A READ is every part of one file that goes to the same reader, together**
+  (`readsOf`, `intake_runs.source_part`). The merged Panther pack is drawings
+  on pages 1–11 and specification sheets on 31–44 with the preamble between:
+  ONE drawings read of both ranges came back as ten items, each joining its
+  drawing page to its sheet (walked 2026-11-21: S-100 on pages 1, 31, 32).
+  Two reads would have staged every item twice.
+- **A file with one reader is registered exactly as before**, `source_part`
+  null — including a file with a cover and a blank divider. Every existing
+  pack is this case, and a test pins that the request is unchanged.
+- **The whole PDF is still sent, and page numbers stay the FILE's.** Every
+  staged page, `source_page`, swatch crop and `#page=` link is a page of the
+  stored file. Copying a part's pages out would make all of them relative and
+  wrong, silently. The read is told its pages (`partInstruction`), and
+  `restrictOutputToPart` drops what came back from outside them and says so in
+  the document's notes. A row with no page is kept.
+- **Bill or schedule goes to CODE, never to more prompt.** A part the survey
+  is torn on — and any non-bill PDF part whose text is a bill's table — is
+  tried by the bill reader for nothing; where it reads as one it stays HELD
+  with the bill suggested and "Reads as a bill: N lines; code and quantity
+  columns found." A wrong bill is a project's worth of wrong records, so it is
+  never filed without a press. Four rewordings of the survey prompt were
+  measured over six answer keys, twice each, and every one made a pack worse:
+  judge a prompt change with `npm run eval:survey`, twice, or do not make it.
+- **A registered part is locked.** Registration is recorded per part and each
+  read has its own request id; changing another part's kind afterwards cannot
+  re-register pages already sent (the review found exactly that double read).
+  Every registration path, bills included since this build, answers a replay
+  with the first run, and a replayed FAILED bill answers as a failure.
+- **A sheet is the smallest part of a workbook.** A bill of some sheets still
+  stages every sheet (the structure read pairs staged to source sheets by
+  name, then INDEX); the others are `ignored` with "Not filed as part of the
+  bill at upload." and can be included by a person.
+- **A part read takes nothing from the filename.** `drawingNumberOf` and
+  `isMockupDrawing` skip the filename when the staged document has a
+  `sourcePart`: a name describes a file, not pages 31–44 of it.
+
+**Not built:** email attachments as parts (the inbox's automatic reads are
+untouched); a row range of a sheet as a part; model-proposed links between
+documents (the plan's Stage 3, waiting for the item-review design).
