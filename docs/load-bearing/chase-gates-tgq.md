@@ -1000,6 +1000,14 @@ the trap (design finding 12):
   the By item tab only, where the phase select is; By question lists every
   phase, and so does the card there. The project card is the project's and
   ignores a phase. `tests/db/area-wide.test.ts`.
+- **The card and the open rows reload each other** (review C7, 2026-11-21).
+  An area save reloaded only the summary, so an open line still held the
+  answered question at its old version and the next edit there was refused
+  once; a row save left the card's `seen` stale, so its next press was refused
+  whole once. Both safe, both read as faults. The page now re-reads every open
+  line and question heading after a card save (`reloadOpenRows`), and bumps
+  the card's `reloadToken` after a row save or a batch, which makes it read
+  again. `tests/components/infill-page.test.tsx`.
 
 ### Which drawing labels answer which question — and why most are not aliased
 

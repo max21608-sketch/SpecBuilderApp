@@ -20,12 +20,15 @@ export default function AreaWideCard({
   onChanged,
   runId = "",
   phaseName = null,
+  reloadToken,
 }: {
   projectId: string;
   onChanged?: () => void;
   /** The fill-in's phase filter; "" is every phase. */
   runId?: string;
   phaseName?: string | null;
+  /** Bumped after a row save elsewhere on the screen, so the card reads again (chase review C7). */
+  reloadToken?: number;
 }) {
   return (
     <ProjectWideCard
@@ -34,6 +37,7 @@ export default function AreaWideCard({
       scope="area"
       runId={runId}
       phaseName={phaseName}
+      reloadToken={reloadToken}
     />
   );
 }

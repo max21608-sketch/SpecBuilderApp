@@ -20,7 +20,7 @@
 //  - that the set is the one on screen: an item added since is refused whole,
 //    and the card says so and reloads.
 // ============================================================================
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
@@ -99,6 +99,7 @@ export default function ProjectWideCard({
   scope = "project",
   runId = "",
   phaseName = null,
+  reloadToken,
 }: {
   projectId: string;
   /** The overview's own numbers move when this writes; it reloads them. */
@@ -112,6 +113,12 @@ export default function ProjectWideCard({
   runId?: string;
   /** The filtered phase's name, for the sentence that says the card is narrowed. */
   phaseName?: string | null;
+  /**
+   * Bumped by the screen after a write elsewhere on it (chase review C7): the
+   * card reads again, so its next press carries the versions that write left
+   * and is not refused whole once for a reason nobody can see.
+   */
+  reloadToken?: number;
 }) {
   const words = SCOPE_WORDS[scope];
   const [questions, setQuestions] = useState<Question[] | null>(null);
@@ -137,6 +144,15 @@ export default function ProjectWideCard({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A WRITE ELSEWHERE ON THE SCREEN (review C7). Only a CHANGED token reads
+  // again: the first render's load is the effect above.
+  const seenToken = useRef(reloadToken);
+  useEffect(() => {
+    if (reloadToken === seenToken.current) return;
+    seenToken.current = reloadToken;
+    void load();
+  }, [reloadToken, load]);
 
   // ARRIVING ON THE ANCHOR. The record screen, the phase table and the fill-in
   // screen all link here as `#project-wide`; the card renders after its data,

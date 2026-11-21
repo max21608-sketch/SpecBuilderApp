@@ -411,7 +411,10 @@ answers one question across many items.
   card names the phases its items are on, with how many in each ("Guest
   Rooms 6 · Public Areas 4"). With "By item" filtered to one phase the card
   says "Filtered to the phase …: an answer here is written to its items
-  only", and a save writes that phase's items and no other's.
+  only", and a save writes that phase's items and no other's. After a save
+  on the card, every item you have open reads again, so the question it
+  answered drops out of their lists; after a save on an item, the card reads
+  again.
 - "Provisional cabinetry gate model, drafted by AI…" at the top means some of
   the TGQ marks on this screen come from that draft.
 

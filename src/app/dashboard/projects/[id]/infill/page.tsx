@@ -96,6 +96,13 @@ function InfillView() {
   const [rowsByQuestion, setRowsByQuestion] = useState<Record<string, InfillQuestion[]>>({});
   const [questionError, setQuestionError] = useState<Record<string, string>>({});
   const [loadingQuestion, setLoadingQuestion] = useState<string | null>(null);
+  /**
+   * THE AREA CARD AND THE OPEN ROWS HOLD THE SAME ANSWERS (chase review C7).
+   * A row save moves an answer's version under the card, whose next press
+   * then compared a stale set and was refused whole; bumping this makes the
+   * card read again. The other direction is `reloadOpenRows`.
+   */
+  const [cardReload, setCardReload] = useState(0);
 
   /**
    * ONE SAVE AT A TIME, AND IT IS NOT A PERFORMANCE MEASURE.
@@ -202,6 +209,25 @@ function InfillView() {
     [projectId],
   );
 
+  /**
+   * Every line and every question heading that is OPEN, read again (chase
+   * review C7). An area save writes answers those rows hold; left as they
+   * were, they still list the question with its old version and the next edit
+   * there is refused once. One at a time, because `loadingLine` names one.
+   * An answered gap leaves `loadOutstanding`, so the row the card answered
+   * goes, which is what the card's save means.
+   */
+  const reloadOpenRows = useCallback(
+    async (groups: QuestionSummary[]) => {
+      for (const lineId of Object.keys(questionsByLine)) await loadLine(lineId);
+      for (const key of Object.keys(rowsByQuestion)) {
+        const group = groups.find((entry) => entry.key === key);
+        if (group) await loadQuestion(group);
+      }
+    },
+    [questionsByLine, rowsByQuestion, loadLine, loadQuestion],
+  );
+
   /** Which line a question belongs to — its own, or its finish option's parent. */
   const lineOf = useCallback(
     (question: InfillQuestion): string => {
@@ -264,6 +290,8 @@ function InfillView() {
         Object.fromEntries(Object.entries(prev).map(([key, list]) => [key, list.map(patch)])),
       );
       setAnswered((prev) => ({ ...prev, [lineId]: (prev[lineId] ?? 0) + 1 }));
+      // The area card holds this answer too, if it is an area question (C7).
+      setCardReload((n) => n + 1);
       return {
         ok: true,
         message:
@@ -343,6 +371,7 @@ function InfillView() {
         for (const row of res.data.filed) next[row.recordId] = (next[row.recordId] ?? 0) + 1;
         return next;
       });
+      setCardReload((n) => n + 1);
 
       const n = res.data.filed.length;
       const head =
@@ -577,7 +606,11 @@ function InfillView() {
         <div className="mt-4">
           <AreaWideCard
             projectId={project.id}
-            onChanged={() => void load()}
+            onChanged={() => {
+              void load();
+              void reloadOpenRows(data.questions);
+            }}
+            reloadToken={cardReload}
             // The phase select is on the By item tab only; By question lists
             // every phase, and so does the card there.
             runId={tab === "by-item" ? filters.runId : ""}
