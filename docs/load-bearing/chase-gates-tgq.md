@@ -660,10 +660,19 @@ silently.
   `project-summary.ts`'s `tgq_map`. A fourth copy without it is the defect
   again. No seed widens his arrays; a test re-runs 0006 and compares his 35
   rows column for column.
-- **The identity rule is per TYPE** (`spec_field_gates_identity_overlap`, a
-  constraint trigger). Rows 106–110 sit where his 18–22 sit, for other types,
+- **The identity rule is per TYPE, and per SHEET** (`spec_field_gates_identity_overlap`,
+  a constraint trigger). Rows 106–110 sit where his 18–22 sit, for other types,
   and 112/113 are one field with two rules. 0026's global unique index refused
-  all of them.
+  all of them. But a sheet answers for the UNION of its types, so two rows for
+  one (gate, field, slot) on S and on A — disjoint arrays — both reach an
+  untyped record on `armchairs-benches-stools-sofas`, and the screen picks one.
+  Two rows clash when their types overlap, when either is "All categories", or
+  when a type of each is mapped to ONE cheat sheet; a mapping that brings two
+  such rows onto one sheet is refused under the same name, by a trigger on
+  `spec_matrix_category_map` (review 1, finding 3). One SQL function,
+  `spec_field_gates_types_meet`, decides "can reach one item" for both
+  triggers and the migration's closing check. Two seed runs at once are not
+  covered: neither sees the other's uncommitted row.
 - **The sentence is DATA** (`spec_matrix_categories.provisional_note`), carried
   in the gate context and printed by `ProvisionalModelNote` on the gate panel,
   the record header, the phase table, the overview and the projects list (its

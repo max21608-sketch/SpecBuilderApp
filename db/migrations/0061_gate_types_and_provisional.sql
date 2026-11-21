@@ -19,8 +19,10 @@
 --    a transcription error -- but it is true PER MATRIX TYPE, not globally:
 --    his row 18 is about seating and row 106 about cabinetry, and nothing
 --    reads both for one item. So the index goes and a constraint trigger
---    holds the real rule: no two rows for one (gate, field-or-key, slot) whose
---    `applies_to` overlap, or where either applies to every category.
+--    holds the real rule: no two rows for one (gate, field-or-key, slot) that
+--    can reach one item -- their `applies_to` overlap, either applies to every
+--    category, or a type of each is mapped to one cheat sheet (a sheet answers
+--    for the union of its types).
 --
 -- 2. "All categories" does not widen. `applies_to` holds his nine codes
 --    literally and every loader joins on it, so the cabinetry types would not
@@ -68,8 +70,50 @@ alter table spec_field_gates
 comment on column spec_field_gates.applies_to_all is
   'True where the row was written for "All categories" (applies_to_raw), so it reaches every mapped type, a type added after it included. Generated, so no seed can disagree with the phrase. "All UPY seating" is NOT all.';
 
--- ---- 1. the identity rule, per matrix type -------------------------------
+-- ---- 1. the identity rule, per matrix type AND per sheet ------------------
+--
+-- WHAT THE OLD INDEX REFUSED IN EFFECT (review 1, finding 3, 2026-11-21; this
+-- file was EDITED, not followed by another, because it had been applied to
+-- local databases only). A sheet answers for the UNION of the types mapped to
+-- it, so an untyped record on armchairs-benches-stools-sofas receives S's rows
+-- AND A's rows. Two rows for one field at one gate, one for S and one for A,
+-- have disjoint arrays and both reach that record: the screen picks one,
+-- which is exactly the transcription error 0026's global index refused. So two
+-- rows clash when their types overlap, when either is "All categories", OR
+-- when a type of each is mapped to one cheat sheet. The map can make the
+-- clash too (mapping DT onto the consoles sheet beside CD), so the map has the
+-- same check, under the same constraint name.
+--
+-- Concurrent writers are out of scope: neither sees the other's uncommitted
+-- row. The rows are seed data, written by one seed run at a time.
 drop index if exists spec_field_gates_identity_key;
+
+-- Whether two rows' types can reach ONE record: an overlap, an "All
+-- categories" row, or two types mapped to one sheet.
+create or replace function spec_field_gates_types_meet(a text[], a_all boolean, b text[], b_all boolean)
+returns boolean
+language sql stable as $$
+  select a_all or b_all or a && b
+      or exists (
+        select 1
+          from spec_matrix_category_map m1
+          join spec_matrix_category_map m2 on m2.item_category_id = m1.item_category_id
+         where m1.matrix_code = any(a) and m2.matrix_code = any(b)
+      )
+$$;
+
+-- Every pair of rows that clashes, "18/106"-style, or null. One statement, so
+-- the gate trigger, the map trigger and the closing check cannot disagree.
+create or replace function spec_field_gates_clashes() returns text
+language sql stable as $$
+  select string_agg(format('%s/%s', a.matrix_row, b.matrix_row), ', ' order by a.matrix_row, b.matrix_row)
+    from spec_field_gates a
+    join spec_field_gates b
+      on a.matrix_row < b.matrix_row and a.gate = b.gate
+     and coalesce(a.spec_field_id::text, a.local_key) = coalesce(b.spec_field_id::text, b.local_key)
+     and coalesce(a.dimension_slot, '') = coalesce(b.dimension_slot, '')
+   where spec_field_gates_types_meet(a.applies_to, a.applies_to_all, b.applies_to, b.applies_to_all)
+$$;
 
 create or replace function spec_field_gates_refuse_overlap() returns trigger
 language plpgsql as $$
@@ -82,12 +126,12 @@ begin
      and g.gate = new.gate
      and coalesce(g.spec_field_id::text, g.local_key) = coalesce(new.spec_field_id::text, new.local_key)
      and coalesce(g.dimension_slot, '') = coalesce(new.dimension_slot, '')
-     and (g.applies_to_all or new.applies_to_all or g.applies_to && new.applies_to)
+     and spec_field_gates_types_meet(g.applies_to, g.applies_to_all, new.applies_to, new.applies_to_all)
    order by g.matrix_row
    limit 1;
   if clash is not null then
     raise exception
-      'Gate rows % and % both say something about "%" at %, for a matrix type they share. Two rows for one field at one gate is a transcription error.',
+      'Gate rows % and % both say something about "%" at %, for items they can both reach (a type they share, or two types on one cheat sheet). Two rows for one field at one gate is a transcription error.',
       clash, new.matrix_row, new.field_name, new.gate
       using errcode = 'check_violation', constraint = 'spec_field_gates_identity_overlap';
   end if;
@@ -97,26 +141,46 @@ end $$;
 -- A CONSTRAINT trigger, checked at the end of each statement, so a re-seed
 -- that moves a field between two rows in one upsert is judged on the result.
 -- Deferrable for a hand fix that needs two statements.
+drop trigger if exists spec_field_gates_identity_overlap on spec_field_gates;
 create constraint trigger spec_field_gates_identity_overlap
   after insert or update on spec_field_gates
   deferrable initially immediate
   for each row execute function spec_field_gates_refuse_overlap();
 
--- The rows already here held the stricter global rule, so none can break the
--- per-type one. Checked anyway, naming any pair, because the trigger only
--- judges rows as they are written.
+-- THE MAP'S SIDE. A mapping that puts two rows' types on one sheet is the same
+-- clash arriving the other way. The whole overlay is judged (56 rows), because
+-- the pair need not name the new code: an "All categories" row already
+-- reaches it, and a pair that only now shares a sheet is any two rows.
+create or replace function spec_matrix_category_map_refuse_overlap() returns trigger
+language plpgsql as $$
+declare
+  bad text;
+begin
+  bad := spec_field_gates_clashes();
+  if bad is not null then
+    raise exception
+      'Mapping % onto this cheat sheet puts two gate rows for one field at one gate on the same items (%). Two rows for one field at one gate is a transcription error.',
+      new.matrix_code, bad
+      using errcode = 'check_violation', constraint = 'spec_field_gates_identity_overlap';
+  end if;
+  return null;
+end $$;
+
+drop trigger if exists spec_matrix_category_map_identity_overlap on spec_matrix_category_map;
+create constraint trigger spec_matrix_category_map_identity_overlap
+  after insert or update on spec_matrix_category_map
+  deferrable initially immediate
+  for each row execute function spec_matrix_category_map_refuse_overlap();
+
+-- The rows already here held the stricter global rule, so none can break this
+-- one. Checked anyway, naming any pair, because the triggers only judge rows
+-- as they are written.
 do $$
 declare bad text;
 begin
-  select string_agg(format('%s/%s', a.matrix_row, b.matrix_row), ', ') into bad
-    from spec_field_gates a
-    join spec_field_gates b
-      on a.matrix_row < b.matrix_row and a.gate = b.gate
-     and coalesce(a.spec_field_id::text, a.local_key) = coalesce(b.spec_field_id::text, b.local_key)
-     and coalesce(a.dimension_slot, '') = coalesce(b.dimension_slot, '')
-     and (a.applies_to_all or b.applies_to_all or a.applies_to && b.applies_to);
+  bad := spec_field_gates_clashes();
   if bad is not null then
-    raise exception '0061: gate rows already overlap for a shared type: %', bad;
+    raise exception '0061: gate rows already overlap for items they can both reach: %', bad;
   end if;
 end $$;
 

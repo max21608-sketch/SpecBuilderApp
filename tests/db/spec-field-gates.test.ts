@@ -95,6 +95,60 @@ describeIfDb("the seeded gate overlay", () => {
     }
   });
 
+  // WHAT THE OLD INDEX REFUSED IN EFFECT (review 1, finding 3). A sheet answers
+  // for the UNION of its types, so an untyped record on
+  // armchairs-benches-stools-sofas receives S's rows and A's rows alike. Two
+  // rows for one field at one gate, one for S and one for A, both reach it,
+  // and the screen picks one: the transcription error 0026's index existed to
+  // stop. Disjoint arrays are not enough; sharing a SHEET is the clash.
+  const scratchRow = (row: number, types: string[]) =>
+    client.query(
+      `insert into spec_field_gates (matrix_row, gate, capture, field_name, local_key, applies_to, applies_to_raw,
+                                     value_type, created_by, updated_by)
+       values ($1, 'TG0', 'input', '__QA one field', '__qa_one_field', $2::text[], array_to_string($2::text[], ', '),
+               'free_text', 'qa', 'qa')`,
+      [row, types],
+    );
+
+  it("refuses two rows for one field at one gate whose types share a cheat sheet, even with disjoint arrays", async () => {
+    await client.query("begin");
+    try {
+      await scratchRow(9011, ["S"]);
+      await expect(scratchRow(9012, ["A"])).rejects.toMatchObject({
+        code: "23514",
+        constraint: "spec_field_gates_identity_overlap",
+      });
+    } finally {
+      await client.query("rollback");
+    }
+    // Types that share no sheet still may: that is what 106-110 beside 18-22 are.
+    await client.query("begin");
+    try {
+      await scratchRow(9013, ["CD"]);
+      await expect(scratchRow(9014, ["DT"])).resolves.toBeTruthy();
+    } finally {
+      await client.query("rollback");
+    }
+  });
+
+  it("refuses a mapping that would put two such rows on one sheet, by the same name", async () => {
+    // The clash can arrive from the map's side: rows for CD and DT are fine
+    // until DT is mapped to the consoles sheet CD already answers for.
+    await client.query("begin");
+    try {
+      await scratchRow(9015, ["CD"]);
+      await scratchRow(9016, ["DT"]);
+      await expect(
+        client.query(
+          `insert into spec_matrix_category_map (matrix_code, item_category_id, created_by, updated_by)
+           select 'DT', id, 'qa', 'qa' from item_categories where slug = 'consoles-desks-dressing-tables'`,
+        ),
+      ).rejects.toMatchObject({ code: "23514", constraint: "spec_field_gates_identity_overlap" });
+    } finally {
+      await client.query("rollback");
+    }
+  });
+
   it("every AI-drafted row says so in its notes, and its types carry the provisional note", async () => {
     const sentence = "Provisional cabinetry gate model, drafted by AI on 20 Nov 2026, not yet confirmed by Matthew";
     const unlabelled = await q(
