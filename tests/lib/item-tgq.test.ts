@@ -55,6 +55,18 @@ describe("the item TGQ predicate", () => {
     expect(inChaseAsk(pw())).toBe(false);
   });
 
+  it("a chase asks the item's CLIENT questions: the audience decides, not the kind (0062, decision D)", () => {
+    expect(inChaseAsk(q({ audience: "in_house" }))).toBe(false);
+    expect(inChaseAsk(q({ audience: "cam" }))).toBe(false);
+    expect(inChaseAsk(q({ requirementKind: "readiness", audience: "client" }))).toBe(true);
+    expect(itemTgqCounts([q({ audience: "in_house" }), q({ requirementKind: "readiness", audience: "client" })])).toEqual({
+      toQuote: 2,
+      toChase: 1,
+      projectWide: 0,
+      later: 0,
+    });
+  });
+
   it("measured on the local copy: Drawers is 18 spec + 9 readiness of its own, 17 project-wide", () => {
     // v3-002 read 44 on the phase table and 20 on the fill-in screen. Its 44
     // to_quote questions are 18 spec fields and 9 readiness about the item,

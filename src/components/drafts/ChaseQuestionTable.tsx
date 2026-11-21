@@ -73,7 +73,7 @@ import SuggestButton from "@/components/ui/SuggestButton";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { TONE } from "@/components/ui/tone";
 import { letterColour } from "@/components/records/letter-colours";
-import { ANSWER_STATE_LABELS, ITEM_LEVEL_LABELS, type AnswerState, type ItemLevel } from "@/lib/spec-vocab";
+import { ANSWER_STATE_LABELS, ITEM_LEVEL_LABELS, QUESTION_AUDIENCE_LABELS, type AnswerState, type ItemLevel } from "@/lib/spec-vocab";
 import { TIER_LABELS, type QuestionTier } from "@/lib/tgq";
 import { selectionSummary } from "@/lib/chase-selection";
 import { areaOptions, matchesArea } from "@/lib/area-filter";
@@ -85,6 +85,8 @@ import {
   countWithItemTgq,
   inChaseAsk,
   inItemTgq,
+  isClientQuestion,
+  questionAudience,
   isProjectWideQuestion,
   finishOptionQtyLabel,
   groupIntoLines,
@@ -178,7 +180,7 @@ function lineArea(line: FurnitureLine<TableQuestion>): string | null {
 /** TGQ first, then the rest, then the commercial checklist. The fold reads down. */
 function byTier(questions: TableQuestion[]): TableQuestion[] {
   const rank = (question: TableQuestion) =>
-    question.requirementKind === "readiness" ? 2 : question.tier === "to_quote" ? 0 : 1;
+    !isClientQuestion(question) ? 2 : question.tier === "to_quote" ? 0 : 1;
   return [...questions].sort((a, b) => rank(a) - rank(b));
 }
 
@@ -277,7 +279,9 @@ export default function ChaseQuestionTable({
       // the project and is listed under "all".
       if (tierValue === "to_quote" && !inItemTgq(question)) return false;
       if (tierValue === "later" && question.tier !== "later") return false;
-      if (!filters.showReadiness && question.requirementKind === "readiness") return false;
+      // OURS, NOT THE CLIENT'S (0062): an in-house or CAM question is listed
+      // only when asked for. A designer's tab never carries one at all.
+      if (!filters.showReadiness && !isClientQuestion(question)) return false;
       if (!waitingValue && question.waiting) return false;
       if (filters.state && question.state !== filters.state) return false;
       if (text && !lineHit && !`${question.prompt} ${question.fieldLabel ?? ""} ${fieldDisplayName(question.fieldLabel) ?? ""}`.toLowerCase().includes(text)) {
@@ -496,7 +500,7 @@ export default function ChaseQuestionTable({
             checked={filters.showReadiness}
             onChange={(event) => setFilters((prev) => ({ ...prev, showReadiness: event.target.checked }))}
           />
-          Show readiness questions
+          Show our own questions (in-house and CAM)
         </label>
         {filtering && (
           <Button
@@ -1041,12 +1045,12 @@ function QuestionRows({
                     ? TIER_LABELS.to_quote
                     : projectWide
                       ? "Project-wide — answered once on the project"
-                      : question.requirementKind === "readiness"
-                      ? "Readiness — internal and commercial"
+                      : !isClientQuestion(question)
+                      ? `${QUESTION_AUDIENCE_LABELS[questionAudience(question)]} — ours to answer, never sent to a designer`
                       : TIER_LABELS.later
                 }
                 className={`mr-2 inline-block h-1.5 w-1.5 rounded-full align-middle ${
-                  toQuote ? TONE.danger.dot : question.requirementKind === "readiness" ? TONE.warn.dot : "bg-neutral-300"
+                  toQuote ? TONE.danger.dot : !isClientQuestion(question) ? TONE.warn.dot : "bg-neutral-300"
                 }`}
               />
               <span className="text-neutral-900">{fieldDisplayName(question.prompt)}</span>

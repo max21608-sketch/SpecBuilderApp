@@ -19,7 +19,7 @@
 // none of it decides ELIGIBILITY -- which questions can be asked, and which
 // half of the email they land in, is the server's answer and is untouched.
 // ============================================================================
-import type { AnswerState } from "@/lib/spec-vocab";
+import type { AnswerState, QuestionAudience } from "@/lib/spec-vocab";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import type { QuestionTier } from "@/lib/tgq";
 import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
@@ -79,18 +79,41 @@ export function inProjectWideTgq(question: TgqCountable): boolean {
 }
 
 /**
- * What a chase ASKS by default: the item's TGQ, specification questions only.
- * A readiness question is ours to record and is never chased (decision 19);
- * a project-wide one is answered once on the project, not asked per item.
+ * WHO A QUESTION IS FOR decides whether a chase may put it to a designer
+ * (0062, decision D of 2026-11-20). It was `kind = 'spec_field'` (decision
+ * 19), which says whether BWS has a column for the answer, not who gives it:
+ * "Assembly guide required" fills a BWS field and is ours; "Floor plans" has
+ * no column and is the client's.
+ *
+ * STAGE 1 FALLBACK: a caller whose payload carries no audience reads the kind
+ * the way 0062 seeded it (readiness in-house, a spec field the client's), so
+ * nothing reads differently until every payload carries it.
  */
-export function inChaseAsk(question: TgqCountable & { requirementKind: "spec_field" | "readiness" }): boolean {
-  return inItemTgq(question) && question.requirementKind === "spec_field";
+export type AudienceReadable = { requirementKind: "spec_field" | "readiness"; audience?: QuestionAudience | null };
+
+export function questionAudience(question: AudienceReadable): QuestionAudience {
+  return question.audience ?? (question.requirementKind === "spec_field" ? "client" : "in_house");
+}
+
+/** May be put in a chase to a designer or a client. */
+export function isClientQuestion(question: AudienceReadable): boolean {
+  return questionAudience(question) === "client";
+}
+
+/**
+ * What a chase ASKS by default: the item's TGQ, client questions only. An
+ * in-house or CAM question is ours to record and is never chased (decision D,
+ * which replaced decision 19's kind test); a project-wide one is answered
+ * once on the project, not asked per item.
+ */
+export function inChaseAsk(question: TgqCountable & AudienceReadable): boolean {
+  return inItemTgq(question) && isClientQuestion(question);
 }
 
 export type ItemTgqCounts = {
   /** The item's own TGQ — what every screen prints as its TGQ. */
   toQuote: number;
-  /** Of those, the ones a chase asks (`spec_field`). */
+  /** Of those, the ones a chase asks (client questions, `inChaseAsk`). */
   toChase: number;
   /** Project-wide TGQ questions this item still carries. Counted apart, never inside `toQuote`. */
   projectWide: number;
@@ -105,14 +128,14 @@ export type ItemTgqCounts = {
  * are different answers.
  */
 export function itemTgqCounts(
-  questions: readonly (TgqCountable & { requirementKind: "spec_field" | "readiness" })[],
+  questions: readonly (TgqCountable & AudienceReadable)[],
 ): ItemTgqCounts | null {
   const counts: ItemTgqCounts = { toQuote: 0, toChase: 0, projectWide: 0, later: 0 };
   for (const question of questions) {
     if (question.tier === null) return null;
     if (inItemTgq(question)) {
       counts.toQuote += 1;
-      if (question.requirementKind === "spec_field") counts.toChase += 1;
+      if (isClientQuestion(question)) counts.toChase += 1;
     } else if (inProjectWideTgq(question)) counts.projectWide += 1;
     else counts.later += 1;
   }
@@ -146,6 +169,8 @@ export type GroupableQuestion = {
   recordId: string;
   requirementId: string;
   requirementKind: "spec_field" | "readiness";
+  /** Who the question is for (0062). Optional until every payload carries it: `questionAudience`. */
+  audience?: QuestionAudience | null;
   tier: QuestionTier | null;
   /** The cheat sheet's section. Read by the TGQ rule: the project-wide section never counts in an item's TGQ. */
   section: string | null;

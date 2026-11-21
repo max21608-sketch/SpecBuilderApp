@@ -11,6 +11,7 @@ import {
   defaultIntro,
   escapeHtml,
   londonGreeting,
+  TEMPLATE_VERSION,
   type ChaseGroup,
 } from "@/lib/chase-template";
 
@@ -222,12 +223,13 @@ describe("buildChaseEmail", () => {
     expect(body).toMatch(/color:#b91c1c;font-weight:bold[^>]*>TBC — our understanding: Yarn Loomworks Harbour</);
   });
 
-  it("names the BWS field in the question heading, and omits it where there is none", () => {
-    const withField = buildChaseEmail(base).body;
+  it("names the BWS field in the question heading for a COLLEAGUE, and omits it where there is none", () => {
+    const withField = buildChaseEmail({ ...base, recipient: "internal" }).body;
     expect(withField).toContain("(BWS: Dimensions)");
 
     const without = buildChaseEmail({
       ...base,
+      recipient: "internal",
       groups: [group({ questions: [question({ fieldLabel: null })] })],
     }).body;
     expect(without).not.toContain("(BWS:");
@@ -603,5 +605,68 @@ describe("a chase to a colleague", () => {
     expect(internal.subject).toBe(external.subject);
     const tables = (body: string) => body.slice(body.indexOf("<table"));
     expect(tables(internal.body)).toBe(tables(external.body));
+  });
+});
+
+// ===========================================================================
+// DECISION E (2026-11-20): THE CLIENT IS SHOWN THE QUESTION, NEVER THE BWS
+// FIELD BESIDE IT, and reads the client wording where the seed gives one.
+// "COM 1" is the prompt on fifteen sheets and is itself the BWS name.
+// ===========================================================================
+describe("buildChaseEmail — what an external recipient reads (0062)", () => {
+  const com = (n: number, askedAs: string | null) =>
+    question({
+      recordId: `r${n}`,
+      requirementId: `q-com-${n}`,
+      recordLabel: `P17231-00${n}`,
+      itemDescription: `Sofa ${n}`,
+      prompt: "COM 1",
+      fieldLabel: "COM 1",
+      askedAs,
+    });
+  const asGroups = (questions: ReturnType<typeof com>[]): ChaseGroup[] =>
+    questions.map((q) => group({ recordId: q.recordId, recordLabel: q.recordLabel, itemDescription: q.itemDescription, questions: [q] }));
+
+  it("prints no BWS field name to a designer or a client, by default", () => {
+    const { body } = buildChaseEmail({ ...base, groups: asGroups([com(1, "Fabric 1")]) });
+    expect(body).not.toContain("BWS:");
+    expect(buildChaseEmail({ ...base, recipient: "external", groups: asGroups([com(1, null)]) }).body).not.toContain("BWS:");
+  });
+
+  it("asks in the client wording where the line carries one, and by the prompt where it does not", () => {
+    const worded = buildChaseEmail({ ...base, groups: asGroups([com(1, "Fabric 1")]) }).body;
+    expect(worded).toContain(">Fabric 1 <span");
+    expect(worded).not.toContain(">COM 1");
+    const unworded = buildChaseEmail({ ...base, groups: asGroups([com(1, null)]) }).body;
+    expect(unworded).toContain(">COM 1 <span");
+  });
+
+  it("gives a colleague the prompt and the BWS field, whatever the client wording", () => {
+    const { body } = buildChaseEmail({ ...base, recipient: "internal", groups: asGroups([com(1, "Fabric 1")]) });
+    expect(body).toContain(">COM 1 <span");
+    expect(body).toContain("(BWS: COM 1)");
+  });
+
+  it("asks one client wording ONCE across items, and still renders exactly the coverage set", () => {
+    const groups = asGroups([com(1, "Fabric 1"), com(2, "Fabric 1"), com(3, "Fabric 1")]);
+    const { body } = buildChaseEmail({ ...base, groups });
+    expect(body.match(/>Fabric 1 <span/g)).toHaveLength(1);
+    const rendered = new Set([...body.matchAll(/data-record="([^"]+)" data-requirement="([^"]+)"/g)].map((m) => `${m[1]}:${m[2]}`));
+    expect(rendered).toEqual(new Set(groups.flatMap((g) => g.questions.map((q) => `${q.recordId}:${q.requirementId}`))));
+  });
+
+  it("says a question is answered once for each area, where the seed says so (decision C)", () => {
+    const area = (n: number, where: string) =>
+      question({ recordId: `r${n}`, requirementId: `q-io-${n}`, recordLabel: `P17231-00${n}`, area: where, prompt: "Indoor/ Outdoor / Humid environment", answerScope: "area" as const });
+    const { body } = buildChaseEmail({
+      ...base,
+      groups: [area(1, "Restaurant"), area(2, "Restaurant"), area(3, "Terrace")].map((q) => group({ recordId: q.recordId, area: q.area, questions: [q] })),
+    });
+    expect(body).toContain("one answer for each area");
+    expect(buildChaseEmail(base).body).not.toContain("one answer for each area");
+  });
+
+  it("is template version 4", () => {
+    expect(TEMPLATE_VERSION).toBe(4);
   });
 });

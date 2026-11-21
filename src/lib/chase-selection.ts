@@ -32,10 +32,12 @@
 //     reading here is how the ticks and the email's own two headings start
 //     disagreeing about what blocks a quote.
 //
-//   * READINESS IS NEVER DEFAULTED IN. 408 of the 728 seeded requirements are
-//     readiness questions and they include deposit status and COM payment
-//     plan — Ben Whistler's own commercial checklist, which can be chosen but
-//     never by accident. Decision 19, unchanged.
+//   * ONLY A CLIENT QUESTION IS DEFAULTED IN (0062, decision D). It was
+//     "readiness is never defaulted in" (decision 19): 408 of the 728 seeded
+//     requirements are readiness questions, including deposit status and COM
+//     payment plan. The audience says it better — "Assembly guide" fills a
+//     BWS field and is ours, "Floor plans" has none and is the client's — and
+//     0062 seeded it from the kind, so the two read alike until seed 0015.
 //
 //   * A QUESTION ALREADY AWAITING A REPLY IS NOT ASKED AGAIN by default.
 //     Unchanged, and the reason the screen keeps a Waiting toggle at all.
@@ -51,7 +53,8 @@
 // predates this file and is asserted in `tests/components/chase-question-table.test.tsx`.
 // ============================================================================
 import type { QuestionTier } from "@/lib/tgq";
-import { isProjectWideQuestion } from "@/lib/chase-grouping";
+import { isClientQuestion, isProjectWideQuestion } from "@/lib/chase-grouping";
+import type { QuestionAudience } from "@/lib/spec-vocab";
 
 /**
  * The shape this file needs from a question. Structural on purpose, like
@@ -62,6 +65,8 @@ export type SelectableQuestion = {
   recordId: string;
   requirementId: string;
   requirementKind: "spec_field" | "readiness";
+  /** Who the question is for (0062). Only a client question is preselected. */
+  audience?: QuestionAudience | null;
   /** The server's reading. Null where the record has no level to read it at. */
   tier: QuestionTier | null;
   /** The cheat sheet's section. A project-wide question is answered once on the project, never asked per item. */
@@ -81,11 +86,11 @@ export type SelectableQuestion = {
  */
 export const selectionKey = (recordId: string, requirementId: string) => `${recordId}:${requirementId}`;
 
-/** Asked of this person, still worth asking, and a specification question. */
+/** Asked of this person, still worth asking, and a CLIENT question (0062, decision D). */
 function chaseable(question: SelectableQuestion, contactId: string): boolean {
   if (!contactId) return false;
   if (question.contactId !== contactId) return false;
-  if (question.requirementKind !== "spec_field") return false;
+  if (!isClientQuestion(question)) return false;
   // ANSWERED ONCE, ON THE PROJECT (Max, 2026-10-12). Preselecting "Is access
   // ok?" on thirty items would ask a designer one question thirty times — and
   // the record's "Chase the n" button, which counts `inChaseAsk`, would land on

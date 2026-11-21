@@ -38,6 +38,7 @@ import {
 import { TEMPLATE_VERSION, buildChaseEmail, defaultClosing, defaultIntro, tierCounts } from "@/lib/chase-template";
 import { ANSWER_STATE_LABELS } from "@/lib/spec-vocab";
 import { requireWriter } from "@/lib/route-guards";
+import { audienceRefusal } from "@/lib/chase-audience";
 
 export const maxDuration = 60;
 
@@ -186,6 +187,12 @@ export async function POST(request: Request): Promise<Response> {
       // generate, and the coverage snapshot: an answer that moves after this
       // read makes the draft stale, and the send gate refuses a stale draft.
       const allQuestions = input.selections.flatMap((s) => s.questions);
+      // Who each question would be asked of, for the audience rule below.
+      const contactRoleOf = new Map<string, string>();
+      for (const selection of input.selections) {
+        const role = String(contactById.get(selection.contactId)?.role ?? "");
+        for (const q of selection.questions) contactRoleOf.set(questionKey(q.recordId, q.requirementId, 0), role);
+      }
       // SCOPED TO THIS PROJECT (audit A3/F11): a record of another project, a
       // question its category does not ask, a heading and a retired phase all
       // come back absent, and absent is refused below. The project is the
@@ -202,6 +209,7 @@ export async function POST(request: Request): Promise<Response> {
         prompt: string | null;
         reason: string;
         gone?: true;
+        audience?: true;
       }[] = [];
       for (const q of allQuestions) {
         const key = questionKey(q.recordId, q.requirementId, 0);
@@ -239,7 +247,14 @@ export async function POST(request: Request): Promise<Response> {
             ...named,
             reason: `is now ${ANSWER_STATE_LABELS[question.state]}`,
           });
+          continue;
         }
+        // ONLY A CLIENT QUESTION GOES TO A DESIGNER OR A CLIENT (0062,
+        // decision D). Read off the LIVE question (seed audience, or the
+        // project's "ask the client") and the LOCKED contact row, never the
+        // request. A colleague may be sent anything.
+        const refusal = audienceRefusal(question, contactRoleOf.get(questionKey(q.recordId, q.requirementId, 0)));
+        if (refusal) ineligible.push({ ...named, reason: refusal, audience: true });
       }
       if (ineligible.length > 0) {
         throw new DomainConflictError("questions_ineligible", ineligibleMessage(ineligible), { diff: ineligible });
@@ -296,6 +311,9 @@ export async function POST(request: Request): Promise<Response> {
           groups,
           now: new Date(),
           environmentPrefix,
+          // A designer or a client reads the client wording and no BWS field
+          // name; a colleague reads both (decision E). Off the locked row.
+          recipient: String(contact.role) === "internal" ? "internal" : "external",
         });
 
         const draftRows = await sql`
@@ -338,10 +356,17 @@ export async function POST(request: Request): Promise<Response> {
  * named apart from one that was answered, because the next step differs:
  * reload, and what you were looking at is not there any more.
  */
-function ineligibleMessage(rows: readonly { gone?: true }[]): string {
+function ineligibleMessage(rows: readonly { gone?: true; audience?: true }[]): string {
   const gone = rows.filter((row) => row.gone).length;
-  const rest = rows.length - gone;
+  const ours = rows.filter((row) => row.audience).length;
+  const rest = rows.length - gone - ours;
   const parts: string[] = [];
+  if (ours > 0) {
+    parts.push(
+      `${ours} selected question${ours === 1 ? " is" : "s are"} ours to answer, not the client's — a chase to a designer or a client asks only client questions. Untick ${ours === 1 ? "it" : "them"}, or answer ${ours === 1 ? "it" : "them"} on the fill-in screen.`,
+    );
+    if (gone === 0 && rest === 0) return parts.join(" ");
+  }
   if (gone > 0) {
     parts.push(`${gone} selected question${gone === 1 ? " is" : "s are"} no longer on this project's records.`);
   }

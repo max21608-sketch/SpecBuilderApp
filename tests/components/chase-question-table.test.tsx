@@ -338,7 +338,7 @@ describe("a filter narrows what is listed, never what is asked", () => {
     await userEvent.type(screen.getByPlaceholderText(/Search a code/), "packing");
     expect(screen.getByText(/2 questions ticked/)).toBeTruthy();
 
-    await userEvent.click(screen.getByLabelText("Show readiness questions"));
+    await userEvent.click(screen.getByLabelText("Show our own questions (in-house and CAM)"));
     expect(screen.getByText(/2 questions ticked/)).toBeTruthy();
   });
 
@@ -348,7 +348,7 @@ describe("a filter narrows what is listed, never what is asked", () => {
     expect(screen.queryByText("Deposit received?")).toBeNull();
     // Still counted as outstanding on the line.
     expect(within(line()).getByText("1")).toBeTruthy();
-    await userEvent.click(screen.getByLabelText("Show readiness questions"));
+    await userEvent.click(screen.getByLabelText("Show our own questions (in-house and CAM)"));
     expect(screen.getByText("Deposit received?")).toBeTruthy();
   });
 

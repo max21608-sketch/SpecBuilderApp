@@ -51,6 +51,20 @@ describe("gateRowRole", () => {
     expect(gateRowRole({ outcome: "blocking", field }, q)).toBe("readiness");
   });
 
+  it("calls an IN-HOUSE spec-field question one we record here, and a CLIENT readiness question a chase (0062)", () => {
+    const assembly = { specFieldJsonId: 191, localKey: null, dimensionSlot: null };
+    expect(gateRowRole({ outcome: "blocking", field: assembly }, question({ requirement_id: "q4", json_id: 191, audience: "in_house" }))).toBe(
+      "readiness",
+    );
+    const plans = { specFieldJsonId: null, localKey: "floor_plans", dimensionSlot: null };
+    expect(
+      gateRowRole(
+        { outcome: "blocking", field: plans },
+        question({ requirement_id: "q5", local_key: "floor_plans", kind: "readiness", audience: "client" }),
+      ),
+    ).toBe("chase");
+  });
+
   it("calls a local-key row with no question at all a record-column row", () => {
     // Spec notes and Designer reference: `loadGateContext` reads them off
     // `spec_records`, which is why they are blocking rather than unanswerable,

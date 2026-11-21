@@ -52,6 +52,19 @@ describe("defaultSelection", () => {
     expect(defaultSelection([waiting], "c-1").size).toBe(0);
   });
 
+  it("ticks only a CLIENT question: an in-house spec field is never preselected (0062, decision D)", () => {
+    // "Assembly guide required" fills a BWS field and is ours. Chaseable was
+    // `kind = 'spec_field'`; it is the audience now.
+    expect(defaultSelection([question({ audience: "in_house" })], "c-1").size).toBe(0);
+    expect(defaultSelection([question({ audience: "cam" })], "c-1").size).toBe(0);
+    expect(selectionSummary([question({ audience: "in_house", tier: "later" })], "c-1").alsoOutstanding).toBe(0);
+  });
+
+  it("ticks a CLIENT readiness question: \"Floor plans\" has no BWS column and is the client's to give", () => {
+    const plans = question({ requirementKind: "readiness", audience: "client" });
+    expect(keys(defaultSelection([plans], "c-1"))).toEqual([selectionKey(plans.recordId, plans.requirementId)]);
+  });
+
   it("never ticks a readiness question", () => {
     // Deposit status and the COM payment plan are Ben Whistler's own
     // commercial checklist. Choosable, never by accident — decision 19.

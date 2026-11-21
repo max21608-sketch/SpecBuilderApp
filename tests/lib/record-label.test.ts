@@ -119,6 +119,11 @@ describe("the renumbering does not stale a sent draft", () => {
       groupLabel: "P18181-012",
       variantCount: 0,
       variantOrdinal: 3,
+      audience: "client",
+      seedAudience: "client",
+      clientPrompt: null,
+      answerScope: "item",
+      matrixType: null,
       ...overrides,
     };
   }

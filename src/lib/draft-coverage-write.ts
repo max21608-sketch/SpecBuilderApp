@@ -9,7 +9,8 @@
 // then; the edit route kept the per-row loop until 2026-11-06.
 //
 // What is written is unchanged: the same rows, the same `sort_order`, in the
-// caller's transaction. A chunk is 500 rows so one parameter never carries a
+// caller's transaction — plus, since 0062, the client wording the line was
+// asked in and its answer scope, as columns beside the snapshot. A chunk is 500 rows so one parameter never carries a
 // whole 300-line project's snapshots. `sort_order` is the position in the list
 // as given, numbered BEFORE anything is chunked: a chunk boundary that
 // restarted the count would reorder the email's questions and be invisible in
@@ -47,6 +48,8 @@ export async function insertCoverageRows(
       tier: item.tier,
       record_no: item.recordNo,
       requirement_sort: item.requirementSort,
+      asked_as: item.askedAs,
+      answer_scope: item.answerScope,
     }));
     // `jsonb_to_recordset` rather than 14 parallel arrays: the snapshot is
     // already an object, so it stays jsonb the whole way and is never
@@ -56,18 +59,18 @@ export async function insertCoverageRows(
       insert into email_draft_items
         (draft_id, record_id, requirement_id, revision_no, answer_id, snapshot_answer_version,
          record_version, context_snapshot, prompt_text, field_label, current_value_text,
-         sort_order, tier, record_no, requirement_sort, created_by)
+         sort_order, tier, record_no, requirement_sort, asked_as, answer_scope, created_by)
       select
         ${draftId}, x.record_id, x.requirement_id, 0,
         x.answer_id, x.snapshot_answer_version, x.record_version,
         x.context_snapshot, x.prompt_text, x.field_label, x.current_value_text,
-        x.sort_order, x.tier, x.record_no, x.requirement_sort, ${actor}
+        x.sort_order, x.tier, x.record_no, x.requirement_sort, x.asked_as, x.answer_scope, ${actor}
       from jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) as x(
         record_id uuid, requirement_id uuid, answer_id uuid,
         snapshot_answer_version integer, record_version integer,
         context_snapshot jsonb, prompt_text text, field_label text,
         current_value_text text, sort_order integer, tier text,
-        record_no integer, requirement_sort integer)
+        record_no integer, requirement_sort integer, asked_as text, answer_scope text)
       returning id
     `;
     // A chunk that lands short has dropped a question the email asks.

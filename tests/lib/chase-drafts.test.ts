@@ -63,6 +63,11 @@ function question(overrides: Partial<OutstandingQuestion> = {}): OutstandingQues
     groupLabel: "P17231-007",
     variantCount: 0,
     variantOrdinal: null,
+    audience: "client",
+    seedAudience: "client",
+    clientPrompt: null,
+    answerScope: "item",
+    matrixType: null,
     ...overrides,
   };
 }
@@ -250,6 +255,30 @@ describe("groupByContact — a colleague", () => {
     );
     expect(groups).toHaveLength(1);
     expect(groups[0]?.questions).toHaveLength(1);
+  });
+});
+
+describe("groupByContact — only a client question reaches a designer (0062, decision D)", () => {
+  const colleague = contact({ id: "c-cam", name: "Ana Whitcombe", role: "internal", designerCode: null });
+
+  it("keeps an in-house or CAM question out of the designer's group, and gives it to a colleague", () => {
+    const inHouse = question({ requirementId: "req-ih", audience: "in_house", requirementKind: "spec_field" });
+    const cam = question({ requirementId: "req-cam", audience: "cam", requirementKind: "readiness" });
+    const plans = question({ requirementId: "req-plans", audience: "client", requirementKind: "readiness" });
+    const { groups } = groupByContact([question(), inHouse, cam, plans], [contact(), colleague]);
+    const designer = groups.find((g) => g.contact.id === "c-lcs")!;
+    expect(designer.questions.map((q) => q.requirementId).sort()).toEqual(["req-1", "req-plans"]);
+    expect(groups.find((g) => g.contact.id === "c-cam")?.questions).toHaveLength(4);
+  });
+
+  it("leaves the blocked list as it was: a line with nobody on it is still named with every question it owes", () => {
+    // `blocked` describes the designer ROUTING, and between 0062 and seed 0015
+    // the screen must read exactly as before: the count is unchanged.
+    const { blocked } = groupByContact(
+      [question({ designer: null }), question({ designer: null, requirementId: "req-ih", audience: "in_house" })],
+      [contact()],
+    );
+    expect(blocked).toEqual([expect.objectContaining({ kind: "nobody_to_ask", questionCount: 2 })]);
   });
 });
 

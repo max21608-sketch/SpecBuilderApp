@@ -54,6 +54,7 @@ import {
   ITEM_LEVEL_LABELS,
   type AnswerState,
   type ItemLevel,
+  type QuestionAudience,
 } from "@/lib/spec-vocab";
 import { type QuestionTier } from "@/lib/tgq";
 import { defaultSelection, selectionKey, selectionSummary } from "@/lib/chase-selection";
@@ -90,6 +91,8 @@ type Question = {
   area: string | null;
   prompt: string;
   requirementKind: "spec_field" | "readiness";
+  /** Who it is for (0062). Only a client question may go to a designer. */
+  audience?: QuestionAudience;
   fieldLabel: string | null;
   state: AnswerState;
   tier: QuestionTier | null;

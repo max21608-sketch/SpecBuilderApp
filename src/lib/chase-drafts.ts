@@ -19,11 +19,22 @@
 // ============================================================================
 import { sql } from "@/lib/db";
 import type { Row } from "@/lib/db";
-import { type AnswerState, type ItemLevel, isSettled, normaliseItemLevel } from "@/lib/spec-vocab";
+import {
+  type AnswerScope,
+  type AnswerState,
+  type ItemLevel,
+  type QuestionAudience,
+  isQuestionAudience,
+  isSettled,
+  normaliseAnswerScope,
+  normaliseItemLevel,
+  normaliseQuestionAudience,
+} from "@/lib/spec-vocab";
 import { questionTierOrNull, type QuestionTier, type TgqMatrix } from "@/lib/tgq";
 import { loadTgqMatrices } from "@/lib/gate-load";
 import { numberingFromRow, recordLabel, recordNoLabel, recordShortLabel } from "@/lib/record-label";
 import type { ChaseGroup } from "@/lib/chase-template";
+import { questionGroupKey } from "@/lib/chase-grouping";
 
 /**
  * A SPLIT BILL LINE IS A HEADING, in SQL, once.
@@ -116,6 +127,10 @@ export const OUTSTANDING_QUESTION_SELECT = `r.project_id,
       q.tgq_levels,
       f.json_id as field_json_id,
       q.local_key,
+      q.audience,
+      q.client_prompt,
+      q.answer_scope,
+      r.matrix_type,
       f.name as field_label,
       a.id as answer_id,
       a.version as answer_version,
@@ -227,6 +242,25 @@ export type OutstandingQuestion = {
   variantCount: number;
   /** 0039: the 3 in 12.3. Null on a bill line. */
   variantOrdinal: number | null;
+  // ---- who it is for, and how a client reads it (0062) ---------------------
+  //
+  // None of these reaches `contextSnapshot`: an audience moving, or a client
+  // wording being seeded, is not a change to what an email asked, and a field
+  // added to the snapshot stales every unsent draft (the chased_at trap).
+  /**
+   * WHO THIS QUESTION IS FOR on this project: the project's own route ("ask
+   * the client", `project_question_routes`) where there is one, else the
+   * seed's `requirements.audience`. Only `client` reaches a designer.
+   */
+  audience: QuestionAudience;
+  /** The seed's audience, so a screen can offer to move it back. */
+  seedAudience: QuestionAudience;
+  /** The wording an external chase prints instead of the prompt. Null prints the prompt. */
+  clientPrompt: string | null;
+  /** `area`: answered once for every item in one area (decision C). */
+  answerScope: AnswerScope;
+  /** The person's accepted gate-model type (0061); null is the sheet's union. */
+  matrixType: string | null;
 };
 
 export type ProjectContact = {
@@ -443,6 +477,14 @@ export type CoveredQuestion = {
   /** The order the email printed, kept so an edit re-renders the same email. */
   recordNo: number;
   requirementSort: number;
+  /**
+   * The client wording this line was asked in (`email_draft_items.asked_as`,
+   * 0062), frozen at generation. Null on a line asked by its prompt and on
+   * every line written before 0062. Beside `context`, never in it.
+   */
+  askedAs: string | null;
+  /** `area` where the question is answered once for its area. Null before 0062. */
+  answerScope: AnswerScope | null;
 };
 
 /**
@@ -472,6 +514,8 @@ export function coveredFromQuestion(question: OutstandingQuestion): CoveredQuest
     prompt: question.prompt,
     fieldLabel: question.fieldLabel,
     currentValueText: question.currentValue,
+    askedAs: question.clientPrompt,
+    answerScope: question.answerScope,
   };
 }
 
@@ -505,6 +549,8 @@ export function groupsFromCovered(items: CoveredQuestion[]): ChaseGroup[] {
       state: c.state,
       currentValue: c.currentValue,
       tier: item.tier,
+      askedAs: item.askedAs,
+      answerScope: item.answerScope,
     };
     // One group per record PER TIER: the email prints everything that blocks a
     // quote first, so a record with questions in both halves appears in both.
@@ -672,6 +718,14 @@ export function groupByContact(
     // their own chase.
     if (contact.role === "internal") continue;
 
+    // ONLY A CLIENT QUESTION REACHES A DESIGNER (0062, decision D). After the
+    // two blocks above, deliberately: `blocked` describes the designer
+    // ROUTING ("there is nobody to ask about this line") and still counts
+    // every question the line owes, so the Nobody assigned tab reads exactly
+    // as it did. An in-house or CAM question is ours, on the fill-in screen,
+    // and a colleague above still receives it.
+    if (question.audience !== "client") continue;
+
     const group = groups.get(contact.id);
     if (group) group.questions.push(question);
     else groups.set(contact.id, { contact, questions: [question] });
@@ -803,6 +857,10 @@ export async function loadOutstanding(
       q.tgq_levels,
       f.json_id as field_json_id,
       q.local_key,
+      q.audience,
+      q.client_prompt,
+      q.answer_scope,
+      r.matrix_type,
       f.name as field_label,
       a.id as answer_id,
       a.version as answer_version,
@@ -857,10 +915,37 @@ export async function loadOutstanding(
   // computed here and nowhere else — the spec table, the chase screen, the
   // generate and edit routes and the email template all read it off this.
   const matrices = await loadTgqMatrices(sql);
-  return rows.map((row) => toOutstandingQuestion(row, matrices));
+  const routes = await loadQuestionRoutes(sql, projectIds);
+  return rows.map((row) => toOutstandingQuestion(row, matrices, routes));
 }
 
-function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>): OutstandingQuestion {
+/** `project_question_routes`, per project, keyed by `questionGroupKey`. */
+export type QuestionRoutes = Map<string, Map<string, QuestionAudience>>;
+
+/**
+ * Each project's "ask the client" (0062): one question moved to another
+ * audience for that project alone. Read ONCE per load, beside the matrices,
+ * and applied per row by the question's own key — `questionGroupKey`, so a
+ * move covers the question on every cheat sheet that asks it.
+ */
+export async function loadQuestionRoutes(exec: SqlExecutor, projectIds: string[]): Promise<QuestionRoutes> {
+  const routes: QuestionRoutes = new Map();
+  if (projectIds.length === 0) return routes;
+  const rows = await exec`
+    select project_id, question_key, audience from project_question_routes
+     where project_id = any(${projectIds}::uuid[])
+  `;
+  for (const row of rows) {
+    if (!isQuestionAudience(row.audience)) continue;
+    const key = String(row.project_id);
+    const byKey = routes.get(key) ?? new Map<string, QuestionAudience>();
+    byKey.set(String(row.question_key), row.audience);
+    routes.set(key, byKey);
+  }
+  return routes;
+}
+
+function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>, routes: QuestionRoutes): OutstandingQuestion {
   const recordNo = Number(row.record_no);
   const level = normaliseItemLevel(row.level);
   const tgqLevels = Array.isArray(row.tgq_levels) ? row.tgq_levels.map(String) : [];
@@ -916,7 +1001,23 @@ function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>): Outs
     groupLabel: recordLabel(String(row.bws_project_number), Number(row.group_no ?? recordNo)),
     variantCount: Number(row.variant_count ?? 0),
     variantOrdinal: numberingFromRow(row).variantOrdinal ?? null,
+    ...audienceOf(row, routes),
+    clientPrompt: row.client_prompt === null || row.client_prompt === undefined ? null : String(row.client_prompt),
+    answerScope: normaliseAnswerScope(row.answer_scope),
+    matrixType: row.matrix_type === null || row.matrix_type === undefined ? null : String(row.matrix_type),
   };
+}
+
+/** The seed's audience, and the project's route over it where there is one. */
+function audienceOf(row: Row, routes: QuestionRoutes): { audience: QuestionAudience; seedAudience: QuestionAudience } {
+  const seedAudience = normaliseQuestionAudience(row.audience);
+  const key = questionGroupKey({
+    requirementId: String(row.requirement_id),
+    prompt: String(row.prompt ?? ""),
+    jsonId: row.field_json_id === null || row.field_json_id === undefined ? null : Number(row.field_json_id),
+    localKey: row.local_key === null || row.local_key === undefined ? null : String(row.local_key),
+  });
+  return { audience: routes.get(String(row.project_id))?.get(key) ?? seedAudience, seedAudience };
 }
 
 /**
@@ -1012,6 +1113,10 @@ export async function loadQuestionsByKey(
       q.tgq_levels,
       f.json_id as field_json_id,
       q.local_key,
+      q.audience,
+      q.client_prompt,
+      q.answer_scope,
+      r.matrix_type,
       f.name as field_label,
       a.id as answer_id,
       a.version as answer_version,
@@ -1040,9 +1145,10 @@ export async function loadQuestionsByKey(
   // here is how a draft's coverage rows come to disagree with the screen that
   // generated them about which half of the email a question belongs in.
   const matrices = await loadTgqMatrices(sql);
+  const routes = await loadQuestionRoutes(exec, [projectId]);
   const byKey = new Map<string, OutstandingQuestion>();
   for (const row of rows) {
-    const question = toOutstandingQuestion(row, matrices);
+    const question = toOutstandingQuestion(row, matrices, routes);
     byKey.set(questionKey(question.recordId, question.requirementId, 0), question);
   }
   return byKey;

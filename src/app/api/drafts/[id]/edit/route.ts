@@ -42,6 +42,7 @@ import { ANSWER_STATE_LABELS } from "@/lib/spec-vocab";
 import { isQuestionTier } from "@/lib/tgq";
 import { draftStateWords } from "@/lib/draft-status";
 import { requireUuid, requireWriter } from "@/lib/route-guards";
+import { audienceRefusal } from "@/lib/chase-audience";
 
 export const maxDuration = 60;
 
@@ -90,7 +91,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const result = await withTransaction(async (sql) => {
       const draftRows = await sql`
         select d.id, d.project_id, d.contact_id, d.status, d.version, d.project_label,
-               d.recipient_name, c.name as contact_name
+               d.recipient_name, c.name as contact_name, c.role as contact_role
         from email_drafts d
         join project_contacts c on c.id = d.contact_id
         where d.id = ${id}
@@ -119,7 +120,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const existingRows = await sql`
         select record_id, requirement_id, revision_no, answer_id, snapshot_answer_version,
                record_version, context_snapshot, prompt_text, field_label, current_value_text,
-               tier, record_no, requirement_sort
+               tier, record_no, requirement_sort, asked_as, answer_scope
         from email_draft_items where draft_id = ${id}
       `;
       const existing = new Map<string, CoveredQuestion>();
@@ -151,6 +152,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             row.requirement_sort === null || row.requirement_sort === undefined
               ? 0
               : Number(row.requirement_sort),
+          // As it was asked: a line written before 0062 has neither, and keeps
+          // its prompt.
+          askedAs: row.asked_as === null || row.asked_as === undefined ? null : String(row.asked_as),
+          answerScope: row.answer_scope === "area" ? "area" : row.answer_scope === "item" ? "item" : null,
         });
       }
 
@@ -164,7 +169,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
       const covered: CoveredQuestion[] = [];
       const staleRetained: { recordLabel: string; prompt: string; why: string }[] = [];
-      const ineligibleAdded: { recordLabel: string; prompt: string; reason: string; gone?: true }[] = [];
+      const ineligibleAdded: { recordLabel: string; prompt: string; reason: string; gone?: true; audience?: true }[] = [];
 
       for (const q of input.questions) {
         const key = questionKey(q.recordId, q.requirementId, 0);
@@ -237,6 +242,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           });
           continue;
         }
+        // ADDED questions only (0062, decision D): a retained line keeps what
+        // the draft already asked, so a draft written before the audience
+        // rule opens, edits and downloads as it was.
+        const refusal = audienceRefusal(liveQuestion, String(draft.contact_role ?? ""));
+        if (refusal) {
+          ineligibleAdded.push({
+            recordLabel: liveQuestion.recordLabel,
+            prompt: liveQuestion.prompt,
+            reason: refusal,
+            audience: true,
+          });
+          continue;
+        }
         covered.push(coveredFromQuestion(liveQuestion));
       }
 
@@ -250,9 +268,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
       if (ineligibleAdded.length > 0) {
         const gone = ineligibleAdded.filter((row) => row.gone).length;
+        const ours = ineligibleAdded.filter((row) => row.audience).length;
         throw new DomainConflictError(
           "questions_ineligible",
-          gone > 0
+          ours > 0 && gone === 0
+            ? `${ours} added question${ours === 1 ? " is" : "s are"} ours to answer, not the client's — a chase to a designer or a client asks only client questions. Nothing was added.`
+            : gone > 0
             ? `${gone} selected question${gone === 1 ? " is" : "s are"} no longer on this project's records, so nothing was added.`
             : `${ineligibleAdded.length} question${ineligibleAdded.length === 1 ? " is" : "s are"} no longer outstanding and cannot be added.`,
           { diff: ineligibleAdded },
@@ -273,6 +294,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         groups: groupsFromCovered(covered),
         now: new Date(),
         environmentPrefix: currentAppEnvIsProduction() ? undefined : "[STAGING]",
+        recipient: String(draft.contact_role) === "internal" ? "internal" : "external",
       });
 
       // Coverage is immutable by trigger, so a change is a delete and a

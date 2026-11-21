@@ -25,16 +25,18 @@
 //
 // ---- THE FOUR WAYS A TGQ ROW CAN FAIL TO BE A QUESTION SOMEBODY IS ASKED ---
 //
-//   chase      a checklist question of kind `spec_field` — the only rows a
-//              chase email ever puts to a designer.
+//   chase      a CLIENT checklist question (`requirements.audience`, 0062) —
+//              the only rows a chase email ever puts to a designer. It read
+//              `kind = 'spec_field'` until decision D (2026-11-20).
 //   details    one of Matthew's id-less rows resolved from a RECORD COLUMN:
 //              Item name, Designer reference, Spec notes. There is no
 //              checklist question, and there is nowhere to chase — it is typed
 //              on this item's own details.
-//   readiness  a checklist question of kind `readiness` (`requirements
-//              .local_key`, db/seed/0009). Ours to record, never chased —
-//              decision 19, and what the chase screen's default selection
-//              already does.
+//   readiness  an IN-HOUSE or CAM checklist question, whatever its kind
+//              (0062). Ours to record, never chased — decision D, and what
+//              the chase screen's default selection does. The bucket keeps
+//              its old name because the sentence it prints ("you record
+//              here") has not changed.
 //   slot       a dimension SLOT row. Rows 4-7 of his matrix are four TGQ rows
 //              carrying one BWS id, each judged by the `record_attributes` row
 //              that holds it, where the checklist asks ONE Dimensions
@@ -76,6 +78,8 @@ export type GateQuestion = {
   local_key: string | null;
   /** `requirements.kind`. Absent on a caller that does not carry it. */
   kind?: string | null;
+  /** `requirements.audience` (0062). Read before the kind where present. */
+  audience?: string | null;
   /** `requirements.section`. The project-wide section is answered on the project. */
   section?: string | null;
 };
@@ -125,7 +129,10 @@ export function gateRowRole(
   // Before readiness: a project-wide question is the PROJECT's work whatever
   // its kind, and it is answered once, on the project.
   if (question && question.section === PROJECT_WIDE_SECTION) return "project";
-  if (question && question.kind === "readiness") return "readiness";
+  // Ours to record, never chased: an in-house or CAM question (0062,
+  // decision D). Where a caller carries no audience, the kind as 0062 seeded
+  // it.
+  if (question && (question.audience ? question.audience !== "client" : question.kind === "readiness")) return "readiness";
   if (row.field.localKey !== null && !question) return "details";
   if (row.field.dimensionSlot) return "slot";
   return "chase";

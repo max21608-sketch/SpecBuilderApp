@@ -40,7 +40,7 @@
 //    appear at all. Mail clients are not browsers and this file is not
 //    Tailwind.
 // ============================================================================
-import { ANSWER_STATE_LABELS, type AnswerState } from "@/lib/spec-vocab";
+import { ANSWER_STATE_LABELS, type AnswerScope, type AnswerState } from "@/lib/spec-vocab";
 import { NO_AREA_LABEL, foldArea } from "@/lib/area-filter";
 import { TIER_EMAIL_HEADINGS, type QuestionTier } from "@/lib/tgq";
 
@@ -113,7 +113,24 @@ export type ChaseQuestion = {
   currentValue: string | null;
   /** Which half of the email this question belongs in. */
   tier: QuestionTier;
+  /**
+   * The client wording this line was asked in (`email_draft_items.asked_as`,
+   * 0062). An external recipient reads it in place of the prompt; null, or a
+   * line written before 0062, reads the prompt.
+   */
+  askedAs?: string | null;
+  /** `area`: answered once for every item in one area (decision C). */
+  answerScope?: AnswerScope | null;
 };
+
+/**
+ * WHO IS READING (0062, decision E). `external` — a designer or a client —
+ * is shown the question and never the BWS field name beside it, in the client
+ * wording where the line carries one. `internal` — a colleague — reads the
+ * prompt and the field, which is how the app and BWS name it. The generate
+ * and edit routes decide it off the LIVE contact row, never off the request.
+ */
+export type ChaseRecipient = "external" | "internal";
 
 export type ChaseGroup = {
   recordId: string;
@@ -137,14 +154,20 @@ export type BuildChaseEmailInput = {
   now: Date;
   /** Non-production deployments mark the subject so a stray send is obvious. */
   environmentPrefix?: string;
+  /** Who reads it. Absent is `external`: the direction that never shows a client a BWS name. */
+  recipient?: ChaseRecipient;
 };
 
 /**
  * 1 — one table per record.
  * 2 — two sections, "needed to quote" first, each with its own banner (0020).
  * 3 — one table per QUESTION, its items grouped by area (2026-09-20).
+ * 4 — an external recipient reads the client wording and no BWS field name,
+ *     and an area question says it takes one answer per area (0062). A body
+ *     stored under an earlier version is never re-rendered by this change;
+ *     only an edit re-renders, from its own coverage rows.
  */
-export const TEMPLATE_VERSION = 3;
+export const TEMPLATE_VERSION = 4;
 
 // Vercel runs UTC; the reader is in London. A "Good morning" that arrives at
 // 23:00 reads as carelessness, so resolve the hour in the reader's zone.
@@ -238,13 +261,31 @@ function itemLabel(question: ChaseQuestion): string {
   return parts.join(" · ");
 }
 
-/** A question, identified the way two coverage rows are the same question. */
-function questionKey(question: ChaseQuestion): string {
-  return `${question.prompt.trim()}\u0000${(question.fieldLabel ?? "").trim()}`;
+/** What the reader is asked, in the words this recipient reads. */
+function askedWords(question: ChaseQuestion, recipient: ChaseRecipient): { prompt: string; fieldLabel: string | null } {
+  if (recipient === "internal") return { prompt: question.prompt, fieldLabel: question.fieldLabel };
+  return { prompt: question.askedAs?.trim() || question.prompt, fieldLabel: null };
+}
+
+/**
+ * A question, identified the way two coverage rows are the same question —
+ * FOR THIS READER. A client reading "Fabric 1" twice is asked once, whatever
+ * the two cheat sheets' prompts were.
+ */
+function questionKey(question: ChaseQuestion, recipient: ChaseRecipient): string {
+  const words = askedWords(question, recipient);
+  return `${words.prompt.trim()}\u0000${(words.fieldLabel ?? "").trim()}`;
 }
 
 type AreaBlock = { label: string; noArea: boolean; questions: ChaseQuestion[] };
-type QuestionBlock = { prompt: string; fieldLabel: string | null; areas: AreaBlock[]; count: number };
+type QuestionBlock = {
+  prompt: string;
+  fieldLabel: string | null;
+  areas: AreaBlock[];
+  count: number;
+  /** Answered once for each area (decision C): the heading says so. */
+  areaScoped: boolean;
+};
 
 /**
  * The flat coverage rows of ONE tier, regrouped into question → area → items.
@@ -261,19 +302,24 @@ type QuestionBlock = { prompt: string; fieldLabel: string | null; areas: AreaBlo
  * the document first spelled them. `Dressing area` and `DRESSING AREA` are one
  * heading; nothing cleverer, or two rooms a bill kept apart become one.
  */
-export function groupByQuestionAndArea(questions: readonly ChaseQuestion[]): QuestionBlock[] {
+export function groupByQuestionAndArea(
+  questions: readonly ChaseQuestion[],
+  recipient: ChaseRecipient = "internal",
+): QuestionBlock[] {
   const blocks = new Map<string, QuestionBlock>();
   const areasByBlock = new Map<string, Map<string, AreaBlock>>();
 
   for (const question of questions) {
-    const key = questionKey(question);
+    const key = questionKey(question, recipient);
     let block = blocks.get(key);
     if (!block) {
-      block = { prompt: question.prompt, fieldLabel: question.fieldLabel, areas: [], count: 0 };
+      const words = askedWords(question, recipient);
+      block = { prompt: words.prompt, fieldLabel: words.fieldLabel, areas: [], count: 0, areaScoped: false };
       blocks.set(key, block);
       areasByBlock.set(key, new Map());
     }
     block.count += 1;
+    if (question.answerScope === "area") block.areaScoped = true;
 
     const folded = foldArea(question.area);
     const areaKey = folded ?? "\u0000none";
@@ -352,7 +398,11 @@ function questionHeading(block: QuestionBlock): string {
     ? ` <span style="font-weight:normal">(BWS: ${escapeHtml(block.fieldLabel.trim())})</span>`
     : "";
   const items = ` <span style="font-weight:normal">— ${block.count} item${block.count === 1 ? "" : "s"}</span>`;
-  return `${escapeHtml(block.prompt)}${field}${items}`;
+  // ONE ANSWER PER AREA (decision C): "Restaurant" answered once covers every
+  // item in it, and saying so is what stops a designer answering it per line.
+  const scope =
+    block.areaScoped && block.count > 1 ? ` <span style="font-weight:normal">— one answer for each area</span>` : "";
+  return `${escapeHtml(block.prompt)}${field}${items}${scope}`;
 }
 
 export function buildChaseEmail(input: BuildChaseEmailInput): { subject: string; body: string } {
@@ -376,7 +426,10 @@ export function buildChaseEmail(input: BuildChaseEmailInput): { subject: string;
       tier === "to_quote"
         ? `${TIER_EMAIL_HEADINGS.to_quote} — ${count} question${count === 1 ? "" : "s"}`
         : `${TIER_EMAIL_HEADINGS.later} — ${count} question${count === 1 ? "" : "s"}`;
-    const bodies = groupByQuestionAndArea(groups.flatMap((group) => group.questions))
+    const bodies = groupByQuestionAndArea(
+      groups.flatMap((group) => group.questions),
+      input.recipient ?? "external",
+    )
       .map((block) => `${H}${questionHeading(block)}</p>\n${questionTable(block)}`)
       .join("\n");
     return `${banner(heading, tier === "to_quote")}\n${bodies}`;

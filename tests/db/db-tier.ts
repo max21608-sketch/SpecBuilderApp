@@ -159,9 +159,9 @@ export async function qaPlaceholderCategory(
   const id = String(created.rows[0]!.id);
   await client.query(
     `insert into requirements (category_id, kind, spec_field_id, local_key, prompt, help_text, section, sort_order,
-                               tgq_levels, created_by, updated_by)
+                               tgq_levels, audience, client_prompt, answer_scope, created_by, updated_by)
      select $1, q.kind, q.spec_field_id, q.local_key, q.prompt, q.help_text, q.section, q.sort_order,
-            q.tgq_levels, 'qa', 'qa'
+            q.tgq_levels, q.audience, q.client_prompt, q.answer_scope, 'qa', 'qa'
        from requirements q join item_categories c on c.id = q.category_id
       where c.slug = $2`,
     [id, copyFromSlug],

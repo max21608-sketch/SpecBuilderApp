@@ -667,8 +667,11 @@ describeIfDb("chase drafts", () => {
     );
     const matrixRecordId = matrixRecord.rows[0].id;
     try {
+      // CLIENT questions: the designer may be asked nothing else (0062,
+      // decision D), and a seating sheet's first three are the TOE agreement,
+      // the expedite and the sales folder, all ours.
       const reqs = await client.query(
-        `select id from requirements where category_id = $1 order by sort_order limit 3`,
+        `select id from requirements where category_id = $1 and audience = 'client' order by sort_order limit 3`,
         [coveredCategoryId],
       );
       const res = await generate(
