@@ -390,8 +390,11 @@ answers one question across many items.
   ("In-house"). "Filter by who answers" → "CAM only" is the list to take to
   the CAM; it hides the rest and changes no count. A CAM or in-house question
   carries its label. If nobody here knows a **CAM** question, press **"Ask
-  the client"** and, on this project only, it goes in the chase. It then says
-  "Asked of the client on this project", with **"Put it back"**. An
+  the client"** and, on this project only, it goes in the chase: the next
+  chase to the designer of each item that asks it lists it, already ticked,
+  and the message says whose chase that is (an item with no designer to ask
+  stays under "Nobody assigned"). The row then says "Asked of the client on
+  this project", with **"Put it back"**. An
   **in-house** question has no such button: it is ours to answer and is never
   sent to the client.
 - **"By area — answered once for each area".** Indoor or outdoor, floor type,

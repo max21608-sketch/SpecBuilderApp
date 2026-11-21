@@ -34,8 +34,18 @@
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { questionGroupKey } from "@/lib/chase-grouping";
 import { normaliseQuestionAudience, type QuestionAudience } from "@/lib/spec-vocab";
+import { designerKey } from "@/lib/chase-drafts";
+import type { ChasedTo } from "@/lib/question-route-words";
 
-export type QuestionRouteResult = { questionKey: string; audience: QuestionAudience; seedAudience: QuestionAudience };
+export type QuestionRouteResult = {
+  questionKey: string;
+  audience: QuestionAudience;
+  seedAudience: QuestionAudience;
+  /** On a move to the client: whose next chase lists it, ticked (`movedToClient`), by item count. */
+  chasedTo?: ChasedTo[];
+  /** On a move to the client: items asking it whose designer resolves to no contact. */
+  unassigned?: number;
+};
 
 export async function setQuestionRoute(
   txn: TxnSql,
@@ -99,7 +109,7 @@ export async function setQuestionRoute(
       values (${projectId}, ${questionKey}, 'client', ${actor}, ${actor})
       on conflict (project_id, question_key) do update set audience = 'client', updated_by = ${actor}
     `;
-    return { questionKey, audience: "client", seedAudience };
+    return { questionKey, audience: "client", seedAudience, ...(await whereItGoes(txn, projectId, asked.map((row) => String(row.id)))) };
   }
 
   // THE DELETE IS AUDITED UNDER WHOEVER PRESSED IT. `write_audit()` takes a
@@ -122,4 +132,46 @@ export async function setQuestionRoute(
     );
   }
   return { questionKey, audience: seedAudience, seedAudience };
+}
+
+/**
+ * WHERE A MOVED QUESTION GOES, so the screen can say it truly (chase review
+ * A3). The chase routes an item's question to the contact its designer code
+ * names (`groupByContact`, by `designerKey`), and ticks a moved question for
+ * that contact (`movedToClient`); an item whose designer resolves to nobody
+ * sits under "Nobody assigned". Same scope as the question lookup above.
+ */
+async function whereItGoes(
+  txn: TxnSql,
+  projectId: string,
+  requirementIds: string[],
+): Promise<{ chasedTo: ChasedTo[]; unassigned: number }> {
+  const records = await txn`
+    select distinct r.id, r.designer
+      from spec_records r
+      join spec_runs run on run.id = r.run_id
+      join requirements q on q.category_id = r.category_id
+     where r.project_id = ${projectId}
+       and r.status = 'active'
+       and run.status = 'active'
+       and not exists (select 1 from spec_records v where v.parent_id = r.id and v.status = 'active')
+       and q.id = any(${requirementIds}::uuid[])
+  `;
+  const contacts = await txn`
+    select name, designer_code, role from project_contacts
+     where project_id = ${projectId} and designer_code is not null and role <> 'internal'
+  `;
+  const byCode = new Map(contacts.map((row) => [String(row.designer_code), String(row.name)]));
+  const counts = new Map<string, number>();
+  let unassigned = 0;
+  for (const row of records) {
+    const code = designerKey(row.designer === null || row.designer === undefined ? null : String(row.designer));
+    const name = code ? byCode.get(code) : undefined;
+    if (!name) unassigned += 1;
+    else counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return {
+    chasedTo: [...counts.entries()].map(([contactName, items]) => ({ contactName, items })).sort((a, b) => a.contactName.localeCompare(b.contactName)),
+    unassigned,
+  };
 }

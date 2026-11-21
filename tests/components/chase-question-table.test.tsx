@@ -85,6 +85,7 @@ function question(over: Partial<TableQuestion> = {}): TableQuestion {
     contactId: "c-1",
     contactName: "Claire Beaumont",
     audience: over.audience ?? (over.requirementKind === "readiness" ? "in_house" : "client"),
+    seedAudience: over.seedAudience ?? over.audience ?? (over.requirementKind === "readiness" ? "in_house" : "client"),
     ...over,
   };
 }
@@ -351,6 +352,38 @@ describe("a filter narrows what is listed, never what is asked", () => {
     expect(within(line()).getByText("1")).toBeTruthy();
     await userEvent.click(screen.getByLabelText("Show our own questions (in-house and CAM)"));
     expect(screen.getByText("Deposit received?")).toBeTruthy();
+  });
+
+  // CHASE REVIEW A3: a question a person sent to the client is listed under
+  // the TGQ filter too — it is what they asked to be chased — and ticked.
+  it("lists and ticks a CAM question a person moved to the client, under the TGQ filter as well", async () => {
+    const moved = question({
+      requirementKind: "readiness",
+      audience: "client",
+      seedAudience: "cam",
+      section: "Project / commercial",
+      tier: "later",
+      prompt: "TOE agreement",
+    });
+    function TierHarness() {
+      const [selected] = useState(() => defaultSelection([moved], "c-1"));
+      return (
+        <ChaseQuestionTable
+          contactId="c-1"
+          questions={[moved]}
+          selected={selected}
+          onToggle={() => {}}
+          onToggleMany={() => {}}
+          generating={false}
+          onGenerate={() => {}}
+          tier="to_quote"
+        />
+      );
+    }
+    render(<TierHarness />);
+    await userEvent.click(screen.getByText("Desk chair"));
+    expect(screen.getByText("TOE agreement")).toBeTruthy();
+    expect(screen.getByText(/1 question ticked/)).toBeTruthy();
   });
 
   it("does not say n shown just because the default view hides readiness", () => {

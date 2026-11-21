@@ -857,6 +857,15 @@ GIVES it. `requirements.audience` is `in_house` | `cam` | `client`, seed data;
   (review A2): the button is offered on a CAM question alone, and the route
   refuses an in-house one in words (`in_house`) — decision E says those are
   never sent. Putting one back stays open, for a route stored before.
+  **A moved question is IN the next chase** (review A3): every CAM question
+  is project-wide, which is never preselected, so "Moved to the chase" put it
+  in no chase. `movedToClient` (`chase-selection.ts`: the routed audience is
+  the client's, the seed's is not) ticks it by default for the item's contact
+  at either tier — a person's explicit decision outranks "project-wide is
+  never preselected" — lists it under the TGQ filter too, and still holds it
+  back while a reply is awaited. The route returns whose chase that is
+  (`chasedTo`, by `designerKey`, and `unassigned`), and the fill-in prints
+  `questionRouteSentence`, never a claim the chase does not make.
 - **An external recipient reads the client wording and NO BWS field name**
   (`recipient` on `buildChaseEmail`, decided off the contact row's role; absent
   is external, the direction that never shows a client a BWS name). A

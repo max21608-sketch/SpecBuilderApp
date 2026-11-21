@@ -53,6 +53,7 @@ import type { InfillLineSummary, InfillQuestion } from "@/lib/infill";
 import { DIMENSION_SLOT_LABELS, type DimensionSlot } from "@/lib/spec-vocab";
 import type { Palette, PaletteOption } from "@/lib/palettes";
 import type { AreaOption } from "@/lib/area-filter";
+import { questionRouteSentence, type QuestionRouteOutcome } from "@/lib/question-route-words";
 
 type Category = { id: string; slug: string; family: string; name: string; requirements_authored: boolean };
 
@@ -427,12 +428,9 @@ function InfillView() {
       if (!res.ok) {
         return { ok: false, error: res.error, code: typeof res.data?.code === "string" ? res.data.code : null };
       }
-      return {
-        ok: true,
-        message: askClient
-          ? "Moved to the chase: on this project it is asked of the client."
-          : "Put back: on this project it is ours to answer again.",
-      };
+      // WHERE IT WENT, TRULY (review A3): whose next chase lists it, ticked,
+      // and which items have nobody to ask.
+      return { ok: true, message: questionRouteSentence(askClient, res.data as QuestionRouteOutcome) };
     },
     [projectId, enqueue],
   );

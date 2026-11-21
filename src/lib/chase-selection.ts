@@ -42,6 +42,13 @@
 //   * A QUESTION ALREADY AWAITING A REPLY IS NOT ASKED AGAIN by default.
 //     Unchanged, and the reason the screen keeps a Waiting toggle at all.
 //
+//   * A QUESTION A PERSON SENT TO THE CLIENT IS TICKED (chase review A3,
+//     2026-11-21). "Ask the client" on the fill-in screen moves a CAM question
+//     to the chase for one project, and every CAM question is project-wide —
+//     which is never preselected — so "Moved to the chase" put it in no chase.
+//     A person's explicit decision outranks that default, at either tier
+//     (`movedToClient`); the waiting rule still holds it back.
+//
 // A question with NO TIER is excluded from both counts. That is a record with
 // no level on a category Matthew's matrix does not cover, and the screen
 // already lists it as a blocker with a level picker on it: a default cannot
@@ -65,8 +72,10 @@ export type SelectableQuestion = {
   recordId: string;
   requirementId: string;
   requirementKind: "spec_field" | "readiness";
-  /** Who the question is for (0062). Only a client question is preselected. */
+  /** Who the question is for (0062), after this project's routes. Only a client question is preselected. */
   audience: QuestionAudience;
+  /** Who the cheat sheet says answers it. Differs from `audience` only where a person moved it. */
+  seedAudience: QuestionAudience;
   /** The server's reading. Null where the record has no level to read it at. */
   tier: QuestionTier | null;
   /** The cheat sheet's section. A project-wide question is answered once on the project, never asked per item. */
@@ -86,11 +95,21 @@ export type SelectableQuestion = {
  */
 export const selectionKey = (recordId: string, requirementId: string) => `${recordId}:${requirementId}`;
 
+/**
+ * Moved to the client by a person on this project ("Ask the client", 0062).
+ * The project's route is the only thing that makes the two audiences differ.
+ */
+export function movedToClient(question: Pick<SelectableQuestion, "audience" | "seedAudience">): boolean {
+  return question.audience === "client" && question.seedAudience !== "client";
+}
+
 /** Asked of this person, still worth asking, and a CLIENT question (0062, decision D). */
 function chaseable(question: SelectableQuestion, contactId: string): boolean {
   if (!contactId) return false;
   if (question.contactId !== contactId) return false;
   if (!isClientQuestion(question)) return false;
+  // A PERSON'S DECISION OUTRANKS THE PROJECT-WIDE DEFAULT (review A3).
+  if (movedToClient(question)) return !question.waiting;
   // ANSWERED ONCE, ON THE PROJECT (Max, 2026-10-12). Preselecting "Is access
   // ok?" on thirty items would ask a designer one question thirty times — and
   // the record's "Chase the n" button, which counts `inChaseAsk`, would land on
@@ -113,7 +132,8 @@ export function defaultSelection(questions: readonly SelectableQuestion[], conta
   const out = new Set<string>();
   for (const question of questions) {
     if (!chaseable(question, contactId)) continue;
-    if (question.tier !== "to_quote") continue;
+    // Moved by a person: ticked at either tier, because they asked for it.
+    if (question.tier !== "to_quote" && !movedToClient(question)) continue;
     out.add(selectionKey(question.recordId, question.requirementId));
   }
   return out;
@@ -164,11 +184,11 @@ export function selectionSummary(questions: readonly SelectableQuestion[], conta
     // The waiting ones fail `chaseable` for that reason alone, so they are
     // counted against the SAME other three tests rather than a looser set.
     if (question.waiting && chaseable({ ...question, waiting: null }, contactId)) {
-      if (question.tier === "to_quote" || question.tier === "later") awaitingReply += 1;
+      if (question.tier === "to_quote" || question.tier === "later" || movedToClient(question)) awaitingReply += 1;
       continue;
     }
     if (!chaseable(question, contactId)) continue;
-    if (question.tier === "to_quote") preselected += 1;
+    if (question.tier === "to_quote" || movedToClient(question)) preselected += 1;
     else if (question.tier === "later") alsoOutstanding += 1;
   }
   return { contactChosen: Boolean(contactId), preselected, alsoOutstanding, awaitingReply };

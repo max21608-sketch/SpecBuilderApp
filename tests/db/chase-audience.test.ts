@@ -298,6 +298,8 @@ describeIfDb("chase audiences (0062)", () => {
     expect((await audience(projectId, recordId)).audience).toBe("cam");
     const moved = await route({ questionKey: "prompt:__qa toe agreement", askClient: true });
     expect(moved.status).toBe(200);
+    // WHERE IT WENT, truly (review A3): the designer whose chase now ticks it.
+    expect(await moved.json()).toMatchObject({ chasedTo: [{ contactName: "__QA Designer", items: 1 }], unassigned: 0 });
     const here = await audience(projectId, recordId);
     expect(here).toMatchObject({ audience: "client", seedAudience: "cam" });
     // Another project asking the same question is untouched.
