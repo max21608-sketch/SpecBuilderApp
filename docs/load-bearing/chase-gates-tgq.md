@@ -723,8 +723,10 @@ type; the traps:
   join decided once per question. `tests/db/project-summary.test.ts` holds it
   equal to `questionTierOrNull` over `tgqMatrixFor` for a typed record.
 - **The type travels with the category and the line.** A category change
-  clears it; a configuration inherits it, as it inherits the level; a version
-  records it and a diff names it "Type".
+  clears it; a configuration inherits it, as it inherits the level, and so
+  does a mock-up copy (`mockup-phase.ts`, which carried the level and dropped
+  the type until review 1 found it); a version records it and a diff names it
+  "Type".
 
 ### A level is guessed at intake, and a guess is not a level
 

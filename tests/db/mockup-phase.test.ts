@@ -126,6 +126,8 @@ describeIfDb("the mock-up phase", () => {
       ["design_code", "DS-08"],
       ["bws_job", "J99001"],
     ]);
+    // A person's accepted TYPE (0061) travels like the level (review 1, finding 4).
+    await client.query(`update spec_records set matrix_type = 'S' where id = $1`, [gr]);
     pl = await line(suites, PL_CODE, 2, { suggested: "complex" });
     other = await line(guestSuites, OTHER_CODE, 4, { level: "simple" });
     configuration = String(
@@ -201,6 +203,8 @@ describeIfDb("the mock-up phase", () => {
     // A decision comes as a decision, a suggestion as a suggestion.
     expect([grCopy.level, grCopy.level_suggested]).toEqual(["simple", null]);
     expect([plCopy.level, plCopy.level_suggested, plCopy.level_suggested_reason]).toEqual([null, "complex", "read off the bill"]);
+    // The accepted type comes with the line: a sofa typed S is not asked Swivel again on the mock-up.
+    expect([grCopy.matrix_type, plCopy.matrix_type]).toEqual(["S", null]);
     // NEVER the quantity, the bill row, or a person's note about the main item.
     expect(grCopy.qty).toBeNull();
     expect(grCopy.source_line_no).toBeNull();

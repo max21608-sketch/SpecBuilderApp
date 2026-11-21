@@ -17,7 +17,9 @@
 //
 // Copied: the description, the category, the level (a decision as a decision,
 // a suggestion as a suggestion -- 0025's rule, the configuration rule again),
-// product reference, designer, area, the bill's category word, and the refs.
+// the accepted matrix type (0061: a person's decision, like the level, and
+// "the type travels with the line" -- review 1, finding 4), product
+// reference, designer, area, the bill's category word, and the refs.
 //
 // NOT copied, each deliberately:
 //
@@ -304,10 +306,10 @@ export async function addToMockupPhase(
     const inserted = await txn`
       insert into spec_records
         (project_id, run_id, record_no, status, category_id, item_description, product_reference,
-         qty, designer, area, boq_category, level, level_suggested, level_suggested_reason,
+         qty, designer, area, boq_category, level, level_suggested, level_suggested_reason, matrix_type,
          internal_notes, mockup_of, created_by, updated_by)
       select project_id, ${runId}, ${nextNo}, 'active', category_id, item_description, product_reference,
-             ${said?.qty ?? null}, designer, area, boq_category, level, level_suggested, level_suggested_reason,
+             ${said?.qty ?? null}, designer, area, boq_category, level, level_suggested, level_suggested_reason, matrix_type,
              ${said?.internalNote ?? null}, id, ${actor}, ${actor}
         from spec_records where id = ${sourceId}
       returning id
