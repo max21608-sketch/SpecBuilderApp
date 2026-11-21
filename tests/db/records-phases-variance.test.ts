@@ -24,7 +24,7 @@
 // in a file every db test imports; they will be replaced by it.
 // ============================================================================
 import { it, expect, beforeAll, afterAll, describe, vi } from "vitest";
-import { describeIfDb, qaNumber } from "./db-tier";
+import { describeIfDb, qaNumber, qaPlaceholderCategory } from "./db-tier";
 import pg from "pg";
 import { loadOutstanding, loadUncategorisedRecords } from "@/lib/chase-drafts";
 import { isScopeFailure, loadExportScope } from "@/lib/export-scope";
@@ -54,6 +54,7 @@ describeIfDb("records and phases, the shapes a real project arrives in", () => {
   let projectId = "";
   let runId = "";
   let categoryId = "";
+  let placeholderCategory: Awaited<ReturnType<typeof qaPlaceholderCategory>> | undefined;
   /** Categorised, levelled, with a client ref: the ordinary case. */
   let ordinaryId = "";
   /** No category at all: no checklist, and therefore no questions. */
@@ -75,12 +76,15 @@ describeIfDb("records and phases, the shapes a real project arrives in", () => {
     // A category that actually asks something. One with no authored
     // requirements would score zero outstanding and prove nothing about a
     // record that scores zero for a different reason.
-    const category = await client.query(
-      `select c.id from item_categories c
-        where exists (select 1 from requirements q where q.category_id = c.id)
-        order by c.sort_order limit 1`,
-    );
-    categoryId = category.rows[0].id;
+    //
+    // ON THE PLACEHOLDER, which the ready-to-quote case below is about: every
+    // own question answered makes the item's TGQ 0. This took the first
+    // seeded sheet by sort order, which was consoles — unmapped until seed
+    // 0014 (2026-11-20) put it on the provisional cabinetry model, where an
+    // item's TGQ is its gate rows and empty dimension slots keep it open. A
+    // `__QA` copy of that sheet's questions, on no gate model.
+    placeholderCategory = await qaPlaceholderCategory(client, "records-variance", "consoles-desks-dressing-tables");
+    categoryId = placeholderCategory.id;
 
     const ordinary = await client.query(
       // `status` defaults to 'draft' and every scope here takes only 'active',
@@ -116,6 +120,7 @@ describeIfDb("records and phases, the shapes a real project arrives in", () => {
     await client.query(`delete from spec_records where project_id = $1`, [projectId]);
     await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
     await client.query(`delete from projects where id = $1`, [projectId]);
+    await placeholderCategory?.drop();
     await client.end();
   });
 
