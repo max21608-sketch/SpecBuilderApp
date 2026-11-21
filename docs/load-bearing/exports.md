@@ -291,10 +291,18 @@ fabric BW supplies. Four things are load-bearing.
   every column, so it treats an undefined `customerSupplied` as "leave it":
   the kinds route, the schedule confirm and an edit that does not mention it
   keep the tick (`tests/db/finish-customer-supplied.test.ts`).
-- **COM only where a spec is LINKED to a ticked finish.** A typed answer has no
-  finish behind it and is FABRIC. The quote route reads the ticked ids and
-  hands them to `composeQuoteSheet`; they are NOT in the record's atoms,
-  because a version is the export's atoms and the export did not move.
+- **COM goes by the fabric's CODE, and BW's own cloth is never COM** (review
+  C5, 2026-11-21; it read "COM only where a spec is LINKED to a ticked
+  finish", and an unlinked `FAB-01` printed FABRIC beside a linked one
+  printing COM). A spec is COM when its linked finish is ticked, or when its
+  own material code — folded by `normaliseFinishCode`, the library's fold and
+  nothing cleverer — is a ticked row's `code_norm`. Where a BW standard is IN
+  FORCE on the value that ships (`standardInForce` + `shippedStandardValue`,
+  the rule the cell itself reads), the line prints BW's fabric and is FABRIC.
+  A typed answer has no code and no finish behind it and is FABRIC. The quote
+  route reads the ticked ids and codes and hands them to `composeQuoteSheet`;
+  they are NOT in the record's atoms, because a version is the export's atoms
+  and the export did not move.
 - **FABRIC and COM are numbered each within its own label**, as his file
   numbers COM: "FABRIC 1", "FABRIC 2", "COM".
 

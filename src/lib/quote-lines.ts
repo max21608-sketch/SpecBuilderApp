@@ -55,6 +55,8 @@ import {
   type ExportScope,
 } from "@/lib/bws-export";
 import type { AttributeUnit, DimensionSlot } from "@/lib/spec-vocab";
+import { shippedStandardValue, standardInForce } from "@/lib/bw-standard";
+import { normaliseFinishCode } from "@/lib/finishes";
 
 /** The column order of Matthew's own file, unchanged. */
 export const QUOTE_HEADER = [
@@ -205,17 +207,39 @@ function dimensionLine(attributes: ExportAttribute[], note: string | null): stri
  */
 /**
  * What the quote calls one fabric (decision F of 2026-11-20). "COM" is the
- * customer's own material; a fabric BW supplies is FABRIC. A fabric is COM only
- * where its spec is LINKED to a library finish ticked customer-supplied
- * (`project_finishes.customer_supplied`, 0062) — a typed answer has no finish
- * behind it and is FABRIC. The tick is read by the quote route and handed in;
- * it is not in the record's atoms, because the BWS file does not change with it.
+ * customer's own material; a fabric BW supplies is FABRIC. The tick is on the
+ * finishes library row (`project_finishes.customer_supplied`, 0062), read by
+ * the quote route and handed in — never put in the record's atoms, because
+ * the BWS file does not change with it.
+ *
+ * BY THE CODE, NOT ONLY BY THE LINK (chase review C5, 2026-11-21). The library
+ * is keyed by the client's code, and a spec carrying that code is the same
+ * fabric whether or not anybody linked it: an unlinked `FAB-01` printed FABRIC
+ * beside a linked one printing COM. So a spec is COM when its linked finish is
+ * ticked, or when its own material code — folded by `normaliseFinishCode`, the
+ * library's own fold — is the code of a ticked row.
+ *
+ * BW'S OWN CLOTH IS NEVER COM. Where a BW standard is IN FORCE on the value
+ * that ships (`standardInForce` + `shippedStandardValue`, the one rule the cell
+ * itself reads), the line prints BW's fabric, and BW supplies it: FABRIC.
+ * A typed answer has no code and no finish behind it, and is FABRIC.
  */
-export type QuoteOptions = { customerSuppliedFinishIds?: ReadonlySet<string> };
+export type QuoteOptions = {
+  customerSuppliedFinishIds?: ReadonlySet<string>;
+  /** The ticked rows' `code_norm`s, so an unlinked spec carrying the code is COM too. */
+  customerSuppliedCodes?: ReadonlySet<string>;
+};
 
 function fabricLabel(attribute: ExportAttribute | undefined, options: QuoteOptions): "FABRIC" | "COM" {
-  const id = attribute?.finish?.id;
-  return id && options.customerSuppliedFinishIds?.has(id) ? "COM" : "FABRIC";
+  if (!attribute) return "FABRIC";
+  if (shippedStandardValue(standardInForce(attribute)) !== null) return "FABRIC";
+  const finish = attribute.finish;
+  if (finish && options.customerSuppliedFinishIds?.has(finish.id)) return "COM";
+  const codes = options.customerSuppliedCodes;
+  if (!codes || codes.size === 0) return "FABRIC";
+  if (finish && codes.has(finish.codeNorm)) return "COM";
+  const own = attribute.materialCode?.trim();
+  return own && codes.has(normaliseFinishCode(own)) ? "COM" : "FABRIC";
 }
 
 export function composeSpecification(

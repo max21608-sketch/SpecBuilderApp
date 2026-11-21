@@ -96,4 +96,31 @@ describeIfDb("a fabric marked as the customer's own material", () => {
     expect(edited.status).toBe(200);
     expect((await read(f.id)).customer_supplied).toBe(true);
   });
+
+  // CHASE REVIEW C5: the quote route hands the ticked rows' CODES to the
+  // composer, so an UNLINKED spec carrying a ticked code prints COM.
+  it("prints COM on the quote for an unlinked spec whose code is ticked, through the real route", async () => {
+    const f = await finish("QA-FAB-C5", "tbc");
+    await client.query(`update project_finishes set customer_supplied = true, updated_by = 'qa' where id = $1`, [f.id]);
+    const run = (
+      await client.query(`insert into spec_runs (project_id, name, sort_order, created_by, updated_by) values ($1, '__QA run', 1, 'qa', 'qa') returning id`, [projectId])
+    ).rows[0].id;
+    const record = (
+      await client.query(
+        `insert into spec_records (project_id, run_id, record_no, status, item_description, created_by, updated_by)
+         values ($1, $2, 1, 'active', '__QA Sofa', 'qa', 'qa') returning id`,
+        [projectId, run],
+      )
+    ).rows[0].id;
+    await client.query(
+      `insert into record_attributes (record_id, attr_group, label, value, material_code, spec_field_id, state, created_by, updated_by)
+       values ($1, 'finish', 'Fabric', '__QA Teddy mohair', 'qa-fab-c5', (select id from spec_fields where json_id = 1), 'confirmed', 'qa', 'qa')`,
+      [record],
+    );
+    const { GET } = await import("@/app/api/projects/[id]/export/quote/route");
+    const res = await GET(new Request(`http://localhost/api/projects/${projectId}/export/quote?format=json`), { params: Promise.resolve({ id: projectId }) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rows: string[][] };
+    expect(body.rows[0]![3]).toMatch(/^COM: __QA Teddy mohair/m);
+  });
 });

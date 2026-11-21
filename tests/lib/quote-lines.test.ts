@@ -220,6 +220,39 @@ describe("the Specification block", () => {
     expect(com).not.toContain("FABRIC");
   });
 
+  // CHASE REVIEW C5, 2026-11-21: COM goes by the fabric's CODE, not only by a
+  // linked spec — an unlinked spec carrying a ticked code printed FABRIC
+  // beside a linked one printing COM. And BW's own cloth is never COM: where a
+  // BW standard is in force on the value that ships, the line is FABRIC.
+  it("prints COM for an UNLINKED spec whose code is a ticked library row, by the library's own fold", () => {
+    const unlinked = attribute({ value: "Teddy mohair", materialCode: " fab-01 " });
+    const spec = composeSpecification(record(), [unlinked], [], { customerSuppliedCodes: new Set(["FAB-01"]) });
+    expect(spec).toMatch(/^COM: Teddy mohair/m);
+    // A code nobody ticked stays FABRIC.
+    expect(composeSpecification(record(), [attribute({ value: "Linen", materialCode: "FAB-02" })], [], { customerSuppliedCodes: new Set(["FAB-01"]) })).toContain(
+      "FABRIC: Linen",
+    );
+  });
+
+  it("prints FABRIC, never COM, where a BW standard is in force on the value that ships", () => {
+    const withStandard = metalFinish({
+      id: "fab-9",
+      kind: "fabric",
+      code: "FAB-09",
+      codeNorm: "FAB-09",
+      standard: { value: "BW House Linen", optionId: null, state: "agreed" },
+    });
+    const linked = composeSpecification(record(), [attribute({ value: "Mohair", materialCode: "FAB-09", finish: withStandard })], [], {
+      customerSuppliedFinishIds: new Set(["fab-9"]),
+      customerSuppliedCodes: new Set(["FAB-09"]),
+    });
+    expect(linked).toContain("FABRIC: BW House Linen");
+    expect(linked).not.toMatch(/^COM/m);
+    // Unlinked, its own standard (0041) in force: the same.
+    const own = attribute({ value: "Mohair", materialCode: "FAB-09", standard: { value: "BW House Linen", optionId: null, state: "proposed" } });
+    expect(composeSpecification(record(), [own], [], { customerSuppliedCodes: new Set(["FAB-09"]) })).not.toMatch(/^COM/m);
+  });
+
   it("numbers FABRIC and COM each within its own label", () => {
     const linked = (id: string) => metalFinish({ id, kind: "fabric", code: id.toUpperCase(), codeNorm: id.toUpperCase(), description: `${id} cloth` });
     const spec = composeSpecification(

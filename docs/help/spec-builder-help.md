@@ -372,9 +372,10 @@ when nothing is left, it says so and offers "Back to the pack".
   kind's questions, as before.
 - **Fabric 1, 2, 3.** The screens call BWS's "COM 1/2/3" fields "Fabric 1/2/3",
   with "BWS: COM 1" in small type beside them. The BWS file still says COM 1.
-  On the quote a fabric reads "FABRIC:", unless its finish in the library is
+  On the quote a fabric reads "FABRIC:", unless its code in the library is
   ticked **"Customer’s own material"** (Finishes → Edit, with a reason like any
-  edit), when it reads "COM:".
+  edit), when it reads "COM:" — on every item carrying that code, linked or
+  not. A fabric where BW's own standard is in force always reads "FABRIC:".
 - "Provisional cabinetry gate model, drafted by AI on 20 Nov 2026, not yet
   confirmed by Matthew" beside a gate view or a TGQ figure means those gate
   rules are a draft. Use them; Matthew may still change them.
