@@ -406,6 +406,33 @@ function InfillView() {
     [lineOf, enqueue],
   );
 
+  /**
+   * "Ask the client" for one question on this project, or put it back (0062,
+   * decision D). The route moves it on every item that asks it and writes no
+   * answer; the row re-reads its line, because who may be asked has changed.
+   */
+  const routeQuestion = useCallback(
+    async (question: InfillQuestion, askClient: boolean): Promise<SaveOutcome> => {
+      const res = await enqueue(() =>
+        apiFetch(`/api/projects/${encodeURIComponent(projectId)}/question-routes`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ questionKey: question.questionKey, askClient }),
+        }),
+      );
+      if (!res.ok) {
+        return { ok: false, error: res.error, code: typeof res.data?.code === "string" ? res.data.code : null };
+      }
+      return {
+        ok: true,
+        message: askClient
+          ? "Moved to the chase: on this project it is asked of the client."
+          : "Put back: on this project it is ours to answer again.",
+      };
+    },
+    [projectId, enqueue],
+  );
+
   // ---- which palette a question offers, exactly as the record screen decides
   const palettesByKey = useMemo(() => {
     const out = new Map<string, Palette>();
@@ -559,6 +586,7 @@ function InfillView() {
             onSaveAnswer={saveAnswer}
             onSaveDimension={saveDimension}
             onApply={applyToRows}
+            onRoute={routeQuestion}
           />
         ) : (
         <InfillTable
@@ -574,6 +602,7 @@ function InfillView() {
           paletteFor={paletteFor}
           onSaveAnswer={saveAnswer}
           onSaveDimension={saveDimension}
+          onRoute={routeQuestion}
           answered={answered}
         />
         )}

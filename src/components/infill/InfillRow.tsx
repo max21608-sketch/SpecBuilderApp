@@ -35,7 +35,7 @@
 // path resets `busy` in a `finally`, so an HTML error page cannot leave a box
 // disabled with nothing said.
 // ============================================================================
-import { inItemTgq, isProjectWideQuestion } from "@/lib/chase-grouping";
+import { inItemTgq, isClientQuestion, isProjectWideQuestion } from "@/lib/chase-grouping";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import { useState } from "react";
 import Link from "next/link";
@@ -51,6 +51,7 @@ import { rowKind, type InfillDimension, type InfillQuestion } from "@/lib/infill
 import type { Palette } from "@/lib/palettes";
 import {
   ANSWER_STATE_LABELS,
+  QUESTION_AUDIENCE_LABELS,
   type AnswerState,
   type AttributeUnit,
   type DimensionSlot,
@@ -64,6 +65,12 @@ export type SaveAnswer = (
   question: InfillQuestion,
   input: { value: string | null; state: AnswerState; reason: string | null },
 ) => Promise<SaveOutcome>;
+
+/**
+ * "Ask the client" (`true`) or put it back (`false`), for this question on this
+ * project (0062, decision D). The caller posts to the question-routes route.
+ */
+export type RouteQuestion = (question: InfillQuestion, askClient: boolean) => Promise<SaveOutcome>;
 
 export type SaveDimension = (
   question: InfillQuestion,
@@ -107,6 +114,7 @@ export default function InfillRow({
   onSaveAnswer,
   onSaveDimension,
   onReload,
+  onRoute,
 }: {
   question: InfillQuestion;
   /** Null where the question offers none, or where BWS owns the list. */
@@ -133,6 +141,8 @@ export default function InfillRow({
   onSaveDimension: SaveDimension;
   /** Re-read THIS line's questions. Called after a refusal, never after a save. */
   onReload: () => Promise<void>;
+  /** Move the question to the client for this project, or back. Absent offers no control. */
+  onRoute?: RouteQuestion;
 }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
@@ -175,6 +185,17 @@ export default function InfillRow({
     }
   }
 
+  // WHO ANSWERS IT (0062). A CAM or in-house question is ours; a CAM who does
+  // not know it sends it to the chase for THIS project, and the line is
+  // re-read, because which questions a designer may be asked has changed.
+  const ours = !isClientQuestion(question);
+  const moved = question.audience === "client" && question.seedAudience !== "client";
+  async function route(askClient: boolean) {
+    if (!onRoute) return;
+    const outcome = await run(() => onRoute(question, askClient));
+    if (outcome.ok) await onReload();
+  }
+
   async function commit(value: string | null, state: AnswerState, withReason: string | null = null) {
     const outcome = await run(() => onSaveAnswer(question, { value, state, reason: withReason }));
     if (!outcome.ok && outcome.code === "reason_required") setPendingReason({ value, state });
@@ -212,12 +233,12 @@ export default function InfillRow({
                 ? TIER_LABELS.to_quote
                 : projectWide
                   ? "Project-wide — answered once on the project"
-                  : question.requirementKind === "readiness"
-                    ? "Readiness — internal and commercial"
+                  : ours
+                    ? `${QUESTION_AUDIENCE_LABELS[question.audience]} — ours to answer, never sent to a designer`
                     : TIER_LABELS.later
             }
             className={`mt-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${
-              toQuote ? TONE.danger.dot : question.requirementKind === "readiness" ? TONE.warn.dot : "bg-neutral-300"
+              toQuote ? TONE.danger.dot : ours ? TONE.warn.dot : "bg-neutral-300"
             }`}
           />
         </td>
@@ -263,6 +284,32 @@ export default function InfillRow({
           )}
           {question.finishNote && (
             <span className="block text-[11px] text-neutral-600">In the library: {question.finishNote}</span>
+          )}
+          {ours && (
+            <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-neutral-600">
+              <Chip tone="plain">{QUESTION_AUDIENCE_LABELS[question.audience]}</Chip>
+              {onRoute && (
+                <Button
+                  size="xs"
+                  variant="quiet"
+                  disabled={busy}
+                  title="Nobody here knows it: put it in the chase to the client, on this project only"
+                  onClick={() => void route(true)}
+                >
+                  Ask the client
+                </Button>
+              )}
+            </span>
+          )}
+          {moved && (
+            <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-blue-700">
+              Asked of the client on this project (normally {QUESTION_AUDIENCE_LABELS[question.seedAudience]})
+              {onRoute && (
+                <Button size="xs" variant="quiet" disabled={busy} onClick={() => void route(false)}>
+                  Put it back
+                </Button>
+              )}
+            </span>
           )}
           {question.waiting && (
             <span className="block text-[11px] text-blue-700">

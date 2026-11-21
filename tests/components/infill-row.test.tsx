@@ -36,6 +36,9 @@ function question(over: Partial<InfillQuestion> = {}): InfillQuestion {
     finishNote: null,
     dimensions: null,
     composed: null,
+    audience: "client",
+    seedAudience: "client",
+    questionKey: "field:1",
     ...over,
   };
 }
@@ -65,8 +68,10 @@ function renderRow(
     onSaveAnswer?: (...args: never[]) => Promise<SaveOutcome>;
     onSaveDimension?: (...args: never[]) => Promise<SaveOutcome>;
     onReload?: () => Promise<void>;
+    onRoute?: (...args: never[]) => Promise<SaveOutcome>;
   } = {},
 ) {
+  const route = handlers.onRoute ?? vi.fn().mockResolvedValue(OK);
   const saveAnswer = handlers.onSaveAnswer ?? vi.fn().mockResolvedValue(OK);
   const saveDimension = handlers.onSaveDimension ?? vi.fn().mockResolvedValue(OK);
   const reload = handlers.onReload ?? vi.fn().mockResolvedValue(undefined);
@@ -81,11 +86,12 @@ function renderRow(
           onSaveAnswer={saveAnswer as never}
           onSaveDimension={saveDimension as never}
           onReload={reload}
+          onRoute={route as never}
         />
       </tbody>
     </table>,
   );
-  return { saveAnswer, saveDimension, reload };
+  return { saveAnswer, saveDimension, reload, route };
 }
 
 describe("InfillRow", () => {
@@ -258,5 +264,31 @@ describe("InfillRow", () => {
     // A value is never filled in from a sister item: there is no control here
     // that would do it, and the box is still empty.
     expect(screen.getByPlaceholderText("Value")).toHaveValue("");
+  });
+});
+
+// 0062, decision D: a CAM who does not know an answer sends it to the chase.
+describe("InfillRow — who answers it", () => {
+  it("names a CAM question and offers to ask the client, which moves it and re-reads the line", async () => {
+    const user = userEvent.setup();
+    const { route, reload } = renderRow({ audience: "cam", seedAudience: "cam", prompt: "TOE agreement", questionKey: "q:toe" });
+    expect(screen.getByText("CAM")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Ask the client" }));
+    expect(route).toHaveBeenCalledWith(expect.objectContaining({ questionKey: "q:toe" }), true);
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it("says a moved question is asked of the client on this project, and can put it back", async () => {
+    const user = userEvent.setup();
+    const { route } = renderRow({ audience: "client", seedAudience: "in_house", questionKey: "field:191" });
+    expect(screen.getByText(/Asked of the client on this project/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Put it back" }));
+    expect(route).toHaveBeenCalledWith(expect.objectContaining({ questionKey: "field:191" }), false);
+  });
+
+  it("offers neither on a client question", () => {
+    renderRow();
+    expect(screen.queryByRole("button", { name: "Ask the client" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Put it back" })).not.toBeInTheDocument();
   });
 });

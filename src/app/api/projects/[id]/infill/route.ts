@@ -47,7 +47,7 @@ import {
   type InfillQuestion,
   type InfillSister,
 } from "@/lib/infill";
-import { groupByQuestion } from "@/lib/chase-grouping";
+import { groupByQuestion, questionAudience, questionGroupKey } from "@/lib/chase-grouping";
 import { loadMatrixItemTgq, type MatrixItemTgq } from "@/lib/item-tgq-load";
 import { numberingFromRow, recordLabel, recordShortLabel } from "@/lib/record-label";
 import { areaOptions } from "@/lib/area-filter";
@@ -132,6 +132,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     // The areas it is outstanding in, so the filter can narrow a heading
     // without opening it.
     areas: [...new Set(group.rows.map((row) => row.area?.trim() || null))],
+    // And who answers it (0062), for the audience filter, likewise.
+    audiences: [...new Set(group.rows.map((row) => questionAudience(row)))],
   }));
 
   // The facets. Phases and areas come off the questions rather than off their
@@ -265,6 +267,9 @@ function toRow(
     // Dimensions ANSWER already holds, which is the projection the export
     // ships. Recomposing it in a route would be a second composer.
     composed: question.jsonId === 3 ? question.currentValue : null,
+    audience: question.audience,
+    seedAudience: question.seedAudience,
+    questionKey: questionGroupKey(question),
   };
 }
 

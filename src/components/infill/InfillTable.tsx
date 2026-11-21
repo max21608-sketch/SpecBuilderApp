@@ -54,10 +54,10 @@ import { letterColour } from "@/components/records/letter-colours";
 import AreaSelect from "@/components/ui/AreaSelect";
 import { areaOptions, matchesArea } from "@/lib/area-filter";
 import { finishOptionQtyLabel } from "@/lib/chase-grouping";
-import InfillRow, { type SaveAnswer, type SaveDimension } from "@/components/infill/InfillRow";
+import InfillRow, { type RouteQuestion, type SaveAnswer, type SaveDimension } from "@/components/infill/InfillRow";
 import type { InfillLineSummary, InfillQuestion } from "@/lib/infill";
 import type { Palette } from "@/lib/palettes";
-import { ITEM_LEVEL_LABELS, type ItemLevel } from "@/lib/spec-vocab";
+import { ITEM_LEVEL_LABELS, QUESTION_AUDIENCES, QUESTION_AUDIENCE_LABELS, type ItemLevel, type QuestionAudience } from "@/lib/spec-vocab";
 import { TIER_LABELS, type QuestionTier } from "@/lib/tgq";
 
 /** The columns, once, so a spanning row cannot drift out of step with the head. */
@@ -70,9 +70,16 @@ export type Filters = {
   area: string;
   tier: "all" | QuestionTier;
   state: "" | "missing" | "tbc";
+  /**
+   * WHO ANSWERS IT (0062): the CAM's view is "cam". It narrows what is LISTED
+   * — the lines by their `audiences`, an open line by each question's own —
+   * and never a count, the chase screen's filter rule. Optional so a caller
+   * holding the old shape still reads "everyone's".
+   */
+  audience?: "" | QuestionAudience;
 };
 
-export const NO_FILTERS: Filters = { text: "", runId: "", area: "", tier: "all", state: "" };
+export const NO_FILTERS: Filters = { text: "", runId: "", area: "", tier: "all", state: "", audience: "" };
 
 export default function InfillTable({
   lines,
@@ -87,6 +94,7 @@ export default function InfillTable({
   paletteFor,
   onSaveAnswer,
   onSaveDimension,
+  onRoute,
   answered,
 }: {
   lines: InfillLineSummary[];
@@ -102,13 +110,16 @@ export default function InfillTable({
   paletteFor: (question: InfillQuestion) => Palette | null;
   onSaveAnswer: SaveAnswer;
   onSaveDimension: SaveDimension;
+  /** "Ask the client" for one question on this project, and back. Absent offers no control. */
+  onRoute?: RouteQuestion;
   /** How many gaps have been filled on each line in this sitting. */
   answered: Record<string, number>;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
 
   const text = filters.text.trim().toLowerCase();
-  const narrowed = Boolean(text) || filters.tier !== "all" || filters.state !== "" || filters.area !== "";
+  const audience = filters.audience ?? "";
+  const narrowed = Boolean(text) || filters.tier !== "all" || filters.state !== "" || filters.area !== "" || audience !== "";
 
   // A CLIENT WALKS A BUILDING ROOM BY ROOM. The options come off the lines
   // actually loaded, so an area with nothing outstanding cannot appear in a
@@ -130,6 +141,7 @@ export default function InfillTable({
       if (filters.tier === "later" && line.counts.later === 0) return false;
       if (filters.state === "missing" && line.states.missing === 0) return false;
       if (filters.state === "tbc" && line.states.tbc === 0) return false;
+      if (audience && line.audiences && (line.audiences[audience] ?? 0) === 0) return false;
       if (
         text &&
         !`${line.code} ${line.itemDescription} ${line.recordLabel} ${line.area ?? ""}`.toLowerCase().includes(text)
@@ -163,6 +175,7 @@ export default function InfillTable({
     return questions.filter((question) => {
       if (filters.tier !== "all" && question.tier !== filters.tier) return false;
       if (filters.state && question.state !== filters.state) return false;
+      if (audience && question.audience !== audience) return false;
       if (text && !lineMatched && !`${question.prompt} ${question.fieldLabel ?? ""} ${fieldDisplayName(question.fieldLabel) ?? ""}`.toLowerCase().includes(text)) {
         return false;
       }
@@ -216,6 +229,19 @@ export default function InfillTable({
           <option value="">Missing and TBC</option>
           <option value="missing">Missing only</option>
           <option value="tbc">TBC only</option>
+        </select>
+        <select
+          value={audience}
+          onChange={(event) => onFilters({ ...filters, audience: event.target.value as Filters["audience"] })}
+          aria-label="Filter by who answers"
+          className="rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm"
+        >
+          <option value="">Everyone&apos;s questions</option>
+          {QUESTION_AUDIENCES.map((value) => (
+            <option key={value} value={value}>
+              {QUESTION_AUDIENCE_LABELS[value]} only
+            </option>
+          ))}
         </select>
         {narrowed && (
           <Button size="xs" variant="quiet" onClick={() => onFilters({ ...NO_FILTERS, runId: filters.runId })}>
@@ -279,6 +305,7 @@ export default function InfillTable({
                   paletteFor={paletteFor}
                   onSaveAnswer={onSaveAnswer}
                   onSaveDimension={onSaveDimension}
+                  onRoute={onRoute}
                 />
               );
             })}
@@ -303,6 +330,7 @@ function LineRows({
   paletteFor,
   onSaveAnswer,
   onSaveDimension,
+  onRoute,
 }: {
   line: InfillLineSummary;
   open: boolean;
@@ -317,6 +345,7 @@ function LineRows({
   paletteFor: (question: InfillQuestion) => Palette | null;
   onSaveAnswer: SaveAnswer;
   onSaveDimension: SaveDimension;
+  onRoute?: RouteQuestion;
 }) {
   const optionsWithNothing =
     line.optionCount -
@@ -436,6 +465,7 @@ function LineRows({
             onSaveAnswer={onSaveAnswer}
             onSaveDimension={onSaveDimension}
             onReload={onReload}
+            onRoute={onRoute}
           />
         ))}
 
@@ -483,6 +513,7 @@ function LineRows({
                 onSaveAnswer={onSaveAnswer}
                 onSaveDimension={onSaveDimension}
                 onReload={onReload}
+                onRoute={onRoute}
               />
             ))}
           </FragmentRows>

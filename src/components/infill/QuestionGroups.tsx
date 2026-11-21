@@ -61,7 +61,8 @@ import Chip from "@/components/ui/Chip";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import AreaSelect from "@/components/ui/AreaSelect";
 import AnswerValue from "@/components/records/AnswerValue";
-import InfillRow, { type SaveAnswer, type SaveDimension } from "@/components/infill/InfillRow";
+import InfillRow, { type RouteQuestion, type SaveAnswer, type SaveDimension } from "@/components/infill/InfillRow";
+import { QUESTION_AUDIENCES, QUESTION_AUDIENCE_LABELS, type QuestionAudience } from "@/lib/spec-vocab";
 import type { Filters } from "@/components/infill/InfillTable";
 import { NO_FILTERS } from "@/components/infill/InfillTable";
 import { matchesArea, type AreaOption } from "@/lib/area-filter";
@@ -83,6 +84,8 @@ export type QuestionSummary = {
   records: number;
   /** The areas it is outstanding in. Null is "no area given". */
   areas: (string | null)[];
+  /** Who answers it (0062). Optional: absent reads as every audience. */
+  audiences?: QuestionAudience[];
 };
 
 /** What one press of the bar came back with. */
@@ -114,6 +117,7 @@ export default function QuestionGroups({
   onSaveAnswer,
   onSaveDimension,
   onApply,
+  onRoute,
 }: {
   questions: QuestionSummary[];
   /** Counted in ROWS by the server: how many items sit in each area. */
@@ -136,6 +140,8 @@ export default function QuestionGroups({
    * how many cells a row has.
    */
   onApply: ApplyToRows;
+  /** "Ask the client" for one question on this project (0062). */
+  onRoute?: RouteQuestion;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   /** Per heading, the rows a person has ticked. Never a global selection. */
@@ -152,6 +158,7 @@ export default function QuestionGroups({
         // AREA. The rows inside are filtered too, so a heading that passes and
         // then shows nothing cannot happen.
         if (filters.area && !group.areas.some((area) => matchesArea({ area }, filters.area))) return false;
+        if (filters.audience && group.audiences && !group.audiences.includes(filters.audience)) return false;
         if (text && !`${group.heading} ${group.fieldLabel ?? ""}`.toLowerCase().includes(text)) return false;
         return true;
       }),
@@ -181,6 +188,7 @@ export default function QuestionGroups({
       if (filters.tier !== "all" && row.tier !== filters.tier) return false;
       if (filters.state && row.state !== filters.state) return false;
       if (!matchesArea(row, filters.area)) return false;
+      if (filters.audience && row.audience !== filters.audience) return false;
       return true;
     });
   }
@@ -217,7 +225,20 @@ export default function QuestionGroups({
           <option value="missing">Missing only</option>
           <option value="tbc">TBC only</option>
         </select>
-        {(text || filters.area || filters.tier !== "all" || filters.state) && (
+        <select
+          value={filters.audience ?? ""}
+          onChange={(event) => onFilters({ ...filters, audience: event.target.value as Filters["audience"] })}
+          aria-label="Filter by who answers"
+          className="rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm"
+        >
+          <option value="">Everyone&apos;s questions</option>
+          {QUESTION_AUDIENCES.map((value) => (
+            <option key={value} value={value}>
+              {QUESTION_AUDIENCE_LABELS[value]} only
+            </option>
+          ))}
+        </select>
+        {(text || filters.area || filters.tier !== "all" || filters.state || filters.audience) && (
           <Button size="xs" variant="quiet" onClick={() => onFilters(NO_FILTERS)}>
             Clear filters
           </Button>
@@ -289,6 +310,7 @@ export default function QuestionGroups({
                   onSaveAnswer={onSaveAnswer}
                   onSaveDimension={onSaveDimension}
                   onApply={onApply}
+                  onRoute={onRoute}
                 />
               );
             })}
@@ -325,6 +347,7 @@ function GroupRows({
   onSaveAnswer,
   onSaveDimension,
   onApply,
+  onRoute,
 }: {
   group: QuestionSummary;
   open: boolean;
@@ -341,6 +364,7 @@ function GroupRows({
   onSaveAnswer: SaveAnswer;
   onSaveDimension: SaveDimension;
   onApply: ApplyToRows;
+  onRoute?: RouteQuestion;
 }) {
   // THE WHOLE HEADING IS ONE BWS FIELD, so one row decides whether it is a
   // dimension — and a heading with nothing loaded yet offers no bar at all.
@@ -446,6 +470,7 @@ function GroupRows({
               onSaveAnswer={onSaveAnswer}
               onSaveDimension={onSaveDimension}
               onReload={onReload}
+              onRoute={onRoute}
             />
           );
         })}

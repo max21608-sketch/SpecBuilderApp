@@ -50,6 +50,9 @@ function row(over: Partial<InfillQuestion> = {}): InfillQuestion {
     finishNote: null,
     dimensions: [],
     composed: null,
+    audience: "client",
+    seedAudience: "client",
+    questionKey: "field:3",
     ...over,
   };
 }

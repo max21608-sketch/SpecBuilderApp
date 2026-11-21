@@ -37,11 +37,13 @@ import {
   groupIntoLines,
   inItemTgq,
   projectWideTgqKeys,
+  questionAudience,
   type GroupableQuestion,
 } from "@/lib/chase-grouping";
 import { DIMENSIONS_JSON_ID } from "@/lib/promote-answers";
 import type { ItemTgqRow } from "@/lib/item-tgq";
 import { isOfferable, type Palette } from "@/lib/palettes";
+import type { QuestionAudience } from "@/lib/spec-vocab";
 
 /** `countOutstanding`'s own shape: the item TGQ, the project-wide TGQ apart from it, the rest. */
 export type InfillCounts = { toQuote: number; projectWide?: number; later: number; waiting: number };
@@ -95,6 +97,13 @@ export type InfillLineSummary = {
   counts: InfillCounts;
   states: InfillStates;
   /**
+   * How many of the line's outstanding questions each audience answers
+   * (0062). Beside the counts, like `states`, so the audience filter can
+   * narrow the LIST before a line is opened and never rewrite a count.
+   * Optional so a payload written before it reads as "every audience".
+   */
+  audiences?: Partial<Record<QuestionAudience, number>>;
+  /**
    * The TGQ rows on this line that are NOT checklist questions (`itemTgq` on
    * Matthew's matrix): a dimension slot, a record column. Counted in
    * `counts.toQuote`, and listed when the line opens as "record it on the
@@ -128,6 +137,18 @@ export type RecordItemTgq = { count: number | null; projectWide: number; rows: r
  * list with different controls on it, and the day they group differently is
  * the day one of them is lying about what is left.
  */
+/** How many questions each audience answers. */
+export function countAudiences(
+  questions: readonly { audience?: QuestionAudience | null; requirementKind: "spec_field" | "readiness" }[],
+): Partial<Record<QuestionAudience, number>> {
+  const counts: Partial<Record<QuestionAudience, number>> = {};
+  for (const question of questions) {
+    const audience = questionAudience(question);
+    counts[audience] = (counts[audience] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export function summariseLines<Q extends GroupableQuestion & { area?: string | null; state: string }>(
   questions: readonly Q[],
   /** `itemTgq` for the records on Matthew's matrix. Absent: every record counts by its questions. */
@@ -167,6 +188,7 @@ export function summariseLines<Q extends GroupableQuestion & { area?: string | n
       area: everything.find((question) => question.area?.trim())?.area?.trim() ?? null,
       counts: countWithItemTgq(everything, tgqByRecord, line.lineId),
       states: countStates(everything),
+      audiences: countAudiences(everything),
       itemRows,
       optionCount: line.optionCount,
       options: line.options.map((option) => ({
@@ -343,6 +365,13 @@ export type InfillQuestion = {
   /** Dimension rows only: what the record already measures, and the cell. */
   dimensions: InfillDimension[] | null;
   composed: string | null;
+  // ---- who answers it (0062) ------------------------------------------------
+  /** On this project: the project's route where there is one, else the seed's. */
+  audience: QuestionAudience;
+  /** The seed's, so a moved question can say so and be put back. */
+  seedAudience: QuestionAudience;
+  /** `questionGroupKey`: what "Ask the client" moves, on every sheet that asks it. */
+  questionKey: string;
 };
 
 /**

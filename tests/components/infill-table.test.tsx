@@ -54,6 +54,9 @@ function question(over: Partial<InfillQuestion> = {}): InfillQuestion {
     finishNote: null,
     dimensions: null,
     composed: null,
+    audience: "client",
+    seedAudience: "client",
+    questionKey: "field:1",
     ...over,
   };
 }
@@ -146,6 +149,32 @@ describe("InfillTable", () => {
     await user.selectOptions(screen.getByLabelText("Filter by what blocks a quote"), "to_quote");
     expect(screen.queryByRole("link", { name: "S-301" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "S-100" })).toBeInTheDocument();
+  });
+
+  it("AN AUDIENCE FILTER NARROWS WHAT IS LISTED AND CHANGES NO COUNT (0062)", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        lines={[
+          line({ audiences: { client: 3, cam: 2 } }),
+          line({ lineId: "line-2", code: "S-100", recordLabel: "AP364c-012", audiences: { client: 4 } }),
+        ]}
+        questionsByLine={{
+          "line-1": [
+            question({ requirementId: "req-c", prompt: "Main fabric" }),
+            question({ requirementId: "req-cam", prompt: "TOE agreement", audience: "cam", seedAudience: "cam" }),
+          ],
+        }}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("Filter by who answers"), "cam");
+    expect(screen.queryByRole("link", { name: "S-100" })).not.toBeInTheDocument();
+    const row = screen.getByRole("link", { name: "S-301" }).closest("tr")!;
+    expect(within(row).getByText("4")).toBeInTheDocument();
+    expect(within(row).getByText("9")).toBeInTheDocument();
+    await user.click(screen.getByText("Desk chair"));
+    expect(screen.getByText("TOE agreement")).toBeInTheDocument();
+    expect(screen.queryByText("Main fabric")).not.toBeInTheDocument();
   });
 
   it("narrows by state using the line's own state counts, before anything is opened", async () => {
