@@ -107,6 +107,13 @@ export type PartRow = {
   errorDetail: string | null;
   /** The read this part went into, once a press has sent it; null before. */
   read: PartReadState | null;
+  /**
+   * A HELD part's suggested reader, OFFERED BESIDE ITS EMPTY BOX and never in
+   * it — the held file's rule (`IntakeBatchUpload.tsx`, `heldSuggestion`):
+   * in the box, choosing the option it already showed fired no change event
+   * (prod-ready F6), and the box read as answered when nothing was.
+   */
+  offered: string;
 };
 
 /** The kind the press reads a part as, or "" while a person has still to say. */

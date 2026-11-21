@@ -295,7 +295,7 @@ const answered = (item: Queued) => (item.parts ? !readsOf(partKinds(item.parts))
 
 /** One part of the look's answer as the row holds it. */
 function partRowOf(part: ClassifiedPart): PartRow {
-  const base = { place: part.place, choice: "", held: part.held, error: part.unsupported, errorDetail: part.unsupportedDetail, read: null };
+  const base = { place: part.place, choice: "", held: part.held, error: part.unsupported, errorDetail: part.unsupportedDetail, read: null, offered: "" };
   // A COVER OR AN INDEX STARTS AT "DON'T READ THIS PART", and it is the
   // look's reading, shown and one change away like any other.
   if (part.nothingToRead) {
@@ -303,8 +303,8 @@ function partRowOf(part: ClassifiedPart): PartRow {
   }
   const read = choiceFor(part.decision);
   if (read) return { ...base, suggested: read, settled: true, evidence: withPdfBill(part.evidence, part.decision ? part.pdfBill : null) ?? "" };
-  // HELD, WITH OR WITHOUT A SUGGESTION: shown, offered, and filed by nobody.
-  return { ...base, suggested: choiceFor(part.suggestion), settled: false, evidence: part.evidence };
+  // HELD, WITH OR WITHOUT A SUGGESTION: offered beside an empty box, filed by nobody.
+  return { ...base, suggested: "", settled: false, offered: choiceFor(part.suggestion), evidence: part.evidence };
 }
 
 /**
@@ -630,7 +630,7 @@ export default function IntakeBatchUpload({
           // as a whole file's box does (C1), with the reason on them. Nothing
           // was registered for them, so they are free to be answered again.
           heldAgain = true;
-          onParts(read.partIndexes, (row) => ({ ...row, choice: "", suggested: "", settled: false, error: res.error, errorDetail: detail, read: null }));
+          onParts(read.partIndexes, (row) => ({ ...row, choice: "", suggested: "", settled: false, offered: "", error: res.error, errorDetail: detail, read: null }));
         } else {
           const answered = serverAnswered(res);
           onParts(read.partIndexes, (row) => ({
@@ -1034,7 +1034,12 @@ export default function IntakeBatchUpload({
   // file whose bill part came back held after its drawings registered has
   // been identified and read in part. It is counted, and said, apart.
   const heldPartly = held.filter((item) => item.parts?.some((part) => part.read?.registered));
-  const heldUnread = held.filter((item) => !heldPartly.includes(item));
+  // NOR IS A FILE WHOSE SURVEY CAME BACK IN PARTS, one of which needs a
+  // person (the walk, 2026-11-21): it was identified, part by part. It has its
+  // own count and its own sentence; "could not be identified" is kept for a
+  // file that genuinely came back unidentified.
+  const heldForPart = held.filter((item) => item.parts && !heldPartly.includes(item));
+  const heldUnread = held.filter((item) => !item.parts);
   const heldSent = heldUnread.filter((item) => item.sentToModel).length;
 
   // A PART IN A READ IS NEVER RE-ANSWERED: the box is disabled, and this
@@ -1418,6 +1423,13 @@ export default function IntakeBatchUpload({
                 nothing was charged for {heldUnread.length - heldSent === 1 ? "it" : "those"}.
               </>
             )}
+          </p>
+        )}
+        {heldForPart.length > 0 && (
+          <p className="text-xs text-amber-700">
+            {heldForPart.length === 1 ? "One file has a part that needs you" : `${heldForPart.length} files have a part that needs you`} —
+            say what it is and press again. Nothing has been read for {heldForPart.length === 1 ? "it" : "them"} yet;{" "}
+            {heldForPart.length === 1 ? "it was" : "each was"} sent to the model once to be identified.
           </p>
         )}
         {heldPartly.length > 0 && (

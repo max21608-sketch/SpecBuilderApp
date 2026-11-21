@@ -370,3 +370,53 @@ describe("a held file's suggestion sits beside an empty box (fix 4, 2026-11-21)"
     expect(screen.getByRole("button", { name: /Read the 0 you have named/ })).toBeDisabled();
   });
 });
+
+describe("the walk's upload screen, 2026-11-21", () => {
+  it("offers a HELD part's suggestion beside an empty box, and the box itself can record it", async () => {
+    looks["QA Bill.xlsx"] = {
+      parts: [
+        { ...part(1, 1, BILL), place: { kind: "sheet", sheet: "MAIN RUN" } },
+        {
+          ...part(1, 1, null, {
+            genre: "ffe_schedule",
+            held: "Could be the bill or an FF&E schedule. If it is the bill, accept Bill of quantities; if not, choose what it is.",
+            suggestion: BILL,
+            evidence: "Reads as a bill: 14 lines; code and quantity columns found.",
+          }),
+          place: { kind: "sheet", sheet: "MAIN RUN - VE" },
+        },
+      ],
+      charged: true,
+    };
+    mount("QA Bill.xlsx");
+    await press();
+    const held = (await screen.findByRole("combobox", { name: "Kind of QA Bill.xlsx, sheet “MAIN RUN - VE”" })) as HTMLSelectElement;
+    expect(held.value).toBe("");
+    expect((held.selectedOptions[0]?.textContent ?? "").trim()).toBe("What is this part?");
+    // An unheld part with a certain reading keeps its filled box.
+    expect((screen.getByRole("combobox", { name: "Kind of QA Bill.xlsx, sheet “MAIN RUN”" }) as HTMLSelectElement).value).toBe("boq");
+    const row = held.closest("li") as HTMLElement;
+    expect(within(row).getByRole("button", { name: /Bill of quantities/ })).toBeTruthy();
+    expect(registered()).toEqual([]);
+
+    await userEvent.selectOptions(held, "boq");
+    await press(/Read the 1 you have named/);
+    await waitFor(() => expect(registered()).toHaveLength(1));
+    expect(registered()[0]).toMatchObject({ importType: "boq" });
+    expect(registered()[0]).not.toHaveProperty("part");
+  });
+
+  it("says a file held for a part has a part that needs you, not that it could not be identified", async () => {
+    looks["QA A.pdf"] = { parts: [part(1, 3, DRAWINGS), part(4, 9, null, { genre: "unclear" })], charged: true };
+    looks["QA B.pdf"] = { parts: [part(1, 3, DRAWINGS), part(4, 9, null, { genre: "unclear" })], charged: true };
+    looks["QA C.pdf"] = { decision: null, evidence: "", charged: true };
+    mount("QA A.pdf", "QA B.pdf", "QA C.pdf");
+    await press();
+    expect(
+      await screen.findByText(
+        /2 files have a part that needs you — say what it is and press again\. Nothing has been read for them yet; each was sent to the model once to be identified\./,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/One file could not be identified/)).toBeTruthy();
+  });
+});

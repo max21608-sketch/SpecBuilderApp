@@ -363,6 +363,25 @@ describe("one reader for the whole file is one whole-file read", () => {
   });
 });
 
+describe("the note a row shows is the model's own", () => {
+  it("leaves code's merge and coverage lines out of the answer's note (the walk, 2026-11-21)", async () => {
+    stored.bytes = buildPdfOfPages(8);
+    create.mockImplementation(
+      surveyAnswer(
+        [
+          { firstPage: 1, lastPage: 2, genre: "shop_drawings", evidence: "a", certain: true },
+          { firstPage: 3, lastPage: 4, genre: "shop_drawings", evidence: "b", certain: true },
+          { firstPage: 5, lastPage: 6, genre: "preamble", evidence: "c", certain: true },
+        ],
+        "Drawings, then the conditions.",
+      ),
+    );
+    const { body } = await classify("QA Pack.pdf");
+    expect(body.note).toBe("Drawings, then the conditions.");
+    expect((body.parts as unknown[]).length).toBe(3);
+  });
+});
+
 describe("nothing the survey set aside is read silently", () => {
   it("answers per part, with the uncovered pages held as a part of their own, when the survey's other part was dropped", async () => {
     stored.bytes = buildPdfOfPages(8);
@@ -383,7 +402,8 @@ describe("nothing the survey set aside is read silently", () => {
       decision: null,
       held: "No part of the file covers these pages — say what they are, or don't read them.",
     });
-    expect(String(body.note)).toContain("was dropped");
+    // Code's bookkeeping stays off the row: the uncovered pages say so themselves.
+    expect(body.note).toBeNull();
   });
 
   it("never reads a workbook as its one placed sheet when the survey named another that is not there", async () => {
@@ -415,7 +435,6 @@ describe("nothing the survey set aside is read silently", () => {
     );
     const { body } = await classify("QA Drawings.pdf");
     expect(body.parts).toHaveLength(2);
-    expect(String(body.note)).toContain("claimed by two parts");
   });
 });
 

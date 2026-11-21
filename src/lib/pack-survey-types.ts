@@ -61,8 +61,14 @@ export type SurveyFile = {
   /** Pages counted off the bytes, null where they could not be (never guessed). */
   pageCount: number | null;
   parts: SurveyPart[];
-  /** Anything the survey wanted a person to know about the file as a whole. */
+  /** Anything the survey wanted a person to know about the file as a whole, then code's own notes. */
   note: string;
+  /**
+   * The MODEL'S note alone, without code's bookkeeping (merges, drops, pages in
+   * no part): the one a screen shows a person. `note` keeps both for the eval.
+   * Optional so a saved survey written before it still reads.
+   */
+  modelNote?: string;
   /**
    * What code set aside or found missing, as facts rather than sentences:
    * parts dropped, places no part covers, and whether two parts claim the

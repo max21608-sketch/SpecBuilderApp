@@ -727,6 +727,7 @@ export function surveyFromAnswer(
     pageCount: file.type === "pdf" ? file.pageCount : null,
     parts,
     note: [answer.note?.trim() ?? "", ...notes].filter(Boolean).join("\n"),
+    modelNote: answer.note?.trim() ?? "",
     gaps: { dropped, uncovered: coverage.uncovered, doubled: coverage.doubled },
   };
 }

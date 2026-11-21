@@ -372,7 +372,12 @@ export async function POST(request: Request): Promise<Response> {
   // drift. TWO OR MORE is a mixed file, answered per part, and the name rule
   // does not apply: a filename cannot describe a mix.
   // ============================================================================
-  const { parts: surveyParts, note } = surveyed.survey;
+  const surveyParts = surveyed.survey.parts;
+  // THE MODEL'S OWN NOTE, AND ONLY THAT, goes to the row. Code's bookkeeping
+  // — "merged from 11 parts", "Pages 25–30 are in no part" — is in
+  // `survey.note` for the eval; on a screen it is developer voice, and an
+  // uncovered page already has its own held row saying so.
+  const note = surveyed.survey.modelNote?.trim() || null;
   const gaps = surveyed.survey.gaps ?? { dropped: 0, uncovered: [], doubled: false };
   const readable = surveyParts.filter((part) => !part.nothingToRead);
   // NEVER ONE WHOLE READ WHEN PART OF THE ANSWER WAS SET ASIDE. A part the

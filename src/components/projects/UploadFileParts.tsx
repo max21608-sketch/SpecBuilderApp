@@ -54,9 +54,12 @@ export default function UploadFileParts({
     <ul className="w-full min-w-0 divide-y divide-neutral-100 border-l-2 border-neutral-200 pl-3" aria-label={`Parts of ${fileName}`}>
       {parts.map((part, index) => {
         const where = placeLabel(part.place);
-        const shown = part.choice || part.suggested;
+        // THE BOX SHOWS WHAT THE PRESS COUNTS: a person's choice, or an
+        // unheld reading. A held part's suggestion is offered beside it.
+        const shown = part.choice || (part.settled ? part.suggested : "");
         // AMBER MEANS THE APP ANSWERED THIS AND NOBODY HAS CHECKED, as on a file row.
-        const unchecked = Boolean(part.suggested) && !part.choice;
+        const unchecked = part.settled && Boolean(part.suggested) && !part.choice;
+        const offer = part.choice ? "" : unchecked ? part.suggested : part.offered;
         const read = part.read;
         const inRead = partLocked(read);
         const waitingForYou = !part.choice && (!part.settled || !part.suggested);
@@ -86,12 +89,12 @@ export default function UploadFileParts({
               {read?.state === "failed" && !read.registered && <span className="text-red-700">Failed</span>}
               {!read && waitingForYou && <span className="text-amber-700">Say which</span>}
             </span>
-            {unchecked && !inRead ? (
+            {offer && !inRead ? (
               <SuggestButton
                 className="w-full"
-                value={label(part.suggested)}
+                value={label(offer)}
                 evidence={part.evidence}
-                onAccept={() => onChoose(index, part.suggested)}
+                onAccept={() => onChoose(index, offer)}
                 disabled={busy || locked}
               />
             ) : (
