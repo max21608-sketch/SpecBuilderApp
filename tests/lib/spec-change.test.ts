@@ -134,7 +134,7 @@ describe("describeChange — finishes", () => {
   it("names the BWS field the finish lands in", () => {
     const change = describeChange(finishProposal("COM 1", "UPH-07", null));
     expect(change.kind).toBe("provides");
-    expect(change.label).toBe("Provides COM 1");
+    expect(change.label).toBe("Provides Fabric 1");
   });
 
   it("reports a different fabric over a held one as a change, showing what it was", () => {
@@ -151,6 +151,6 @@ describe("describeChange — finishes", () => {
   it("names an undecided fabric without pretending it is a value", () => {
     const change = describeChange(finishProposal("COM 3", "TBC", null, true));
     expect(change.kind).toBe("provides");
-    expect(change.label).toBe("Records COM 3 as TBC");
+    expect(change.label).toBe("Records Fabric 3 as TBC");
   });
 });

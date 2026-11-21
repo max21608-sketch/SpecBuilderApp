@@ -41,6 +41,7 @@ import { useState } from "react";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
+import { QuestionName } from "@/components/ui/FieldName";
 import { TONE } from "@/components/ui/tone";
 import AnswerValue from "@/components/records/AnswerValue";
 import { Td } from "@/components/ui/Table";
@@ -268,10 +269,7 @@ export default function InfillRow({
             </>
           ) : (
             <>
-              <span className="text-neutral-900">{fieldDisplayName(question.prompt)}</span>
-              {question.fieldLabel && (
-                <span className="block text-[11px] text-neutral-500">BWS: {fieldDisplayName(question.fieldLabel)}</span>
-              )}
+              <QuestionName prompt={question.prompt} fieldLabel={question.fieldLabel} />
             </>
           )}
           {/* REFERENCE, NEVER A PRE-FILL. There is deliberately no control that

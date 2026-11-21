@@ -28,6 +28,8 @@ const Patch = z
     colour: z.string().max(200).nullable().optional(),
     notes: z.string().max(4000).nullable().optional(),
     state: z.enum(["confirmed", "tbc"]).optional(),
+    // The customer's own material (0062): absent leaves it as it is.
+    customerSupplied: z.boolean().optional(),
     status: z.enum(["active", "retired"]).optional(),
     evidence: z
       .object({

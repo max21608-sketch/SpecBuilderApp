@@ -197,14 +197,57 @@ describe("the Specification block", () => {
 
   it("numbers a label only when the item carries more than one of it", () => {
     const one = composeSpecification(record(), [attribute({ specFieldJsonId: 1, value: "Mohair" })], []);
-    expect(one).toContain("COM: Mohair");
+    expect(one).toContain("FABRIC: Mohair");
     const two = composeSpecification(
       record(),
       [attribute({ specFieldJsonId: 1, value: "Mohair" }), attribute({ id: "a2", specFieldJsonId: 2, value: "Velvet" })],
       [],
     );
-    expect(two).toContain("COM 1: Mohair");
-    expect(two).toContain("COM 2: Velvet");
+    expect(two).toContain("FABRIC 1: Mohair");
+    expect(two).toContain("FABRIC 2: Velvet");
+  });
+
+  // DECISION F (2026-11-20): "COM" is the customer's own material. A fabric BW
+  // supplies is FABRIC on the quote; one marked customer-supplied in the
+  // finishes library is COM. The BWS file's column is COM 1 and stays that.
+  it("prints FABRIC by default and COM for a fabric whose library finish is the customer's own material", () => {
+    const linked = (id: string) => metalFinish({ id, kind: "fabric", code: id.toUpperCase(), codeNorm: id.toUpperCase() });
+    expect(composeSpecification(record(), [attribute({ value: "Mohair" })], [])).toContain("FABRIC: Mohair");
+    const com = composeSpecification(record(), [attribute({ value: "Mohair", finish: linked("fab-1") })], [], {
+      customerSuppliedFinishIds: new Set(["fab-1"]),
+    });
+    expect(com).toMatch(/^COM: /m);
+    expect(com).not.toContain("FABRIC");
+  });
+
+  it("numbers FABRIC and COM each within its own label", () => {
+    const linked = (id: string) => metalFinish({ id, kind: "fabric", code: id.toUpperCase(), codeNorm: id.toUpperCase(), description: `${id} cloth` });
+    const spec = composeSpecification(
+      record(),
+      [
+        attribute({ id: "a1", specFieldJsonId: 1, value: "Mohair" }),
+        attribute({ id: "a2", specFieldJsonId: 2, value: "Velvet", finish: linked("fab-2") }),
+        attribute({ id: "a3", specFieldJsonId: 14, value: "Linen" }),
+      ],
+      [],
+      { customerSuppliedFinishIds: new Set(["fab-2"]) },
+    );
+    const lines = spec.split("\n");
+    expect(lines).toContain("FABRIC 1: Mohair");
+    expect(lines).toContain("FABRIC 2: Linen");
+    expect(lines.filter((line) => line.startsWith("COM"))).toEqual([expect.stringMatching(/^COM: /)]);
+  });
+
+  it("carries the tick through the sheet, read by the route and never by the atoms", () => {
+    const sheet = composeQuoteSheet(
+      {
+        ...scope({ attributes: [attribute({ finish: metalFinish({ id: "fab-9", kind: "fabric" }) })] }),
+        records: [{ ...record(), matrixCodes: ["S"] }],
+      },
+      register,
+      { customerSuppliedFinishIds: new Set(["fab-9"]) },
+    );
+    expect(sheet.rows[0]?.[3]).toMatch(/^COM: /m);
   });
 
   it("carries the placement onto the line, which is where his own file puts it", () => {
@@ -269,7 +312,7 @@ describe("the sheet", () => {
     expect(row[0]).toBe("J");
     expect(row[1]).toBe("14");
     expect(row[2]).toBe("Sofa");
-    expect(row[3]).toContain("COM: Pierre Frey Teddy Mohair F2500017");
+    expect(row[3]).toContain("FABRIC: Pierre Frey Teddy Mohair F2500017");
     expect(row[4]).toBe("previous price 9,200");
     expect(row[5]).toBe("FF Living Room");
     // No pricing exists anywhere in this app. A generated number would be the

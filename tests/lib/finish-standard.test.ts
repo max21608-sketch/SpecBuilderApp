@@ -108,7 +108,7 @@ describe("which list a code's BW finish comes from — paletteForFinish", () => 
   it("a fabric on COM has NO list, and says why rather than offering an empty one", () => {
     const onCom = paletteForFinish({ kind: "fabric" }, [{ jsonId: COM_1, fieldName: "COM 1" }], BY_FIELD);
     expect(onCom.palette).toBeNull();
-    expect(onCom.why).toMatch(/COM 1/);
+    expect(onCom.why).toMatch(/Fabric 1/);
     const unplaced = paletteForFinish({ kind: "fabric" }, [], BY_FIELD);
     expect(unplaced.palette).toBeNull();
     expect(unplaced.why).toMatch(/COM fields carry no BWS list/);
@@ -132,7 +132,7 @@ describe("which list a code's BW finish comes from — paletteForFinish", () => 
   // full sentence back on every row.
   it("every 'no list' sentence has a few-word form for the row", () => {
     const cases: [ReturnType<typeof paletteForFinish>, string][] = [
-      [paletteForFinish({ kind: "fabric" }, [{ jsonId: COM_1, fieldName: "COM 1" }], BY_FIELD), "no BW list for COM 1"],
+      [paletteForFinish({ kind: "fabric" }, [{ jsonId: COM_1, fieldName: "COM 1" }], BY_FIELD), "no BW list for Fabric 1"],
       [paletteForFinish({ kind: "fabric" }, [], BY_FIELD), "no BW finish for a fabric"],
       [paletteForFinish({ kind: "leather" }, [], BY_FIELD), "no BW finish for a leather"],
       [paletteForFinish({ kind: "stone" }, [], BY_FIELD), "no BW list for stone"],

@@ -466,4 +466,33 @@ describe("a three-part project code", () => {
     const unmapped = rows().find((row) => row.textContent?.includes("ZZ-CH-04"))!;
     expect(within(unmapped).getByText(/no page says what CH means/)).toBeInTheDocument();
   });
+
+  // DECISION F (2026-11-20): the quote prints COM only for the customer's own
+  // material. One tick in the Edit panel, off by default, sent with the
+  // panel's reason like every other field.
+  it("ticks a fabric as the customer's own material in the Edit panel, and says so on the row", async () => {
+    const user = userEvent.setup();
+    render(<FinishesLibrary projectId="proj-1" />);
+    await screen.findByText("MOR005");
+    const row = rows().find((r) => r.textContent?.includes("MOR005"))!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    const tick = screen.getByLabelText(/customer.s own material/i);
+    expect(tick).not.toBeChecked();
+    await user.click(tick);
+    await user.type(screen.getByPlaceholderText(/Required — this finish is confirmed/), "the client supplies it");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(patched()).toMatchObject({ customerSupplied: true, reason: "the client supplies it" });
+  });
+
+  it("marks a customer-supplied finish COM on its row", async () => {
+    fetchMock.mockImplementation(async () =>
+      new Response(JSON.stringify({ ...PAYLOAD, finishes: [finish({ customer_supplied: true })] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    render(<FinishesLibrary projectId="proj-1" />);
+    await screen.findByText("MOR005");
+    expect(within(firstRow()).getByText("COM")).toBeInTheDocument();
+  });
 });

@@ -39,7 +39,9 @@
 //
 // The labels are normalised. His own file writes `COM1`, `COM 1` and `COM` for
 // one field and `TIMBER1` / `TIMBER 1` for another -- written by hand, over
-// years. We emit one spelling per field, from one constant.
+// years. We emit one spelling per field, from one constant -- and since
+// decision F (2026-11-20) a fabric is FABRIC unless the finishes library says
+// it is the customer's own material, when it is COM.
 // ============================================================================
 import { compareRecordOrder } from "@/lib/record-label";
 import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
@@ -81,7 +83,8 @@ const TYPE = "J";
  * 26, FR INTERLINER 20, COM 18, METAL 12, STONE 7, DRAWER LINER 6.
  */
 const SPEC_LINES: { label: string; jsonIds: number[] }[] = [
-  { label: "COM", jsonIds: [1, 2, 14] },
+  // FABRIC or COM per value (decision F): see `fabricLabel`.
+  { label: "FABRIC", jsonIds: [1, 2, 14] },
   { label: "FR INTERLINER", jsonIds: [74] },
   { label: "TIMBER", jsonIds: [4, 31, 143] },
   { label: "METAL", jsonIds: [5, 35] },
@@ -200,10 +203,26 @@ function dimensionLine(attributes: ExportAttribute[], note: string | null): stri
  * example does — "Curved sofa with fixed back and seat / Recessed timber
  * plinth" — then the labelled lines, then his standing caveat.
  */
+/**
+ * What the quote calls one fabric (decision F of 2026-11-20). "COM" is the
+ * customer's own material; a fabric BW supplies is FABRIC. A fabric is COM only
+ * where its spec is LINKED to a library finish ticked customer-supplied
+ * (`project_finishes.customer_supplied`, 0062) — a typed answer has no finish
+ * behind it and is FABRIC. The tick is read by the quote route and handed in;
+ * it is not in the record's atoms, because the BWS file does not change with it.
+ */
+export type QuoteOptions = { customerSuppliedFinishIds?: ReadonlySet<string> };
+
+function fabricLabel(attribute: ExportAttribute | undefined, options: QuoteOptions): "FABRIC" | "COM" {
+  const id = attribute?.finish?.id;
+  return id && options.customerSuppliedFinishIds?.has(id) ? "COM" : "FABRIC";
+}
+
 export function composeSpecification(
   record: ExportRecord & { specDescription?: string | null },
   attributes: ExportAttribute[],
   answers: { specFieldJsonId: number; value: string | null; qualifier: string | null }[],
+  options: QuoteOptions = {},
 ): string {
   const lines: string[] = ["As per details supplied"];
 
@@ -222,26 +241,31 @@ export function composeSpecification(
   const answerByField = new Map(answers.map((answer) => [answer.specFieldJsonId, answer]));
 
   for (const { label, jsonIds } of SPEC_LINES) {
-    // Several slots share one label — COM 1, 2 and 3 are all "COM" in his
+    // Several slots share one label — COM 1, 2 and 3 are all one label in his
     // file — and each one that holds a value gets its own line, numbered only
-    // where there is more than one, exactly as he writes it.
-    const values: string[] = [];
+    // where there is more than one, exactly as he writes it. The fabric slots
+    // split into FABRIC and COM per value, each numbered within its own label.
+    const values: { label: string; value: string }[] = [];
     for (const jsonId of jsonIds) {
       if (jsonId === DIMENSIONS_JSON_ID) continue;
       const attribute = byField.get(jsonId);
+      const lineLabel = label === "FABRIC" ? fabricLabel(attribute, options) : label;
       if (attribute) {
         const rendered = renderAttributeValue(attribute);
-        if (rendered.trim()) values.push(rendered);
+        if (rendered.trim()) values.push({ label: lineLabel, value: rendered });
         continue;
       }
       // THE EXPORT'S OWN RENDERER, never a hand-made " - " (audit F8/F14,
       // 2026-11-06): a flip of EXPORT_QUALIFIER_MODE must move the quote with
       // the file, and a break typed into an answer is folded the same way.
       const answer = answerByField.get(jsonId);
-      if (answer?.value?.trim()) values.push(renderAnswerValue(answer));
+      if (answer?.value?.trim()) values.push({ label: lineLabel, value: renderAnswerValue(answer) });
     }
-    if (values.length === 1) lines.push(`${label}: ${values[0]}`);
-    else values.forEach((value, index) => lines.push(`${label} ${index + 1}: ${value}`));
+    for (const each of [...new Set(values.map((entry) => entry.label))]) {
+      const mine = values.filter((entry) => entry.label === each);
+      if (mine.length === 1) lines.push(`${each}: ${mine[0]!.value}`);
+      else mine.forEach((entry, index) => lines.push(`${each} ${index + 1}: ${entry.value}`));
+    }
   }
 
   // His own closing line, on every bespoke item in the file.
@@ -268,6 +292,7 @@ export function composeQuoteSheet(
     })[];
   },
   register: QuoteBoilerplate[],
+  options: QuoteOptions = {},
 ): QuoteSheet {
   const rows: string[][] = [];
 
@@ -287,7 +312,7 @@ export function composeQuoteSheet(
       TYPE,
       record.qty === null ? "" : String(record.qty),
       record.variantLabel ? `${record.itemDescription} (${record.variantLabel})` : record.itemDescription,
-      composeSpecification(record, mine, answers),
+      composeSpecification(record, mine, answers, options),
       record.internalNotes?.trim() ?? "",
       record.area ?? "",
       "", // Net price each — no pricing in this app.

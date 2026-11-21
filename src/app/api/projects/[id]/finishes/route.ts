@@ -34,6 +34,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const finishes = await sql`
     select f.id, f.code, f.code_norm, f.code_origin, f.kind, f.description, f.supplier_raw, f.reference, f.colour,
            f.notes, f.state, f.status, f.version, f.retired_at, f.retired_by, f.updated_at, f.updated_by,
+           f.customer_supplied,
            -- 0045: BW's own finish for the code, and the email that agreed it.
            f.standard_value, f.standard_state, f.standard_set_by, f.standard_set_at,
            ev.filename as standard_evidence_filename,

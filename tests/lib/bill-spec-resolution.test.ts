@@ -258,7 +258,7 @@ describe("resolveProposals — by the bill's row", () => {
     const [exact] = resolveProposals([observation({ attributeRaw: "COM", valueRaw: "FAB-13" })], regs, ids);
     expect(exact?.finish?.specFieldName).toBe("COM 1");
     expect(exact?.attributeTarget?.attributeId).toBe("attr-com1");
-    expect(exact?.readingNote).toMatch(/already holds FAB-13 in COM 1/);
+    expect(exact?.readingNote).toMatch(/already holds FAB-13 in Fabric 1/);
     // Under the bill's zone, the same code — aimed there, and asked about.
     const [zoned] = resolveProposals([observation({ attributeRaw: "COM", valueRaw: "ZZ-FAB-13" })], regs, ids);
     expect(zoned?.finish?.specFieldName).toBe("COM 1");

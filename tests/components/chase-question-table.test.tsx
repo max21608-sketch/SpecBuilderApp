@@ -487,7 +487,7 @@ describe("a long line is folded", () => {
   it("lists the first few and counts the rest", async () => {
     render(<Harness questions={many()} />);
     await userEvent.click(screen.getByText("Desk chair"));
-    expect(screen.getByText("COM 1")).toBeTruthy();
+    expect(screen.getByText("Fabric 1")).toBeTruthy();
     expect(screen.queryByText("Stitching spec")).toBeNull();
     // One more TGQ and the later one, which sorts below it.
     expect(screen.getByRole("button", { name: "1 more TGQ · 1 also outstanding" })).toBeTruthy();

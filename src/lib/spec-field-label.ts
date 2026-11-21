@@ -27,9 +27,20 @@
 // against `db/seed/0001_spec_fields.sql`: a BWS rename fails
 // it rather than quietly putting the old name back on screen.
 
+//
+// DECISION F (2026-11-20): COM 1/2/3 read "Fabric 1/2/3". "COM" is the
+// customer's own material, and most fabric BW supplies itself; the screens
+// say Fabric with the BWS name small beside it (`FieldName`), the quote prints
+// FABRIC or COM by the finishes library's customer-supplied tick, and the BWS
+// file's column is COM 1 and stays that. "COM Hardware" is a different field
+// and is not renamed.
+
 export const SPEC_FIELD_DISPLAY_NAMES: readonly { jsonId: number; bwsName: string; displayName: string }[] = [
   { jsonId: 4, bwsName: "Main timber finish", displayName: "Timber finish 1" },
   { jsonId: 5, bwsName: "Main metal finish", displayName: "Metal finish 1" },
+  { jsonId: 1, bwsName: "COM 1", displayName: "Fabric 1" },
+  { jsonId: 2, bwsName: "COM 2", displayName: "Fabric 2" },
+  { jsonId: 14, bwsName: "COM 3", displayName: "Fabric 3" },
 ];
 
 const fold = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
@@ -59,4 +70,15 @@ export function fieldDisplayNameWithBws(name: string | null | undefined, jsonId?
   const entry = entryFor(jsonId, name);
   if (entry) return `${entry.displayName} (BWS: ${name?.trim() || entry.bwsName})`;
   return name ? name.trim() : null;
+}
+
+/**
+ * BWS's own name, where a screen prints ours instead — for `FieldName` to set
+ * small beside it ("Fabric 1 · BWS: COM 1"). Null where the two agree, so a
+ * screen never prints the same words twice.
+ */
+export function bwsNameIfDifferent(name: string | null | undefined, jsonId?: number | null): string | null {
+  const entry = entryFor(jsonId, name);
+  if (!entry) return null;
+  return name?.trim() || entry.bwsName;
 }

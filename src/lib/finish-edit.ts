@@ -52,6 +52,13 @@ export type FinishFields = {
   colour?: string | null;
   notes?: string | null;
   state?: AttributeState;
+  /**
+   * The customer's own material (0062, decision F): the quote prints COM for a
+   * fabric linked here and FABRIC otherwise. UNDEFINED LEAVES IT ALONE — this
+   * function REPLACES every other column, and the kinds route, the schedule
+   * confirm and an edit that does not mention it must not untick it.
+   */
+  customerSupplied?: boolean;
 };
 
 export type FinishEditResult = {
@@ -276,6 +283,7 @@ export async function editFinish(
         colour = ${clean(fields.colour)},
         notes = ${clean(fields.notes)},
         state = ${fields.state ?? String(finish.state)},
+        customer_supplied = coalesce(${fields.customerSupplied ?? null}::boolean, customer_supplied),
         updated_by = ${actor}
     where id = ${finishId} and version = ${expectedVersion} and status = 'active'
     returning id

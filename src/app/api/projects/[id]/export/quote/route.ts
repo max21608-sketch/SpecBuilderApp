@@ -85,6 +85,13 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     bwsId: Number(row.bws_id),
   }));
 
+  // WHICH FABRICS ARE THE CUSTOMER'S OWN (0062, decision F): the quote prints
+  // COM for those and FABRIC for the rest. Read here, never put in the atoms —
+  // the BWS file does not change with it.
+  const customerSupplied = new Set(
+    (await sql`select id from project_finishes where project_id = ${id} and customer_supplied`).map((row) => String(row.id)),
+  );
+
   const sheet = composeQuoteSheet(
     {
       ...scope,
@@ -99,6 +106,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       }),
     },
     register,
+    { customerSuppliedFinishIds: customerSupplied },
   );
 
   if (format === "json") {

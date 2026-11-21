@@ -237,7 +237,7 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       { rowImages: images({ 3: picture("p/a.png"), 5: picture("p/a.png") }) },
     );
     expect(out.get("0:1")).toEqual({
-      goesTo: "→ COM 1",
+      goesTo: "→ Fabric 1",
       filing: "new library entry ZZ-FAB-13",
       swatch: "swatch: this row's picture",
       askForShortCode: false,
@@ -254,7 +254,7 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       { library: [held], heldSwatches: new Set(["fin-7"]), rowImages: images({ 3: picture("p/a.png") }) },
     );
     expect(out.get("0:1")).toEqual({
-      goesTo: "→ COM 1",
+      goesTo: "→ Fabric 1",
       filing: "matches ZZ-FAB-13 in the library",
       swatch: "swatch: none (the library already has one)",
       askForShortCode: false,
@@ -288,14 +288,14 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       { rowImages: images({ 3: picture("p/c.png") }) },
     );
     expect(out.get("0:1")).toEqual({
-      goesTo: "→ COM 1",
+      goesTo: "→ Fabric 1",
       filing: "new in-house fabric — numbered BW-ZZA-… at confirm",
       swatch: "swatch: this row's picture",
       askForShortCode: false,
       tbc: false,
     });
     expect(out.get("0:3")).toEqual({
-      goesTo: "→ COM 1",
+      goesTo: "→ Fabric 1",
       filing: "same words as row 3 — one in-house code",
       swatch: "swatch: row 3's picture",
       askForShortCode: false,
@@ -309,7 +309,7 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       { prefix: null },
     );
     expect(out.get("0:1")).toEqual({
-      goesTo: "→ COM 1",
+      goesTo: "→ Fabric 1",
       filing: "new in-house fabric — numbered BW-F-… at confirm",
       swatch: "swatch: none in the bill",
       askForShortCode: true,
@@ -335,7 +335,7 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       { rowImages: images({ 3: picture("p/e.png") }) },
     );
     expect(out.get("0:1")).toEqual({
-      goesTo: "→ COM 1",
+      goesTo: "→ Fabric 1",
       filing: "placeholder — not filed",
       swatch: null,
       askForShortCode: false,
@@ -577,7 +577,7 @@ describe("a finish line filed by its schedule code (the bill's COM CODE column)"
       heldSlots: () => [],
     });
     expect(out.get("0:1")).toMatchObject({
-      goesTo: "→ COM 1",
+      goesTo: "→ Fabric 1",
       filing: "new library entry ZB_04, by its COM CODE — described when the finishes schedule is read",
       writes: { value: "NAME: EXAMPLE VELVET CODE: 1234.56 COLOUR: IVORY", qualifier: "POUFFE DEPTH" },
       tbc: false,
@@ -593,7 +593,7 @@ describe("a finish line filed by its schedule code (the bill's COM CODE column)"
 // the confirm. The confirm used to re-read what a record held for every line,
 // rows it had written moments before included, so a second fabric under one
 // carried item found the first "held" and refused the whole bill, while the
-// review said "→ COM 2".
+// review said "→ Fabric 2".
 describe("planBillFinishWrites — the one plan the review and the confirm share", () => {
   type Line = Parameters<typeof planBillFinishWrites>[0]["sheets"][number]["lines"][number];
   const item = (index: number, lineNo: number, code: string, over: Partial<Line> = {}): Line => ({
@@ -689,7 +689,7 @@ describe("planBillFinishWrites — the one plan the review and the confirm share
       heldSlots: (_sheet: number, line: number) => (line === 0 ? [1] : []),
     };
     const review = planBillFabrics({ sheets: [{ sheetName: "Bill", ignored: false, lines }], rowImages: null, library: [], heldSwatches: new Set(), prefix: "ZZA", descriptionCodes: () => [], ...over });
-    expect(review.get("0:2")?.goesTo).toBe("→ COM 2");
+    expect(review.get("0:2")?.goesTo).toBe("→ Fabric 2");
     expect(review.get("0:2")?.refusal).toBeUndefined();
   });
 

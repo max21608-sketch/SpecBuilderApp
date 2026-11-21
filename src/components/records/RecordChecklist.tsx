@@ -38,6 +38,7 @@
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fieldDisplayName } from "@/lib/spec-field-label";
+import FieldName from "@/components/ui/FieldName";
 import Link from "next/link";
 import {
   ANSWER_STATES,
@@ -737,7 +738,7 @@ export default function RecordChecklist({
                       />
                     )}
                     <span className="min-w-0">
-                      <span className="text-neutral-900">{fieldDisplayName(answer.prompt)}</span>
+                      <FieldName name={answer.prompt} className="text-neutral-900" />
                       {answer.json_id !== null && FIELD_TIPS[answer.json_id] && (
                         <Tip>{FIELD_TIPS[answer.json_id]!}</Tip>
                       )}
@@ -758,7 +759,7 @@ export default function RecordChecklist({
                           title={answer.json_id !== null ? `BWS field ${answer.json_id}` : undefined}
                           className="mt-0.5 block text-[11px] text-neutral-400"
                         >
-                          {fieldDisplayName(answer.field_name, answer.json_id)}
+                          <FieldName name={answer.field_name} jsonId={answer.json_id} />
                         </span>
                       )}
                     </span>

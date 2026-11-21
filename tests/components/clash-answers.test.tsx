@@ -175,7 +175,7 @@ describe("the three answers", () => {
     render(<DrawingsReview importId="import-1" />);
     expect((await screen.findAllByRole("button", { name: "Same fabric — keep page 1’s wording" })).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "Same fabric — keep page 2’s wording" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("button", { name: "Two fabrics — move page 2 to COM 2" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Two fabrics — move page 2 to Fabric 2" }).length).toBeGreaterThan(0);
     expect(screen.queryByText(/move one to another field/)).toBeNull();
   });
 
@@ -200,7 +200,7 @@ describe("the three answers", () => {
 
   it("two fabrics moves page 2 to COM 2 and touches nothing else", async () => {
     render(<DrawingsReview importId="import-1" />);
-    await userEvent.click((await screen.findAllByRole("button", { name: "Two fabrics — move page 2 to COM 2" }))[0]!);
+    await userEvent.click((await screen.findAllByRole("button", { name: "Two fabrics — move page 2 to Fabric 2" }))[0]!);
     await waitFor(() => expect(server.patches).toHaveLength(1));
     expect(server.patches[0]).toMatchObject({ observationId: drawingId(), expectedVersion: 1, changes: { specFieldId: "field-com2" } });
   });

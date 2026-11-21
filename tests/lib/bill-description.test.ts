@@ -750,7 +750,7 @@ describe("revisionDescriptionDifferences", () => {
     expect(revisionDescriptionDifferences(revised, empty).map((difference) => [difference.what, difference.record])).toEqual([
       ["size", "no size"],
       ["Timber finish 1", "nothing"],
-      ["COM 1", "nothing"],
+      ["Fabric 1", "nothing"],
     ]);
   });
 });

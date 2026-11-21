@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { SPEC_FIELD_DISPLAY_NAMES, fieldDisplayName, fieldDisplayNameWithBws } from "@/lib/spec-field-label";
+import { SPEC_FIELD_DISPLAY_NAMES, bwsNameIfDifferent, fieldDisplayName, fieldDisplayNameWithBws } from "@/lib/spec-field-label";
 
 const seeded = new Map(
   [...readFileSync(path.join(process.cwd(), "db/seed/0001_spec_fields.sql"), "utf8").matchAll(/^\s*\((\d+),\s*'[A-Z]+',\s*'((?:[^']|'')*)'/gm)].map(
@@ -35,14 +35,29 @@ describe("fieldDisplayName", () => {
     expect(fieldDisplayName("  main  METAL finish ")).toBe("Metal finish 1");
   });
 
+  it("calls COM 1/2/3 Fabric 1/2/3, by id or by BWS's name (decision F, 2026-11-20)", () => {
+    expect(fieldDisplayName("COM 1", 1)).toBe("Fabric 1");
+    expect(fieldDisplayName(" COM 2 ")).toBe("Fabric 2");
+    expect(fieldDisplayName("COM 3", 14)).toBe("Fabric 3");
+    // COM Hardware is a different thing and keeps its name.
+    expect(fieldDisplayName("COM Hardware", 8)).toBe("COM Hardware");
+  });
+
   it("leaves every other field as BWS names it", () => {
     expect(fieldDisplayName("Metal Finish 2", 35)).toBe("Metal Finish 2");
-    expect(fieldDisplayName(" COM 1 ")).toBe("COM 1");
     expect(fieldDisplayName(null)).toBeNull();
   });
 
   it("prints both where a reader checks against the BWS file", () => {
     expect(fieldDisplayNameWithBws("Main metal finish", 5)).toBe("Metal finish 1 (BWS: Main metal finish)");
-    expect(fieldDisplayNameWithBws("COM 1", 1)).toBe("COM 1");
+    expect(fieldDisplayNameWithBws("COM 1", 1)).toBe("Fabric 1 (BWS: COM 1)");
+    expect(fieldDisplayNameWithBws("Stud spec", 16)).toBe("Stud spec");
+  });
+
+  it("gives the BWS name to print small beside ours, only where the two differ", () => {
+    expect(bwsNameIfDifferent("COM 1", 1)).toBe("COM 1");
+    expect(bwsNameIfDifferent("Main timber finish")).toBe("Main timber finish");
+    expect(bwsNameIfDifferent("Stud spec", 16)).toBeNull();
+    expect(bwsNameIfDifferent(null)).toBeNull();
   });
 });

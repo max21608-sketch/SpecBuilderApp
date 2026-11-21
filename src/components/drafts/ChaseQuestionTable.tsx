@@ -54,6 +54,7 @@
 // ============================================================================
 import { useMemo, useState } from "react";
 import { fieldDisplayName } from "@/lib/spec-field-label";
+import { QuestionName } from "@/components/ui/FieldName";
 import Link from "next/link";
 import ExpandRowButton from "@/components/layout/ExpandRowButton";
 import Button from "@/components/ui/Button";
@@ -1053,10 +1054,11 @@ function QuestionRows({
                   toQuote ? TONE.danger.dot : !isClientQuestion(question) ? TONE.warn.dot : "bg-neutral-300"
                 }`}
               />
-              <span className="text-neutral-900">{fieldDisplayName(question.prompt)}</span>
-              {question.fieldLabel && (
-                <span className="block pl-3.5 text-[11px] text-neutral-500">BWS: {fieldDisplayName(question.fieldLabel)}</span>
-              )}
+              <QuestionName
+                prompt={question.prompt}
+                fieldLabel={question.fieldLabel}
+                className="block pl-3.5 text-[11px] text-neutral-500"
+              />
             </Td>
             <Td>
               <Chip tone={STATE_TONE[question.state] ?? "plain"}>

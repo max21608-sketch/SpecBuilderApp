@@ -14,7 +14,7 @@
 import { Fragment } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { fieldDisplayName } from "@/lib/spec-field-label";
+import FieldName from "@/components/ui/FieldName";
 import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
@@ -554,7 +554,7 @@ export default function SpecsTab({
                                 attribute.json_id !== null ? `BWS field ${attribute.json_id}` : undefined
                               }
                             >
-                              {fieldDisplayName(attribute.field_name, attribute.json_id)}
+                              <FieldName name={attribute.field_name} jsonId={attribute.json_id} />
                               {attribute.dimension_slot ? ` (${attribute.dimension_slot})` : ""}
                             </span>
                           ) : attribute.dimension_slot ? (

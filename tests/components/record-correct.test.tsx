@@ -274,7 +274,7 @@ describe("correcting a spec from the record", () => {
       );
       render(<RecordPage />);
       const cell = await screen.findByTitle("BWS field 1");
-      expect(cell.textContent).toBe("COM 1");
+      expect(cell.textContent).toBe("Fabric 1BWS: COM 1");
       expect(screen.queryByText(/^1 · /)).toBeNull();
     });
 

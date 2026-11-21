@@ -114,7 +114,7 @@ describe("decideBillFinishSlot — the next slot of the line's kind, or kept wit
   });
 
   it("says where each goes, in the review's words", () => {
-    expect(describeBillFinishSlot(decideBillFinishSlot("fabric", taken(1, 2)))).toBe("→ COM 3");
+    expect(describeBillFinishSlot(decideBillFinishSlot("fabric", taken(1, 2)))).toBe("→ Fabric 3");
     expect(describeBillFinishSlot(decideBillFinishSlot("metal", taken()))).toBe("→ Metal finish 1");
     expect(describeBillFinishSlot(decideBillFinishSlot("timber", taken(4)))).toBe("→ Timber Finish 2");
     expect(describeBillFinishSlot(decideBillFinishSlot("fabric", taken(1, 2, 14)))).toBe("→ kept, COM 1–3 are full");
@@ -174,10 +174,10 @@ describe("planBillFabrics says where every finish line under one item goes", () 
   it("files fabrics to COM in order, the metal and the timber to theirs, and keeps the rest", () => {
     const out = plan();
     expect([1, 2, 3, 4, 5, 6, 7].map((index) => out.get(`0:${index}`)?.goesTo)).toEqual([
-      "→ COM 1",
-      "→ COM 2",
+      "→ Fabric 1",
+      "→ Fabric 2",
       "→ Metal finish 1",
-      "→ COM 3",
+      "→ Fabric 3",
       "→ Timber finish 1",
       "→ kept, COM 1–3 are full",
       "→ kept, no BWS field (trim)",
@@ -189,7 +189,7 @@ describe("planBillFabrics says where every finish line under one item goes", () 
 
   it("decides against what the item already holds", () => {
     const out = plan([4, 1]);
-    expect(out.get("0:1")?.goesTo).toBe("→ COM 2");
+    expect(out.get("0:1")?.goesTo).toBe("→ Fabric 2");
     expect(out.get("0:5")?.goesTo).toBe("→ Timber Finish 2");
   });
 });

@@ -160,7 +160,7 @@ describe("two pages that do not say the same thing", () => {
     const b = claims.get(drawingFabric.id);
     expect(a?.kind).toBe("conflict");
     expect(a?.message).toBe(
-      "Page 1 and page 2 both give COM 1 for TYPE 1 · TYPE 5. If they are the same fabric, keep one wording; if they are two fabrics, give page 2 its own field.",
+      "Page 1 and page 2 both give Fabric 1 for TYPE 1 · TYPE 5. If they are the same fabric, keep one wording; if they are two fabrics, give page 2 its own field.",
     );
     expect(b?.message).toBe(a?.message);
     // No longer the advice that invented a second fabric.
@@ -171,13 +171,13 @@ describe("two pages that do not say the same thing", () => {
     const claim = claims.get(drawingFabric.id);
     if (claim?.kind !== "conflict") throw new Error("expected a conflict");
     expect(claim.clash.fabric).toBe(true);
-    expect(claim.clash.fieldName).toBe("COM 1");
+    expect(claim.clash.fieldName).toBe("Fabric 1");
     expect(claim.clash.rows).toEqual([
       { observationId: sheetFabric.id, itemId: sheet.id, page: 1 },
       { observationId: drawingFabric.id, itemId: drawing.id, page: 2 },
     ]);
     // COM 1 is the sheet's in TYPE 1 / TYPE 5; COM 2 is the next free.
-    expect(claim.clash.move).toMatchObject({ observationId: drawingFabric.id, page: 2, fieldId: "f-com2", fieldName: "COM 2" });
+    expect(claim.clash.move).toMatchObject({ observationId: drawingFabric.id, page: 2, fieldId: "f-com2", fieldName: "Fabric 2" });
   });
 
   it("moves to a slot the RECORD also leaves free", () => {
@@ -198,10 +198,10 @@ describe("two pages that do not say the same thing", () => {
       ).find((b) => b.code === "field_conflict");
 
     const free = blockerWith(new Map());
-    expect(free?.code === "field_conflict" && free.clash.move.fieldName).toBe("COM 2");
+    expect(free?.code === "field_conflict" && free.clash.move.fieldName).toBe("Fabric 2");
     // An earlier document already wrote COM 2 on TYPE 5: COM 3 is next.
     const com2Held = blockerWith(new Map([["v5", new Map([["f-com2", occupant("a2")]])]]));
-    expect(com2Held?.code === "field_conflict" && com2Held.clash.move.fieldName).toBe("COM 3");
+    expect(com2Held?.code === "field_conflict" && com2Held.clash.move.fieldName).toBe("Fabric 3");
     // Every COM slot held: nothing to move to, and the row says so.
     const allHeld = blockerWith(
       new Map([["v1", new Map([["f-com2", occupant("a2")], ["f-com3", occupant("a3")]])]]),

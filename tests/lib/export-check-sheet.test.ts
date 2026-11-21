@@ -151,7 +151,7 @@ describe("composeCheckSheet", () => {
         answers: [{ recordId: "rec-1", specFieldJsonId: 4, value: "Walnut, satin lacquer", qualifier: null }],
       }),
     );
-    expect(at(cell(sheet.rows, "COM 1"), "Exported value", "Came from", "Source document", "Page")).toEqual([
+    expect(at(cell(sheet.rows, "Fabric 1 (BWS: COM 1)"), "Exported value", "Came from", "Source document", "Page")).toEqual([
       "Yarn LW44102", "Document", "S-100.pdf", "2",
     ]);
     // An answer is somebody filling in a checklist: there is no page to open.
@@ -171,7 +171,7 @@ describe("composeCheckSheet", () => {
     );
     // Blank says nobody looked; TBC says the client has not decided. A check
     // sheet that flattened them would have a reviewer chase a settled question.
-    expect(at(cell(sheet.rows, "COM 1"), "Exported value")).toEqual(["TBC"]);
+    expect(at(cell(sheet.rows, "Fabric 1 (BWS: COM 1)"), "Exported value")).toEqual(["TBC"]);
   });
 
   it("leaves the reviewer's three columns empty", () => {
@@ -202,7 +202,7 @@ describe("the Client specified column", () => {
         ],
       }),
     );
-    const [said] = at(cell(sheet.rows, "COM 1"), "Client specified");
+    const [said] = at(cell(sheet.rows, "Fabric 1 (BWS: COM 1)"), "Client specified");
     expect(said).toBe(`6'-4"`);
   });
 
@@ -214,7 +214,7 @@ describe("the Client specified column", () => {
         ],
       }),
     );
-    const [exported, said] = at(cell(sheet.rows, "COM 1"), "Exported value", "Client specified");
+    const [exported, said] = at(cell(sheet.rows, "Fabric 1 (BWS: COM 1)"), "Exported value", "Client specified");
     expect(exported).toBe("Invented velvet Rose");
     expect(said).toBe("Invented velvet Rose");
   });

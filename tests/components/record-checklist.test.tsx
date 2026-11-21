@@ -189,10 +189,11 @@ describe("the record checklist", () => {
       readiness: { ...READINESS, toQuote: 0 },
       answers: [answer({ requirement_id: "q9", prompt: "Main fabric", json_id: 1, field_name: "COM 1 " })],
     });
-    expect(screen.getByText("COM 1")).toBeInTheDocument();
+    // Decision F (2026-11-20): our name, with BWS's small beside it.
+    expect(screen.getByText("Fabric 1")).toBeInTheDocument();
     expect(screen.queryByText(/BWS 1/)).not.toBeInTheDocument();
     expect(screen.queryByText("1 · COM 1")).not.toBeInTheDocument();
-    expect(screen.getByTitle("BWS field 1")).toHaveTextContent("COM 1");
+    expect(screen.getByTitle("BWS field 1")).toHaveTextContent("Fabric 1BWS: COM 1");
   });
 
   // ---- 2.8 step 1: the project-wide section, folded ------------------------

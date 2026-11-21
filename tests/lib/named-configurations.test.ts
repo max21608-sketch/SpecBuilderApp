@@ -559,7 +559,7 @@ describe("two pages giving one configuration the same BWS field", () => {
     // THE REAL QUESTION (plan any-bill, step 4), not "move one to another
     // field" — which on S-301 put a second, non-existent fabric into COM 2.
     expect(a?.message).toBe(
-      "Page 1 and page 2 both give COM 1 for TYPE 1 · TYPE 5. If they are the same fabric, keep one wording; if they are two fabrics, give page 2 its own field.",
+      "Page 1 and page 2 both give Fabric 1 for TYPE 1 · TYPE 5. If they are the same fabric, keep one wording; if they are two fabrics, give page 2 its own field.",
     );
     expect(b?.message).toBe(a?.message);
   });

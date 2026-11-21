@@ -84,6 +84,8 @@ type Finish = {
   version: number; retired_at: string | null; retired_by: string | null;
   updated_at: string; updated_by: string | null;
   swatch_attachment_id: string | null;
+  /** The customer's own material (0062): COM on the quote, FABRIC otherwise. Absent reads as no. */
+  customer_supplied?: boolean;
   used_on: UsedOn[];
   /**
    * 0045: BW's own finish for the code, and which list it is chosen from --
@@ -113,6 +115,7 @@ type Payload = {
 type Draft = {
   code: string; kind: string; description: string; supplierRaw: string;
   reference: string; colour: string; notes: string; state: "confirmed" | "tbc"; reason: string;
+  customerSupplied: boolean;
 };
 
 const draftOf = (finish: Finish): Draft => ({
@@ -125,6 +128,7 @@ const draftOf = (finish: Finish): Draft => ({
   notes: finish.notes ?? "",
   state: finish.state,
   reason: "",
+  customerSupplied: finish.customer_supplied === true,
 });
 
 /** "Not said" is a real answer and gets its own option, not an absence. */
@@ -242,6 +246,7 @@ export default function FinishesLibrary({
             colour: draft.colour || null,
             notes: draft.notes || null,
             state: draft.state,
+            customerSupplied: draft.customerSupplied,
           }),
         },
       );
@@ -521,6 +526,13 @@ export default function FinishesLibrary({
           </Td>
           <Td>
             <span className="font-mono font-semibold text-neutral-900">{finish.code}</span>
+            {/* THE CUSTOMER'S OWN MATERIAL (0062): the one thing on this row
+                the quote prints differently — COM, where BW's fabric is FABRIC. */}
+            {finish.customer_supplied && (
+              <span className="ml-1.5 align-middle" title="Customer's own material: the quote prints COM, not FABRIC">
+                <Chip tone="plain">COM</Chip>
+              </span>
+            )}
             {/* WHOSE CODE IT IS (0036). `BW-F-001` was minted by this app
                 because the client's document gave the finish no code, and it
                 never reaches the BWS export, the quote or the costing sheet —
@@ -756,6 +768,15 @@ export default function FinishesLibrary({
                     <option value="tbc">TBC — not decided</option>
                     <option value="confirmed">Confirmed</option>
                   </select>
+                </label>
+                <label className="flex items-center gap-2 text-neutral-600 sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={draft.customerSupplied}
+                    onChange={(event) => setDraft({ ...draft, customerSupplied: event.target.checked })}
+                    className="h-3.5 w-3.5 accent-blue-700"
+                  />
+                  Customer&rsquo;s own material — the quote says COM instead of FABRIC. The BWS file is not affected.
                 </label>
                 <label className="text-neutral-600 sm:col-span-2">
                   Notes
