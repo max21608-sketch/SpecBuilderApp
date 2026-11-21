@@ -48,6 +48,7 @@ import { changeSetForEdit, findOpenChangeSet } from "@/lib/change-sets";
 import { editAnswer } from "@/lib/answer-edit";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { lockRecords } from "@/lib/record-lock";
+import { insertMissingAnswerRows } from "@/lib/answer-rows";
 import { DIMENSIONS_JSON_ID } from "@/lib/promote-answers";
 import { foldArea } from "@/lib/area-filter";
 import { planProjectWide, type ProjectWideRow } from "@/lib/project-wide-plan";
@@ -496,31 +497,28 @@ async function applyFanOut(
   // edit below is the ordinary edit with its ordinary lock. ONE insert for
   // every such row (review 4A, 2026-11-16), not one per row — the records are
   // already locked above, and the rows are new, so nothing else can see them.
+  // It is `insertMissingAnswerRows`, the one insert (L1, 2026-11-21), narrowed
+  // to the pairs this press writes: never a row for another question.
   const missing = targets.filter((row) => !row.answerId);
   const createdFor = new Map<string, { id: string; version: number }>();
   if (missing.length > 0) {
-    const created = await txn`
-      insert into spec_answers (record_id, requirement_id, spec_field_id, state, created_by, updated_by)
-      select t.record_id, q.id, q.spec_field_id, 'missing', ${actor}, ${actor}
-        from unnest(${missing.map((row) => row.recordId)}::uuid[], ${missing.map((row) => row.requirementId)}::uuid[])
-             with ordinality as t(record_id, requirement_id, ord)
-        join requirements q on q.id = t.requirement_id
-       order by t.ord
-      returning id, version, record_id, requirement_id
-    `;
-    for (const row of created) {
-      createdFor.set(`${String(row.record_id)}:${String(row.requirement_id)}`, {
-        id: String(row.id),
-        version: Number(row.version),
-      });
-    }
+    const created = await insertMissingAnswerRows(
+      txn,
+      missing.map((row) => row.recordId),
+      actor,
+      { only: missing.map((row) => ({ recordId: row.recordId, requirementId: row.requirementId })) },
+    );
+    for (const row of created) createdFor.set(`${row.recordId}:${row.requirementId}`, { id: row.id, version: row.version });
   }
 
   for (const row of targets) {
     let answerId = row.answerId;
     let version = row.answerVersion;
     if (!answerId) {
-      const created = createdFor.get(`${row.recordId}:${row.requirementId}`)!;
+      const created = createdFor.get(`${row.recordId}:${row.requirementId}`);
+      // The set was read under the record locks, so the row cannot have
+      // appeared since; a missing one is a fault, never a silent skip.
+      if (!created) throw new Error(`no answer row was created for ${row.recordId}:${row.requirementId}`);
       answerId = created.id;
       version = created.version;
     }

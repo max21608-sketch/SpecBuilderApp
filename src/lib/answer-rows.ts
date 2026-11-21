@@ -21,16 +21,19 @@
 //   * `insertMissingAnswerRows` — the rows a record's CURRENT category asks
 //     and it lacks, created `missing`, for a caller that has already locked
 //     the records and opened its change. `setRecordCategory` on an unchanged
-//     category and `db:backfill-question-rows` use it.
+//     category and `db:backfill-question-rows` use it whole; the project and
+//     area fan-out (`project-wide.ts`) and the fill-in's batch
+//     (`/answers/apply`) narrow it to the (record, question) pairs they are
+//     about to write, because a press about one question must not create rows
+//     for a record's other questions behind a sentence about that one.
 //   * `answerQuestionWithoutRow` — a person answering one such question: the
 //     row is created inside the same change set and under the same record
 //     lock as the answer, and the answer is the ordinary `editAnswer`, so the
 //     reason rule, ownership (`source_kind = 'manual'`) and the version are
 //     exactly an edit's. `POST /api/records/[id]/answers` is its route.
 //
-// `project-wide.ts` creates rows for the same reason with the same insert
-// (its own, inside its batch); it is the other coder's file in the chase
-// build and is left as it is.
+// There is no other copy of the insert (L1, 2026-11-21: `project-wide.ts`
+// carried its own until then).
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { changeSetForEdit, type VerifiedEvidence } from "@/lib/change-sets";
@@ -39,6 +42,9 @@ import { lockRecords } from "@/lib/record-lock";
 import type { AnswerState } from "@/lib/spec-vocab";
 
 export type CreatedAnswerRow = { id: string; recordId: string; requirementId: string; version: number };
+
+/** One question on one record. */
+export type AnswerRowPair = { recordId: string; requirementId: string };
 
 /**
  * Creates, `missing`, every answer row these records' CURRENT categories ask
@@ -54,9 +60,22 @@ export async function insertMissingAnswerRows(
   txn: TxnSql,
   recordIds: readonly string[],
   actor: string,
+  options: {
+    /**
+     * Only these (record, question) pairs — and still only where the record's
+     * CURRENT category asks the question and no row exists. Absent is every
+     * missing row of every record given; an EMPTY list is none.
+     */
+    only?: readonly AnswerRowPair[];
+  } = {},
 ): Promise<CreatedAnswerRow[]> {
   const ids = [...new Set(recordIds)].sort();
   if (ids.length === 0) return [];
+  const only = options.only;
+  if (only && only.length === 0) return [];
+  const narrowed = only !== undefined;
+  const pairRecords = (only ?? []).map((pair) => pair.recordId);
+  const pairQuestions = (only ?? []).map((pair) => pair.requirementId);
   const rows = await txn`
     insert into spec_answers (record_id, requirement_id, spec_field_id, state, source_kind, created_by, updated_by)
     select r.id, q.id, q.spec_field_id, 'missing', 'manual', ${actor}, ${actor}
@@ -66,6 +85,10 @@ export async function insertMissingAnswerRows(
        and not exists (
          select 1 from spec_answers a where a.record_id = r.id and a.requirement_id = q.id and a.revision_no = 0
        )
+       and (not ${narrowed}::boolean or exists (
+         select 1 from unnest(${pairRecords}::uuid[], ${pairQuestions}::uuid[]) as p(record_id, requirement_id)
+          where p.record_id = r.id and p.requirement_id = q.id
+       ))
      order by r.id, q.sort_order
     on conflict (record_id, requirement_id, revision_no) do nothing
     returning id, record_id, requirement_id, version

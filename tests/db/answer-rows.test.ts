@@ -206,4 +206,28 @@ describeIfDb("answering a question that has no answer row", () => {
     expect(again.answersCreated).toBe(0);
     expect(await versionsOf(record.id)).toHaveLength(after.length);
   });
+
+  // L1, 2026-11-21: `project-wide.ts` had its own copy of this insert. It now
+  // calls the one function, narrowed to the (record, question) pairs it is
+  // about to write — a fan-out writes ONE question, and must not create rows
+  // for the record's other missing questions behind a sentence about that one.
+  it("narrowed to (record, question) pairs, creates those rows only, and never one the record's category does not ask", async () => {
+    const record = await categorisedRecord("__QA Wardrobe");
+    const wanted = await addQuestion("__QA Hanging rail?", "readiness");
+    const untouched = await addQuestion("__QA Shoe rack?", "readiness");
+    const [foreign] = await q(`select id from requirements where category_id = $1 order by sort_order limit 1`, [other!.id]);
+    const { insertMissingAnswerRows } = await import("@/lib/answer-rows");
+    const created = await withTransaction((txn) =>
+      insertMissingAnswerRows(txn, [record.id], "qa", {
+        only: [
+          { recordId: record.id, requirementId: wanted },
+          { recordId: record.id, requirementId: String(foreign!.id) },
+        ],
+      }),
+    );
+    expect(created.map((row) => row.requirementId)).toEqual([wanted]);
+    expect(await answerOf(record.id, wanted)).toMatchObject({ state: "missing", source_kind: "manual" });
+    expect(await answerOf(record.id, untouched)).toBeUndefined();
+    expect(await answerOf(record.id, String(foreign!.id))).toBeUndefined();
+  });
 });
