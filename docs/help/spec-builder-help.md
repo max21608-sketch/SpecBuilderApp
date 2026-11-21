@@ -352,8 +352,14 @@ when nothing is left, it says so and offers "Back to the pack".
   ?" — "The name says “sofa”." Press it to accept, or "Choose type" / "Change
   type" to pick another; "Any of them" goes back to asking every kind's
   questions. A phase tab offers "Accept N suggested types". A typed sofa's TGQ
-  no longer counts "Swivel mechanism"; an item nobody has typed counts every
+  no longer counts "Swivel mechanism", and a chase or the Fill-in screen no
+  longer marks it as needed to quote; an item nobody has typed counts every
   kind's questions, as before.
+- **Fabric 1, 2, 3.** The screens call BWS's "COM 1/2/3" fields "Fabric 1/2/3",
+  with "BWS: COM 1" in small type beside them. The BWS file still says COM 1.
+  On the quote a fabric reads "FABRIC:", unless its finish in the library is
+  ticked **"Customer’s own material"** (Finishes → Edit, with a reason like any
+  edit), when it reads "COM:".
 - "Provisional cabinetry gate model, drafted by AI on 20 Nov 2026, not yet
   confirmed by Matthew" beside a gate view or a TGQ figure means those gate
   rules are a draft. Use them; Matthew may still change them.
@@ -365,6 +371,20 @@ away — either saves it — or press "TBC" if it
 has been asked and is not decided yet. "By question"
 answers one question across many items.
 
+- **Who answers it.** Every question is the client's, the CAM's or ours
+  ("In-house"). "Filter by who answers" → "CAM only" is the list to take to
+  the CAM; it hides the rest and changes no count. A CAM or in-house question
+  carries its label; if nobody here knows it, press **"Ask the client"** and,
+  on this project only, it goes in the chase. It then says "Asked of the
+  client on this project", with **"Put it back"**.
+- **"By area — answered once for each area".** Indoor or outdoor, floor type,
+  wall build and "fully outdoor or partially protected" are answered once for
+  an area such as "Restaurant" and written to every item in it. An item that
+  already holds a different answer is left alone unless you tick it (and say
+  why). An item with no area is answered on its own.
+- "Provisional cabinetry gate model, drafted by AI…" at the top means some of
+  the TGQ marks on this screen come from that draft.
+
 Project → **"Chase N"**.
 
 1. **Contacts first.** Each record carries a designer code from the bill. Add a
@@ -375,7 +395,16 @@ Project → **"Chase N"**.
    codes are offered) and press "Set on N items". It sets each item as its
    Edit would, and its configurations with no designer of their own; any it
    could not change are listed by number, with why.
-2. Tick what to ask and press **"Draft the email · N questions"**.
+2. Tick what to ask and press **"Draft the email · N questions"**. A designer
+   or client is asked only the client's questions; our own (in-house and CAM)
+   are not listed under their name, and "Show our own questions (in-house and
+   CAM)" shows them only on a colleague's tab, where anything may be sent. If
+   one is ticked for a designer anyway, the draft is refused: "… ours to
+   answer, not the client's — a chase to a designer or a client asks only
+   client questions." Untick it, or answer it on the Fill-in screen. A
+   designer's email shows each question in the client's words ("Fabric 1"),
+   never the BWS field name; an area question says "one answer for each
+   area". A draft made before this works as it did.
 3. **"Open in Outlook (.eml)"** downloads the draft. Open it, check it, and
    send it from your own Outlook. The app sends nothing.
 4. Back in the app press **"I've sent this"** → "Yes, I sent it". This is what
@@ -606,8 +635,9 @@ Things that look wrong and are not:
   items with something outstanding. Hover the number for what it counts.
 - *"Product code — Nowhere to record it"* on the Gates tab → known: the
   matrix asks for it and the app has no field yet. Not a fault.
-- *Project-wide questions (site access, assembly guide)* → answered once on
-  the project ("Answer on the project"), not on every item.
+- *Project-wide questions (site access, assembly guide, interliner / fire
+  standard, visible fixings, "exact copy or BW standards?")* → answered once
+  on the project ("Answer on the project"), not on every item.
 
 ### 6.7 Anything, anywhere
 

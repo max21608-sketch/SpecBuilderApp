@@ -508,8 +508,10 @@ the one item with NO category. Max's ruling is the rule:
   was the second rule, and on Matthew's matrix it drops readiness rows that
   ARE TGQ.
 - **What a chase ASKS is a narrower set, and the screen says so.**
-  `inChaseAsk` = the item's TGQ, `spec_field` only (decision 19). The record
-  header sentence (`chase-counts.ts`) states each part.
+  `inChaseAsk` = the item's TGQ, CLIENT questions only (decision D of
+  2026-11-20, which replaced decision 19's `spec_field` test — see "Every
+  question has an audience" below). The record header sentence
+  (`chase-counts.ts`) states each part.
 - **A question's TIER is untouched.** `questionTier` and the tier stored on
   `email_draft_items` are what they were. This changes what is COUNTED, and
   re-tiering would stale every unsent draft (the `chased_at` trap).
@@ -708,10 +710,13 @@ type; the traps:
   blocks a quote". An untyped item behaves exactly as before 0061.
 - **`tgqMatrixFor` is the only lookup.** `loadTgqMatrices` still returns the
   union per sheet, with each type's own set beside it, so a caller reading
-  `.get(categoryId)` keeps today's behaviour — and that is where
-  `chase-drafts.ts` and `project-wide.ts` still are until Track 2 moves them,
-  so a typed sofa's chase and fill-in still list Swivel while its gate panel,
-  its TGQ and the overview do not.
+  `.get(categoryId)` gets the union whatever the record's type. Every caller
+  that tiers a record goes through `tgqMatrixFor` with `r.matrix_type`:
+  the gate panel, TGQ, the overview, and (since Track 2's Stage 2,
+  2026-11-21) `loadOutstanding`, `loadQuestionsByKey` and `project-wide.ts`
+  — so a typed sofa is neither chased for Swivel nor shown it as TGQ on the
+  fill-in screen. A new `.get(categoryId)` beside a question is the defect
+  again (`tests/db/chase-matrix-type.test.ts`).
 - **The SQL copy picks its row by type.** `tgq_questions` holds one row per
   question for the union (`matrix_code` null) and one per type, joined on
   `coalesce(matrix_code, '') = coalesce(record's type, '')`, so it stays a
@@ -795,3 +800,127 @@ written only where `categoryStatus = 'chosen'`. A guess nobody accepted
 confirms with no category and no checklist, as an unsuggested line always has.
 "Accept all suggested categories on this tab" is one press per tab. `qa:demo`
 accepts its guesses before confirming.
+
+### Every question has an audience, and only client questions reach a designer
+
+`db/migrations/0062_question_audience.sql`, `db/seed/0015_question_audience.sql`,
+`src/lib/chase-grouping.ts` (`questionAudience`, `isClientQuestion`,
+`inChaseAsk`), `src/lib/chase-drafts.ts` (`loadQuestionRoutes`,
+`groupByContact`), `src/lib/chase-audience.ts`, `src/lib/question-routes.ts`,
+`src/app/api/projects/[id]/question-routes/route.ts`,
+`src/lib/chase-template.ts` (`TEMPLATE_VERSION` 4), `src/components/infill/InfillRow.tsx`
+
+Decisions D and E of 2026-11-20 (Claude's at Max's instruction; Matthew may
+overrule): the first chase on the test tender put "Assembly guide required"
+and BWS field names in front of a designer. Chaseable was `kind =
+'spec_field'`, which says whether BWS has a COLUMN for the answer, not who
+GIVES it. `requirements.audience` is `in_house` | `cam` | `client`, seed data;
+`project_question_routes` moves one question for one project. Seven traps:
+
+- **0062 sets the audience FROM THE KIND** (readiness in-house, a spec field
+  the client's), so between the migration and seed 0015 every count, tier and
+  preselection reads exactly as before. Measured on T20120: item TGQ, the
+  overview, the preselection and the blocked panel identical; the designer
+  tab's LIST dropped the readiness questions its default filter already hid.
+  Order: migrate, deploy, seed.
+- **The audience decides the chase, never the kind, with no fallback.**
+  `AudienceReadable`, `GroupableQuestion`, `SelectableQuestion`,
+  `GateQuestion` and the record payload REQUIRE it, so a payload that forgets
+  it is a type error and not a quiet reading of decision 19. `gateRowRole`'s
+  `readiness` bucket ("you record here") is every in-house or CAM question,
+  whatever its kind; `chase` is a client one, a readiness question
+  included ("Floor plans").
+- **`groupByContact` drops a non-client question from the designer route
+  AFTER its two blocks.** `blocked` describes the routing and still counts
+  every question a line owes, so the Nobody assigned panel did not move. A
+  colleague (`internal`) still receives everything; a designer's chase can
+  hold only client questions.
+- **Refused at the write boundary, on ADDED lines only.** The generate route
+  refuses an in-house or CAM question to a designer or client in words
+  (`audienceRefusal`, off the LIVE question and the LOCKED contact row); the
+  edit route refuses one only when it is added, so a draft written before the
+  rule opens, edits and downloads with its body as stored
+  (`tests/db/chase-audience.test.ts`, byte for byte).
+- **Neither the client wording nor "ask the client" touches the snapshot or
+  `spec_answers`.** The wording is `requirements.client_prompt`, frozen per
+  line in `email_draft_items.asked_as` beside `context_snapshot`, never in it
+  (the 0020 tier rule: a field in the snapshot stales every unsent draft). The
+  route is a side table, never a column on the answer (bump_version — the
+  chased_at trap) and never a write to `requirements` (one project's decision
+  is not the cheat sheet's). It opens no change set — it writes no
+  specification content — and is accounted for by its audit trigger (insert to
+  move, delete to move back) and by the row saying so on screen. It locks the
+  project, as the generate route does, so a chase reads one audience.
+- **An external recipient reads the client wording and NO BWS field name**
+  (`recipient` on `buildChaseEmail`, decided off the contact row's role; absent
+  is external, the direction that never shows a client a BWS name). A
+  colleague reads the prompt and the field. Lines group by the words THIS
+  reader is asked, so "Fabric 1" from fifteen sheets is asked once. The
+  coverage pairs still round-trip out of the body.
+- **"Project sold with metal finish or metal paint effect?" stays a client
+  question** with a client wording ("Metal finish 1, and where on the item"):
+  it is the only question for BWS field 5 on all seventeen sheets and TG0
+  rows 21 and 109 require that field. E's other wording-for-BW questions are
+  in-house.
+
+The fill-in screen's "Filter by who answers" narrows what is LISTED — lines
+by their `audiences` counts, an open line by each question — and never a
+count, the chase screen's filter rule.
+
+### A question can be answered once for an AREA, by the project-wide mechanism
+
+`db/seed/0015_question_audience.sql` (`answer_scope`), `db/seed/0003_requirements.sql`
+(three section literals), `src/lib/project-wide.ts` (`loadAreaWide`,
+`applyAreaWide`, `FanOutScope`), `src/app/api/projects/[id]/area-wide/route.ts`,
+`src/components/infill/AreaWideCard.tsx`, `src/components/projects/ProjectWideCard.tsx`
+
+Decision C of 2026-11-20 is two different changes, and keeping them apart is
+the trap (design finding 12):
+
+- **Per PROJECT is the section, not a scope.** Interliner (the fire
+  standard), visible fixings and "exact copy or BW standards?" moved into
+  "Project / commercial" in seed 0003 — the literal and nothing else — and the
+  existing mechanism answers them with no code.
+- **Per AREA is `requirements.answer_scope = 'area'`** (Indoor / Outdoor,
+  Floor type, Wall build, fully outdoor), and those questions STAY in the
+  item's own TGQ count. A third, per-area count is how TGQ came to mean four
+  numbers (2026-10-12).
+- **One mechanism, not a copy.** `project-wide.ts`'s loader and writer take a
+  scope; an area card's key is the folded area plus `questionGroupKey`. The
+  project-wide rules hold unchanged: the set re-derived under the PROJECT lock
+  (an item added, retired or moved to another area moves the set) and refused
+  whole if it moved; a settled different answer never overwritten without a
+  tick and a reason; one change set, one version per record, records locked
+  in id order, `spec_records.version` untouched; a dimension refused.
+- **The area folds by case and whitespace only (`foldArea`)**, the chase
+  email's rule; an item with NO area is on no card and is answered on its own.
+  `tests/db/area-wide.test.ts`.
+
+### Which drawing labels answer which question — and why most are not aliased
+
+`db/seed/0016_requirement_aliases.sql`, `src/lib/spec-document.ts`
+(`requirementCandidates`, read only), `src/lib/matching.ts` (`scoreMatch`),
+`tests/lib/requirement-aliases-seed.test.ts`
+
+Decision G of 2026-11-20. `requirement_aliases` is read by `spec-document.ts`
+(emails and register-backed documents) through `matchName`, whose score is
+the overlap over the SMALLER word set: every word of an alias attracts any
+one-word label containing it, and any label whose words all appear in it. So
+an alias is chosen by running the corpus (`vocab:gap`, 613 labels on the
+local stack, 2026-11-21) through the resolver with and without it, and only
+the forms that moved nothing but what they were meant to were seeded:
+"Swivel", "Seat build", "Studs / nailing".
+
+- **"Back cushions" is NOT an alias**: any alias holding "cushions" lands the
+  corpus's own fabric callout "cushions (seat, back, bolster)" and a bare
+  "cushions" ("double stitching") on Back Cushion Build — confidently wrong.
+- **"Stitching" is NOT an alias**: STITCHING already lands by the prompt and
+  the BWS name agreeing, and a one-word alias attracts "Cushion (Double
+  stitching)", which a tie happens to hold off today.
+- **"FR" already lands on "Interliner required?"** through the BWS field's own
+  name ("FR Interliner"), and G says FR answers nothing. A seed cannot stop it;
+  it is the matcher, and it is Max's to decide, not fixed here.
+- **Shop drawings do not read this table** (`drawing-document.ts`): a sofa
+  drawing still shows SWIVEL as a note. That is a read-time step in
+  `suggestSpecField`, not in this build (design finding 13).
+

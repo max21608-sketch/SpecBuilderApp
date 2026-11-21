@@ -161,7 +161,9 @@ quote cannot cover a different set of records from the file.
   `composeDimensionCell` writes the DIMS line and `renderAttributeValue` the
   rest. A quote saying `W2860` where the BWS file said something else would be
   found by a client rather than by us. The labels are normalised: his own file
-  writes `COM1`, `COM 1` and `COM` for one field.
+  writes `COM1`, `COM 1` and `COM` for one field. Since decision F
+  (2026-11-20) the fabric slots print FABRIC, or COM for the customer's own
+  material — the section at the end of this file.
 - **An AMBIGUOUS product code derives nothing.** Matthew's rule is "MF1 or MF2
   populated → with-Metalwork, otherwise Simple", and the register is seeded
   from the 2026-09-14 capture — 18 of the 25 ids in his real quote match it
@@ -267,3 +269,32 @@ coverage only.
 **STILL OPEN:** what `Specs 2` should point at on the real sheet (a second
 drawing set? the designer's own sheet?), and whether Matthew wants `Tags` to go
 on receiving pasted prose once the app composes a real cell there.
+
+### A fabric is FABRIC on the quote unless the library says it is the customer's own
+
+`src/lib/quote-lines.ts` (`fabricLabel`, `QuoteOptions`),
+`src/app/api/projects/[id]/export/quote/route.ts`, `src/lib/finish-edit.ts`,
+`src/lib/spec-field-label.ts`, `src/components/ui/FieldName.tsx`,
+`tests/lib/bws-export-com.test.ts`
+
+Decision F of 2026-11-20: "COM" is the customer's own material, and most
+fabric BW supplies. Four things are load-bearing.
+
+- **The BWS file does not change.** Its column is COM 1 and stays that;
+  `bws-export.ts` was not opened, and a test holds its 109 columns, names and
+  ids against a digest taken at 8db3611. Screens say "Fabric 1" with "BWS:
+  COM 1" small beside it (`FieldName`); the check sheet prints "Fabric 1 (BWS:
+  COM 1)" because a reviewer reads it against the file.
+- **The tick is on the finishes library row** (`project_finishes.customer_supplied`,
+  0062), off by default, and it is an EDIT: on a confirmed finish it needs the
+  Edit panel's reason and opens a `finish_edit` change. `editFinish` REPLACES
+  every column, so it treats an undefined `customerSupplied` as "leave it":
+  the kinds route, the schedule confirm and an edit that does not mention it
+  keep the tick (`tests/db/finish-customer-supplied.test.ts`).
+- **COM only where a spec is LINKED to a ticked finish.** A typed answer has no
+  finish behind it and is FABRIC. The quote route reads the ticked ids and
+  hands them to `composeQuoteSheet`; they are NOT in the record's atoms,
+  because a version is the export's atoms and the export did not move.
+- **FABRIC and COM are numbered each within its own label**, as his file
+  numbers COM: "FABRIC 1", "FABRIC 2", "COM".
+
