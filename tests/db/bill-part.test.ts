@@ -268,6 +268,22 @@ describeIfDb("a bill that is part of a file, and a bill registered twice", () =>
     expect((await run(first.body.importId)).registration_request_id).toBe(requestId);
   });
 
+  it("answers a replayed FAILED bill as the failure it was, never as an added bill", { timeout: 60_000 }, async () => {
+    // Fix 5 (2026-11-21): the replay answered `ok: true` for a run whose parse
+    // had failed, so a lost response, retried, showed a bill that never read
+    // as "Added".
+    const requestId = randomUUID();
+    const first = await register("__QA replay broken.xlsx", Buffer.from("not a workbook at all"), XLSX, { registrationRequestId: requestId });
+    expect(first.body.ok).toBe(false);
+    expect((await run(first.body.importId)).status).toBe("failed");
+    const [runs, attachments] = [await count("intake_runs"), await count("attachments")];
+
+    const again = await register("__QA replay broken.xlsx", Buffer.from("not a workbook at all"), XLSX, { registrationRequestId: requestId });
+    expect(again.status).toBe(422);
+    expect(again.body).toEqual({ ok: false, error: first.body.error, importId: first.body.importId, reused: true });
+    expect([await count("intake_runs"), await count("attachments")]).toEqual([runs, attachments]);
+  });
+
   it("answers a replayed PDF bill without storing a second workbook", { timeout: 60_000 }, async () => {
     const requestId = randomUUID();
     const first = await register("__QA replay mixed.pdf", mixedPdf(), "application/pdf", {

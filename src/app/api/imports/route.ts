@@ -536,14 +536,33 @@ async function registerBlobBoq(input: Registered, actor: string): Promise<Respon
  * stored or recorded for a replay.
  */
 async function replayedBill(requestId: string | null | undefined, exec: TxnSql = sql): Promise<Response | null> {
-  const importId = await billRegisteredBefore(requestId, exec);
-  return importId ? json({ ok: true, importId, reused: true, sourcePreserved: true }, 200) : null;
+  const earlier = await billRegisteredBefore(requestId, exec);
+  return earlier ? replayAnswer(earlier) : null;
 }
 
-async function billRegisteredBefore(requestId: string | null | undefined, exec: TxnSql): Promise<string | null> {
+type EarlierBill = { id: string; status: string; error: string | null };
+
+async function billRegisteredBefore(requestId: string | null | undefined, exec: TxnSql): Promise<EarlierBill | null> {
   if (!requestId) return null;
-  const rows = await exec`select id from intake_runs where registration_request_id = ${requestId}`;
-  return rows[0] ? String(rows[0].id) : null;
+  const rows = await exec`select id, status, error from intake_runs where registration_request_id = ${requestId}`;
+  if (!rows[0]) return null;
+  return { id: String(rows[0].id), status: String(rows[0].status), error: rows[0].error == null ? null : String(rows[0].error) };
+}
+
+/**
+ * A REPLAY ANSWERS AS THE FIRST REQUEST ENDED, failure included. A bill whose
+ * parse FAILED is a run with `status = 'failed'`, and answering its replay
+ * `ok: true` told the screen a bill that never read had been added — a lost
+ * response, retried, turned a failure into "Added". So a failed run is
+ * answered as the failure it was, with its sentence, and the screen mints a
+ * fresh request id for the next try (`nextRequestId`: the server answered).
+ * A run still parsing, or parsed, is the success it is or will be.
+ */
+function replayAnswer(earlier: EarlierBill): Response {
+  if (earlier.status === "failed") {
+    return json({ ok: false, error: earlier.error ?? "This bill could not be read.", importId: earlier.id, reused: true }, 422);
+  }
+  return json({ ok: true, importId: earlier.id, reused: true, sourcePreserved: true }, 200);
 }
 
 /**
@@ -691,13 +710,13 @@ async function registerPdfForTranscription(
   // The PDF's attachment and the run that names it stand or fall together: an
   // attachment with no run is a stored bill nobody can open from any screen.
   let importId: string;
-  let reused = false;
+  let reused: EarlierBill | null = null;
   try {
     importId = await withTransaction(async (txn) => {
       const earlier = await billRegisteredBefore(requestId, txn);
       if (earlier) {
-        reused = true;
-        return earlier;
+        reused = earlier;
+        return earlier.id;
       }
       const pdfAttachment = await txn`
         insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
@@ -735,7 +754,7 @@ async function registerPdfForTranscription(
   } catch (cause) {
     return replayOrFailure(requestId, cause);
   }
-  if (reused) return json({ ok: true, importId, reused: true, sourcePreserved: true }, 200);
+  if (reused) return replayAnswer(reused);
   return json(
     {
       ok: true,
@@ -835,11 +854,11 @@ async function parseBoqInto(
   // failed, which is a state the Documents tab shows.
   let runId: string;
   let pdfSource: PdfBillSource | undefined;
-  let reused = false;
+  let reused: EarlierBill | null = null;
   try {
     ({ runId, pdfSource, reused } = await withTransaction(async (txn) => {
       const earlier = await billRegisteredBefore(requestId, txn);
-      if (earlier) return { runId: earlier, pdfSource: undefined, reused: true };
+      if (earlier) return { runId: earlier.id, pdfSource: undefined, reused: earlier };
       const attached = options.attach ? await options.attach(txn) : null;
       const run = await txn`
         insert into intake_runs
@@ -849,12 +868,12 @@ async function parseBoqInto(
                 ${requestId}, ${part ? JSON.stringify(part) : null}::jsonb, ${actor}, ${actor})
         returning id
       `;
-      return { runId: recordedId(run), pdfSource: attached?.pdfSource, reused: false };
+      return { runId: recordedId(run), pdfSource: attached?.pdfSource, reused: null as EarlierBill | null };
     }));
   } catch (cause) {
     return replayOrFailure(requestId, cause);
   }
-  if (reused) return json({ ok: true, importId: runId, reused: true, sourcePreserved: true }, 200);
+  if (reused) return replayAnswer(reused);
 
   // Terminal vs retryable is decided per step, not by one outer try/catch. A
   // file that is not a spreadsheet never becomes one, so it is terminal and
