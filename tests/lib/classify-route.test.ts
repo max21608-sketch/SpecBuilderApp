@@ -23,6 +23,7 @@
 // ============================================================================
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildPdf, buildPdfOfPages } from "../fixtures/build-pdf.mjs";
+import { lookAnswer } from "../fixtures/look-answers";
 
 const create = vi.hoisted(() => vi.fn());
 
@@ -99,11 +100,12 @@ async function classify(extra: Record<string, unknown> = {}) {
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 }
 
-function answers(input: Record<string, unknown>) {
-  create.mockResolvedValue({
-    content: [{ type: "tool_use", id: "t1", name: "record_document_kind", input }],
-    stop_reason: "tool_use",
-  });
+// What the model saw, answered through whichever tool the look forces: the
+// survey (one whole-file part) for a file with text, the file check for a
+// scan. Re-pinned for open intake: the route's look moved to the survey, and
+// every assertion below is unchanged.
+function answers(input: { genre: string; titleText: string | null; evidence: string; certain: boolean }) {
+  create.mockImplementation(lookAnswer(input));
 }
 
 describe("the model looked", () => {
@@ -169,14 +171,17 @@ describe("the call failed", () => {
 describe("which model looks", () => {
   // ONE model for every file since 2026-11-20: Haiku 5.5 takes every PDF the
   // upload admits, so a long set no longer goes to the extraction model.
-  it("asks the file-check model, with its forced tool and no thinking", async () => {
+  // Re-pinned for open intake: the look is the SURVEY's forced tool now, on
+  // the same model, still without thinking.
+  it("asks the file-check model, with the survey's forced tool and no thinking", async () => {
     answers({ genre: "shop_drawings", titleText: null, evidence: "x", certain: true });
     await classify();
-    const { CLASSIFY_MODEL, CLASSIFY_TOOL_NAME } = await import("@/lib/document-classify");
+    const { CLASSIFY_MODEL } = await import("@/lib/document-classify");
+    const { SURVEY_TOOL_NAME } = await import("@/lib/pack-survey");
     expect(CLASSIFY_MODEL).toBe("claude-haiku-5-5");
     expect(create.mock.calls[0]?.[0]).toMatchObject({
       model: CLASSIFY_MODEL,
-      tool_choice: { type: "tool", name: CLASSIFY_TOOL_NAME },
+      tool_choice: { type: "tool", name: SURVEY_TOOL_NAME },
     });
     expect(create.mock.calls[0]?.[0]).not.toHaveProperty("thinking");
     expect(create.mock.calls[0]?.[0]).not.toHaveProperty("fallbacks");

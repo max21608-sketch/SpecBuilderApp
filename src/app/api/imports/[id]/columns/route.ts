@@ -229,7 +229,9 @@ async function readAgain(run: BoqRunRow, expectedVersion: number, actor: string)
 
   const sources = await readBoqSource(run);
   const version = await withTransaction(async (txn) => {
-    const parsed = parseBoqSheets(sources, await loadBoqReadingRegisters(txn));
+    // The registration's part, again: a sheet the upload did not file as the
+    // bill comes back ignored with the same reason, never silently included.
+    const parsed = parseBoqSheets(sources, await loadBoqReadingRegisters(txn), { part: run.sourcePart });
     if (!parsed.sheets || parsed.sheets.length === 0) {
       throw new DomainConflictError("no_sheets", parsed.ok ? "The file has no sheets." : parsed.error, {
         status: 422,

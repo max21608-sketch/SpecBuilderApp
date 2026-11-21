@@ -25,6 +25,7 @@ import Link from "next/link";
 import { DOCUMENT_KIND_LABELS } from "@/lib/spec-vocab";
 import type { PreambleNote, StagedPreamble } from "@/lib/preamble-document";
 import { attemptRestartable } from "@/lib/extraction-claim";
+import { documentLabel, type SourcePart } from "@/lib/source-part";
 
 type Run = {
   id: string;
@@ -32,6 +33,8 @@ type Run = {
   version: number;
   error: string | null;
   filename: string | null;
+  /** Which part of the file this read is for (open intake); null or absent for the whole file. */
+  sourcePart?: SourcePart | null;
   claim_live: boolean | null;
   within_deadline: boolean | null;
   claim_count: number;
@@ -182,7 +185,7 @@ export default function PreambleReview({
     <>
       <PageHeader
         crumbs={[crumb]}
-        title={run?.filename ?? "Preamble"}
+        title={run?.filename ? documentLabel(run.filename, run.sourcePart) : "Preamble"}
         actions={actions}
         subtitle={
           <>
@@ -216,7 +219,7 @@ export default function PreambleReview({
     return shell(
       <Card title={deferred ? "This preamble is waiting for a slot" : "This preamble has not been read"}>
         <p className="text-neutral-600">
-          {run.filename ?? "This document"} · {DOCUMENT_KIND_LABELS.preamble}
+          {run.filename ? documentLabel(run.filename, run.sourcePart) : "This document"} · {DOCUMENT_KIND_LABELS.preamble}
         </p>
         <div className="mt-2">
           <DocumentState run={{ status: run.status, waitingForSlot: run.waitingForSlot }} />

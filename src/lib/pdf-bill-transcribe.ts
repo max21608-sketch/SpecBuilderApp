@@ -55,6 +55,7 @@ import type { PrintedTotal } from "@/lib/pdf-bill-checks";
 import { parseBoqSheets, proposePhaseNames, type BoqReadingRegisters, type StagedBoqSheet } from "@/lib/boq-import";
 import { readSpreadsheetSheets } from "@/lib/intake-source";
 import { stageSheet } from "@/lib/boq-stage";
+import { partInstruction, partLabel, partPageCount, type SourcePart } from "@/lib/source-part";
 
 export { transcriptionChecks, printedNumber, type PrintedTotal, type PdfTranscription } from "@/lib/pdf-bill-checks";
 
@@ -89,10 +90,30 @@ export function planPageWindows(pageCount: number, perWindow = PAGES_PER_WINDOW)
   return out;
 }
 
+/**
+ * The page windows PART of a PDF is read in (open intake): each range of the
+ * part in windows of its own, so a window never spans pages of another
+ * document between two ranges, and every page is the FILE's — the model is
+ * told the file's page numbers, and every row it reports keeps its page.
+ */
+export function planPartWindows(part: SourcePart, perWindow = PAGES_PER_WINDOW): PageWindow[] {
+  const out: PageWindow[] = [];
+  if (part.kind !== "pages") return out;
+  for (const range of part.ranges) {
+    for (let first = range.from; first <= range.to; first += perWindow) {
+      out.push({ index: out.length, firstPage: first, lastPage: Math.min(range.to, first + perWindow - 1) });
+    }
+  }
+  return out;
+}
+
 const pagesWords = (window: PageWindow) =>
   window.firstPage === window.lastPage ? `page ${window.firstPage}` : `pages ${window.firstPage} to ${window.lastPage}`;
 
-export function transcribeWindowInstruction(window: PageWindow, windows: number, pageCount: number): string {
+export function transcribeWindowInstruction(window: PageWindow, windows: number, pageCount: number, part: SourcePart | null = null): string {
+  // A part in ONE window: the part's own instruction, sent before this, has
+  // said which pages are the document; "1 parts" would be nonsense.
+  if (part && windows === 1) return `Transcribe ${pagesWords(window)} of this file.`;
   if (windows === 1 && window.firstPage === 1 && window.lastPage === pageCount) {
     return `Transcribe every page of this document (${pageCount === 1 ? "one page" : `${pageCount} pages`}).`;
   }
@@ -297,6 +318,9 @@ export function mergeTranscription(windows: readonly PageWindow[], outputs: read
   const totals: PrintedTotal[] = [];
   let notABill: string | null = null;
 
+  // The lines above the table are read off the FIRST page read — page 1 of a
+  // whole file, the first page of a part (whose pages are the file's).
+  const firstPage = windows[0]?.firstPage ?? 1;
   const canonicalIndex = outputs.findIndex((output) => output.columns.length > 0);
   if (canonicalIndex >= 0) columns.push(...outputs[canonicalIndex]!.columns);
 
@@ -338,7 +362,7 @@ export function mergeTranscription(windows: readonly PageWindow[], outputs: read
 
     for (const raw of output.aboveHeader) {
       const parsed = AboveEntry.safeParse(raw);
-      if (parsed.success && parsed.data.page === 1 && window.firstPage === 1 && parsed.data.text.trim()) aboveHeader.push(parsed.data);
+      if (parsed.success && parsed.data.page === firstPage && window.firstPage === firstPage && parsed.data.text.trim()) aboveHeader.push(parsed.data);
     }
 
     let unreadable = 0;
@@ -536,11 +560,22 @@ function defaultStream(anthropic: Anthropic): StreamFn {
 export async function transcribePdfBill(input: {
   base64: string;
   pageCount: number;
+  /**
+   * The pages of the PDF that are this bill, where it holds other documents
+   * too (open intake). The whole file is still sent — its pages stay the
+   * file's — and only the part's pages are windowed and paid for.
+   */
+  part?: SourcePart | null;
   signal?: AbortSignal;
   deadlineMs?: number;
   stream?: StreamFn;
 }): Promise<TranscribeResult> {
-  const windows = planPageWindows(input.pageCount);
+  const part = input.part?.kind === "pages" ? input.part : null;
+  if (part) {
+    const refused = partTranscriptionRefusal(part, input.pageCount);
+    if (refused) return { ok: false, error: refused, charged: false, retryable: false, calls: [] };
+  }
+  const windows = part ? planPartWindows(part) : planPageWindows(input.pageCount);
   if (windows.length === 0) {
     return { ok: false, error: "This PDF's pages could not be counted, so it was not transcribed. Nothing was read or charged.", charged: false, retryable: false, calls: [] };
   }
@@ -582,10 +617,15 @@ export async function transcribePdfBill(input: {
 
   const readWindow = async (window: PageWindow) => {
     const startedAt = Date.now();
+    // A part's own instruction (which pages are the document, and that pages
+    // are the file's) goes between the prompt and the window's; a whole file
+    // sends exactly the three blocks it always sent.
+    const partText = partInstruction(part);
     const content = [
       { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf" as const, data: input.base64 } },
       { type: "text" as const, text: TRANSCRIBE_PROMPT },
-      { type: "text" as const, text: transcribeWindowInstruction(window, windows.length, input.pageCount) },
+      ...(partText ? [{ type: "text" as const, text: partText }] : []),
+      { type: "text" as const, text: transcribeWindowInstruction(window, windows.length, input.pageCount, part) },
     ];
     try {
       const { message, requestId } = await stream!({
@@ -647,4 +687,27 @@ export async function transcribePdfBill(input: {
   }
   const transcription = mergeTranscription(windows, outputs as TranscribeOutput[]);
   return { ok: true, transcription, calls, raw: raws };
+}
+
+/**
+ * Why PART of a PDF cannot be transcribed in one go, as the sentence the
+ * review prints, or null. The 24-page cap is the PART's pages, since only they
+ * are windowed; a part past the file's last page (where it could be counted)
+ * would window over pages that do not exist. Nothing is read or charged.
+ */
+export function partTranscriptionRefusal(part: SourcePart, pageCount: number): string | null {
+  const pages = partPageCount(part) ?? 0;
+  const most = MAX_WINDOWS * PAGES_PER_WINDOW;
+  if (pages > most) {
+    return `This bill is ${partLabel(part)} of the PDF, ${pages} pages, and one transcription reads at most ${most}. Split it into smaller PDFs and upload them separately, or ask for the bill as a spreadsheet. Nothing was read or charged.`;
+  }
+  const last = part.kind === "pages" ? (part.ranges[part.ranges.length - 1]?.to ?? 0) : 0;
+  if (pageCount > 0 && last > pageCount) {
+    return `This bill is ${partLabel(part)} of the PDF, and the PDF has ${pageCount} page${pageCount === 1 ? "" : "s"}. Upload it again with the pages it holds. Nothing was read or charged.`;
+  }
+  const windows = planPartWindows(part).length;
+  if (windows > MAX_WINDOWS) {
+    return `This bill is ${partLabel(part)} of the PDF, in more separate ranges of pages than one transcription can read (it would take ${windows} calls, and one transcription makes at most ${MAX_WINDOWS}). Upload the bill's pages as a PDF of their own. Nothing was read or charged.`;
+  }
+  return null;
 }

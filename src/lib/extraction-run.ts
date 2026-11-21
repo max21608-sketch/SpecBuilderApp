@@ -55,6 +55,9 @@ import { stageDrawings } from "@/lib/drawing-legacy";
 import { stageDrawingsV4 } from "@/lib/drawing-items";
 import { stagePreamble, type StagedPreamble } from "@/lib/preamble-document";
 import { stageFinishSchedule, type StagedFinishSchedule } from "@/lib/finish-schedule";
+import { partInstruction, readStoredPart, type SourcePart } from "@/lib/source-part";
+import { restrictOutputToPart, withLeftOutNote } from "@/lib/part-filter";
+import type { ExtractionPayload } from "@/lib/extraction-schema";
 
 const MAX_SOURCE_BYTES = 30 * 1024 * 1024;
 
@@ -65,6 +68,14 @@ type Claim = {
   projectId: string;
   attachmentId: string | null;
   documentKind: DocumentKind;
+  /**
+   * The part of the file this read is for (open intake), null for the whole
+   * file. A stored part that does not read as one FAILS the read rather than
+   * reading the whole file: a person registered a part, and reading every
+   * other document in the file too would stage them all under this one.
+   */
+  sourcePart: SourcePart | null;
+  sourcePartUnreadable: boolean;
 };
 
 export async function runDocumentExtraction({
@@ -102,7 +113,7 @@ export async function runDocumentExtraction({
         or (status = 'parsing'
             and processing_started_at < now() - make_interval(secs => ${CLAIM_EXPIRY_SECONDS}))
       )
-    returning id, attempt_id, claim_token, project_id, attachment_id, document_kind
+    returning id, attempt_id, claim_token, project_id, attachment_id, document_kind, source_part
   `;
 
   if (!claimed[0]) return await explainFailedClaim(extractionId, attemptId);
@@ -114,10 +125,15 @@ export async function runDocumentExtraction({
     projectId: String(claimed[0].project_id),
     attachmentId: claimed[0].attachment_id ? String(claimed[0].attachment_id) : null,
     documentKind: String(claimed[0].document_kind) as DocumentKind,
+    sourcePart: readStoredPart(claimed[0].source_part),
+    sourcePartUnreadable: claimed[0].source_part != null && readStoredPart(claimed[0].source_part) === null,
   };
 
   if (!claim.attachmentId) {
     return await fail(claim, actor, "The uploaded document is no longer attached to this import.");
+  }
+  if (claim.sourcePartUnreadable) {
+    return await fail(claim, actor, "This read is for part of a file, and which part could not be read. Upload the file again.");
   }
 
   // ---- the source ---------------------------------------------------------
@@ -150,7 +166,12 @@ export async function runDocumentExtraction({
   // the fourth attempt. Encrypted and oversized land here too.
   let source: Awaited<ReturnType<typeof prepareDocumentSource>>;
   try {
-    source = await prepareDocumentSource(blob.bytes, String(attachment.filename), String(attachment.content_type ?? ""));
+    source = await prepareDocumentSource(
+      blob.bytes,
+      String(attachment.filename),
+      String(attachment.content_type ?? ""),
+      claim.sourcePart,
+    );
   } catch (cause) {
     // The reader's own refusals are sentences ("This PDF has 140 pages…") and
     // pass through; a parser library's text gets a reference instead.
@@ -210,14 +231,21 @@ export async function runDocumentExtraction({
 
   // An OBSERVATION kind reads a long spreadsheet in row windows, inside this
   // one attempt (`extraction-windows.ts`); everything else is one call.
+  //
+  // A part of a PDF is told which pages are its own (`partInstruction`), after
+  // the prompt; a whole file, or a part of a workbook (whose other sheets were
+  // never put in `source`), sends exactly what it always sent.
+  const instruction = partInstruction(claim.sourcePart);
+  const partOptions = instruction ? { instruction, part: claim.sourcePart } : {};
   let result: ExtractionResult;
   let windows: WindowCall[] | null = null;
   if (isRegisterFreeKind(claim.documentKind)) {
-    result = await extractSpecDocument(source, claim.documentKind, { signal: abort });
+    result = await extractSpecDocument(source, claim.documentKind, { signal: abort, ...partOptions });
   } else {
     ({ result, windows } = await readSpecDocument(source, claim.documentKind, {
       signal: abort,
       billRows: registers?.billRows ?? null,
+      ...partOptions,
     }));
   }
 
@@ -257,7 +285,13 @@ export async function runDocumentExtraction({
   let staged: StagedOutput["staged"];
   let stagedCount: number;
   try {
-    ({ staged, stagedCount } = stageOutput(result.output, { fields, filename, projectDefaultUnit, registers }));
+    ({ staged, stagedCount } = stageOutput(result.output, {
+      fields,
+      filename,
+      projectDefaultUnit,
+      registers,
+      sourcePart: claim.sourcePart,
+    }));
   } catch (cause) {
     return await fail(
       claim,
@@ -328,7 +362,51 @@ type StagedOutput = {
  * try/catch wraps (audit D8): it may throw, and it never releases.
  */
 function stageOutput(
-  output: Extract<ExtractionResult, { ok: true }>["output"],
+  raw: Extract<ExtractionResult, { ok: true }>["output"],
+  context: {
+    fields: SpecFieldEntry[];
+    filename: string;
+    projectDefaultUnit: AttributeUnit | null;
+    registers: Awaited<ReturnType<typeof loadExtractionRegisters>> | null;
+    sourcePart: SourcePart | null;
+  },
+): StagedOutput {
+  const { fields, filename, projectDefaultUnit, registers, sourcePart } = context;
+  // FIRST, before any staging function sees the output (the design's trap 2):
+  // what the model reported from outside this read's part is dropped here,
+  // and the line saying so goes into the document's notes. A whole file
+  // passes through as the same object.
+  const restricted = restrictOutputToPart(raw, sourcePart);
+  const output = noted(restricted.output, restricted.leftOut);
+  const staged = stageRestricted(output, { fields, filename, projectDefaultUnit, registers });
+  // Only where there IS a part, so a whole file's staged JSON is what it was.
+  if (sourcePart) staged.staged.sourcePart = sourcePart;
+  return staged;
+}
+
+/** The output with the left-out line after its own document notes. */
+function noted(output: ExtractionPayload, leftOut: string | null): ExtractionPayload {
+  if (!leftOut) return output;
+  switch (output.outputKind) {
+    case "observations":
+      return { ...output, data: { ...output.data, documentNotes: withLeftOutNote(output.data.documentNotes, leftOut) } };
+    case "drawing_items":
+      return { ...output, data: { ...output.data, documentNotes: withLeftOutNote(output.data.documentNotes, leftOut) } };
+    case "drawing_items_v4":
+      return { ...output, data: { ...output.data, documentNotes: withLeftOutNote(output.data.documentNotes, leftOut) } };
+    case "preamble_notes":
+      return { ...output, data: { ...output.data, documentNotes: withLeftOutNote(output.data.documentNotes, leftOut) } };
+    case "finish_entries":
+      return { ...output, data: { ...output.data, documentNotes: withLeftOutNote(output.data.documentNotes, leftOut) } };
+    default: {
+      const unreachable: never = output;
+      return unreachable;
+    }
+  }
+}
+
+function stageRestricted(
+  output: ExtractionPayload,
   context: {
     fields: SpecFieldEntry[];
     filename: string;

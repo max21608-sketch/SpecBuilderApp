@@ -45,6 +45,12 @@
 // screen with an empty box and nothing is read for it, which costs nothing.
 // Choosing one by hand always wins over the suggestion.
 //
+// A FILE CAN HOLD SEVERAL DOCUMENTS (open intake, 2026-11-20). The look is a
+// survey, and a file it finds two or more parts in shows a box per part
+// (`UploadFileParts.tsx`); the press registers one READ per reader
+// (`upload-reads.ts`), each with its own place and request id. A file with one
+// read is a file row exactly as before. Still ONE charged look per file.
+//
 // STARTING AN INTAKE SPENDS MONEY, and this screen is still where that is said:
 // one small call per file to work out what it is, then one full read per
 // specification document. A bill of quantities is parsed by code and costs
@@ -61,6 +67,17 @@ import SuggestButton from "@/components/ui/SuggestButton";
 import Button from "@/components/ui/Button";
 import { checkUploadCounted } from "@/lib/upload-check";
 import { isPdfUpload, pdfUploadVerdict, type UploadVerdict } from "@/lib/upload-limits";
+import UploadFileParts from "@/components/projects/UploadFileParts";
+import {
+  kindOfPart,
+  nextRequestId,
+  readsOf,
+  serverAnswered,
+  SKIP_PART,
+  type ClassifiedPart,
+  type PartReadState,
+  type PartRow,
+} from "@/lib/upload-reads";
 import {
   CLASSIFY_FAILURE_BANNER,
   classifyFailureFromResponse,
@@ -159,6 +176,25 @@ type Queued = {
   alternative: string;
   alternativeEvidence: string | null;
   /**
+   * A HELD FILE'S SUGGESTED READER (a bill or schedule whose cells read as a
+   * bill's), OFFERED BESIDE AN EMPTY BOX and never in it — `alternative`'s
+   * rule, for its reason (2026-11-21, the review): shown in the box, the
+   * suggestion could not be accepted there (choosing the option a select
+   * already shows fires no change event, prod-ready F6), and a box showing a
+   * kind reads as answered when nothing has been. Kept out of `suggested`,
+   * too, so no path that reads `suggested` (`settledKind`) can file it.
+   */
+  heldSuggestion: string;
+  heldSuggestionEvidence: string | null;
+  /** The survey's own note on the file — what it set aside, merged or saw — in slate on the row. */
+  surveyNote: string | null;
+  /**
+   * EVERY PART LEFT OUT, NOTHING REGISTERED. Settled — no person is wanted —
+   * and not read: the row says "Nothing read from this file." and the tally
+   * does not count it as being read.
+   */
+  nothingRead: boolean;
+  /**
    * Stored and registered, and its read is queued behind the pack's in-flight
    * cap. NOT `error`: this is the ordinary outcome for the fourth document
    * onwards and it needs nobody, so it is said in slate beside the file rather
@@ -204,6 +240,21 @@ type Queued = {
   sentToModel: boolean;
   /** The browser's page count, passed to classify as a hint. Null when not counted. */
   pages: number | null;
+  /**
+   * THE FILE'S PARTS, where the look found two or more to read (open intake).
+   * Null for every single-kind file, which keeps today's row exactly: one
+   * box, one registration, `registrationRequestId` above.
+   */
+  parts: PartRow[] | null;
+  /**
+   * One request id PER READ, by the read's key (`readsOf`), made the first
+   * time the read is sent and kept for a retry of it — never shared between
+   * reads, and replaced once the server has answered it with an error
+   * (`nextRequestId`). How each read WENT is on its parts (`PartRow.read`),
+   * never here: a key changes with a kind, and a part's registration must
+   * not (`upload-reads.ts`).
+   */
+  readIds: Record<string, string>;
 };
 
 /**
@@ -232,6 +283,30 @@ function withPdfBill(
 /** What will be used for a file: what somebody chose, else what was read. */
 const kindOf = (item: Queued) => item.choice || item.suggested;
 
+/** A file's parts as `readsOf` takes them. */
+const partKinds = (parts: PartRow[]) => parts.map((part) => ({ place: part.place, kind: kindOfPart(part), read: part.read }));
+
+/**
+ * Has a person said enough for the press to act on this held file? A file
+ * row: its box. A file with parts: EVERY part — a file half answered
+ * registers nothing (`readsOf`).
+ */
+const answered = (item: Queued) => (item.parts ? !readsOf(partKinds(item.parts)).blocked : Boolean(item.choice));
+
+/** One part of the look's answer as the row holds it. */
+function partRowOf(part: ClassifiedPart): PartRow {
+  const base = { place: part.place, choice: "", held: part.held, error: part.unsupported, errorDetail: part.unsupportedDetail, read: null, offered: "" };
+  // A COVER OR AN INDEX STARTS AT "DON'T READ THIS PART", and it is the
+  // look's reading, shown and one change away like any other.
+  if (part.nothingToRead) {
+    return { ...base, suggested: SKIP_PART, settled: true, evidence: part.evidence || "Nothing here is read for a specification." };
+  }
+  const read = choiceFor(part.decision);
+  if (read) return { ...base, suggested: read, settled: true, evidence: withPdfBill(part.evidence, part.decision ? part.pdfBill : null) ?? "" };
+  // HELD, WITH OR WITHOUT A SUGGESTION: offered beside an empty box, filed by nobody.
+  return { ...base, suggested: "", settled: false, offered: choiceFor(part.suggestion), evidence: part.evidence };
+}
+
 /**
  * HELD BECAUSE THE NAME AND THE MODEL DISAGREE (K1), and nobody has said which.
  *
@@ -242,7 +317,8 @@ const kindOf = (item: Queued) => item.choice || item.suggested;
  * already shows fires no change). So the box is empty until somebody chooses,
  * in the box or by either suggestion; neither side is picked for them.
  */
-const disputed = (item: Queued) => item.status === "needs-kind" && Boolean(item.alternative) && !item.choice;
+const disputed = (item: Queued) =>
+  item.status === "needs-kind" && Boolean(item.alternative || item.heldSuggestion) && !item.choice;
 
 /** The kind the row's box shows. */
 const shownKind = (item: Queued) => (disputed(item) ? "" : kindOf(item));
@@ -253,8 +329,11 @@ const shownKind = (item: Queued) => (disputed(item) ? "" : kindOf(item));
  * bill the model will transcribe says what that costs when the press spends
  * it (F4); the name's, or the model's unheld reading, otherwise.
  */
-const shownEvidence = (item: Queued) =>
-  item.alternative && item.choice === item.alternative ? (item.alternativeEvidence ?? item.evidence) : item.evidence;
+const shownEvidence = (item: Queued) => {
+  if (item.alternative && item.choice === item.alternative) return item.alternativeEvidence ?? item.evidence;
+  if (item.heldSuggestion && item.choice === item.heldSuggestion) return item.heldSuggestionEvidence ?? item.evidence;
+  return item.evidence;
+};
 
 /**
  * The kind the press may act on WITHOUT looking at the document.
@@ -284,8 +363,10 @@ function uploadTally(queue: Queued[]) {
   return queue.reduce(
     (acc, item) => {
       if (item.pathname) acc.stored += 1;
-      if (item.status !== "refused" && shownKind(item)) acc.identified += 1;
-      if (item.status === "registering" || (item.status === "done" && !item.note && !item.duplicate)) acc.beingRead += 1;
+      if (item.status !== "refused" && (item.parts ? item.parts.some((part) => part.choice || part.suggested) : shownKind(item))) {
+        acc.identified += 1;
+      }
+      if (item.status === "registering" || (item.status === "done" && !item.note && !item.duplicate && !item.nothingRead)) acc.beingRead += 1;
       // Registered, and its read is queued behind the pack's in-flight cap. It
       // starts on its own and needs nobody, which is why it is not in the
       // column that says somebody is wanted.
@@ -372,6 +453,10 @@ export default function IntakeBatchUpload({
         held: null,
         alternative: "",
         alternativeEvidence: null,
+        heldSuggestion: "",
+        heldSuggestionEvidence: null,
+        surveyNote: null,
+        nothingRead: false,
         note: null,
         duplicate: false,
         emailRunId: null,
@@ -380,6 +465,8 @@ export default function IntakeBatchUpload({
         failure: null,
         sentToModel: false,
         pages: null,
+        parts: null,
+        readIds: {},
         };
       });
     // TOO LARGE FOR ONE READ is refused here too, before a byte is stored:
@@ -408,7 +495,7 @@ export default function IntakeBatchUpload({
   // says how many will be.
   const pending = queue.filter((item) => item.status !== "done" && item.status !== "refused");
   const held = queue.filter((item) => item.status === "needs-kind");
-  const heldAndAnswered = held.filter((item) => item.choice);
+  const heldAndAnswered = held.filter(answered);
 
   // ============================================================================
   // THIRTY BOXES, SET IN ONE GO (plan any-bill, step 3). Max, on the Miami
@@ -424,8 +511,12 @@ export default function IntakeBatchUpload({
   // ============================================================================
   const [ticked, setTicked] = useState<Set<string>>(() => new Set());
   const [bulkKind, setBulkKind] = useState("");
-  /** A row whose kind can still be set: not registered, not refused. */
-  const settable = pending;
+  /**
+   * A row whose kind can still be set: not registered, not refused — and a
+   * WHOLE FILE. A file with parts has a kind per part, and a bulk choice
+   * written over all of them would be the bulk control deciding a mix.
+   */
+  const settable = pending.filter((item) => !item.parts);
   const tickedRows = settable.filter((item) => ticked.has(item.key));
   const allTicked = settable.length > 0 && tickedRows.length === settable.length;
   /**
@@ -482,6 +573,102 @@ export default function IntakeBatchUpload({
   }
 
   /**
+   * A MIXED FILE'S READS, one registration per reader (`readsOf`), each with
+   * its own request id and its outcome recorded ON THE PARTS it covers. A
+   * registered part is never sent again, whatever its box says since; a read
+   * whose answer was lost is re-sent exactly; a refused one is free to be
+   * answered again. Returns false where the pack itself could not be made,
+   * which stops the press as it does for a single file.
+   */
+  async function registerReads(item: Queued, parts: PartRow[], pathname: string): Promise<boolean> {
+    const plan = readsOf(partKinds(parts));
+    if (plan.blocked) {
+      update(item.key, { status: "needs-kind" });
+      return true;
+    }
+    const ids = { ...item.readIds };
+    let rows = parts;
+    const onParts = (indexes: number[], patch: (row: PartRow) => PartRow) => {
+      rows = rows.map((row, index) => (indexes.includes(index) ? patch(row) : row));
+    };
+    let heldAgain = false;
+    for (const read of plan.reads) {
+      const entry = CHOICES.find((option) => option.value === read.kind);
+      if (!entry) continue;
+      const batch = await ensureBatch();
+      if (!batch) return false;
+      ids[read.key] ??= crypto.randomUUID();
+      const sent = { key: read.key, kind: read.kind, part: read.part };
+      // IN DOUBT FROM THE MOMENT IT IS SENT: a press interrupted here has
+      // sent a request whose answer nobody saw.
+      onParts(read.partIndexes, (row) => ({ ...row, read: { state: "registering", message: null, registered: false, inDoubt: sent } }));
+      update(item.key, { status: "registering", failure: null, held: null, readIds: { ...ids }, parts: rows });
+      const res = await apiFetch<{
+        importId?: string;
+        autoRead?: { dispatched: boolean; error?: string; waiting?: boolean; note?: string };
+      }>("/api/imports", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          batchId: batch,
+          importType: entry.importType,
+          documentKind: entry.documentKind,
+          pathname,
+          filename: item.file.name,
+          contentType: item.file.type,
+          size: item.file.size,
+          registrationRequestId: ids[read.key],
+          ...(read.part ? { part: read.part } : {}),
+        }),
+      });
+      if (!res.ok) {
+        ids[read.key] = nextRequestId(ids[read.key]!, res);
+        const detail = typeof res.data?.detail === "string" ? res.data.detail : null;
+        if (res.status === 400 && detail && entry.importType === "boq") {
+          // A BILL WHOSE TEXT IS NOT A TABLE: its parts go back to a person,
+          // as a whole file's box does (C1), with the reason on them. Nothing
+          // was registered for them, so they are free to be answered again.
+          heldAgain = true;
+          onParts(read.partIndexes, (row) => ({ ...row, choice: "", suggested: "", settled: false, offered: "", error: res.error, errorDetail: detail, read: null }));
+        } else {
+          const answered = serverAnswered(res);
+          onParts(read.partIndexes, (row) => ({
+            ...row,
+            read: { state: "failed", message: res.error, registered: false, inDoubt: answered ? null : sent },
+          }));
+        }
+        continue;
+      }
+      const autoRead = res.data.autoRead;
+      const waiting = autoRead?.dispatched === false && autoRead.waiting === true;
+      const state: PartReadState =
+        autoRead && !autoRead.dispatched && !waiting
+          ? // REGISTERED, and its read did not reach the queue: the run exists
+            // and the pack screen offers the retry, so the part is locked as
+            // added, with the reason in red beside it.
+            { state: "failed", message: autoRead.error ?? "Stored, but not queued for reading.", registered: true, inDoubt: null }
+          : { state: waiting ? "waiting" : "done", message: waiting ? (autoRead?.note ?? null) : null, registered: true, inDoubt: null };
+      onParts(read.partIndexes, (row) => ({ ...row, read: state }));
+    }
+    const failed = rows.some((row) => row.read?.state === "failed" && !row.read.registered);
+    const anyRegistered = rows.some((row) => row.read?.registered);
+    const waitingNote = rows.find((row) => row.read?.state === "waiting")?.read?.message ?? null;
+    update(item.key, {
+      parts: rows,
+      readIds: { ...ids },
+      status: heldAgain ? "needs-kind" : failed ? "failed" : "done",
+      progress: heldAgain || failed ? item.progress : 100,
+      // The tally reads `note` as "waiting for a slot"; the parts say which.
+      note: !heldAgain && !failed ? waitingNote : null,
+      // Every part left out: settled, and nothing read.
+      nothingRead: !heldAgain && !failed && !anyRegistered,
+      error: null,
+    });
+    return true;
+  }
+
+  /**
    * The press, over every file — or over ONE, for "Try identifying again". A
    * retry is the same path with the held-row guard lifted for that file: it is
    * already stored, so nothing is uploaded twice, and it is looked at again.
@@ -502,7 +689,7 @@ export default function IntakeBatchUpload({
         // HELD FOR A KIND AND STILL UNANSWERED. Skipped rather than guessed at:
         // reading it under the wrong prompt spends a call on output that
         // answers a different question. A retry of THIS file is the exception.
-        if (item.status === "needs-kind" && !item.choice && item.key !== onlyKey) continue;
+        if (item.status === "needs-kind" && !answered(item) && item.key !== onlyKey) continue;
 
         let pathname = item.pathname;
         let pages = item.pages;
@@ -539,7 +726,8 @@ export default function IntakeBatchUpload({
         // classified twice — but a NAME is not a reading, so a file the
         // filename rule guessed at is still looked at here.
         let choice = settledKind(item);
-        if (!choice) {
+        let parts = item.parts;
+        if (!choice && !parts) {
           update(item.key, { status: "reading", failure: null });
           const asked = await apiFetch<{
             decision: { importType: string; documentKind: string | null } | null;
@@ -556,9 +744,15 @@ export default function IntakeBatchUpload({
             held?: string | null;
             /** Held because the NAME says another kind: what the model read it as (K1). */
             modelDecision?: { importType: string; documentKind: string | null } | null;
+            /** Held, with a reader suggested: a bill or a schedule whose cells read as a bill's. */
+            suggestion?: { importType: string; documentKind: string | null } | null;
+            /** Two or more parts to read: the file is answered per part. */
+            parts?: ClassifiedPart[];
             evidence?: string;
             titleText?: string | null;
             charged?: boolean;
+            /** The survey's note on the file as a whole. */
+            note?: string | null;
           }>("/api/imports/classify", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -592,65 +786,101 @@ export default function IntakeBatchUpload({
           const evidence = withPdfBill(asked.data.evidence ?? null, pdfBill);
           update(item.key, {
             sentToModel: item.sentToModel || asked.data.charged !== false,
+            // The survey's own note: shown on the row, single file or parts.
+            surveyNote: asked.data.note?.trim() || null,
           });
-          // THE NAME AND THE MODEL DISAGREE (K1): held, with the name's
-          // suggestion kept in the box and the model's offered beside it. A
-          // person chooses; nothing is registered or read until they do.
-          //
-          // AND THE MODEL'S READING CARRIES ITS COST (F4): a bill the model
-          // will transcribe says so beside the offer, as the unheld row does.
-          if (asked.data.held && asked.data.modelDecision) {
-            update(item.key, {
-              status: "needs-kind",
-              held: asked.data.held,
-              alternative: choiceFor(asked.data.modelDecision),
-              alternativeEvidence: withPdfBill(asked.data.evidence ?? null, asked.data.pdfBill ?? null),
-            });
-            continue;
-          }
-          if (read) {
-            // THE DOCUMENT BEATS THE NAME, and the evidence moves with it: a
-            // suggestion and the sentence under it are one reading, or the row
-            // cites a cover page for something it worked out from a filename.
-            update(item.key, { suggested: read, evidence, suggestedFrom: "model", note: null });
+          // A MIXED FILE: a kind per part, and the press goes on to its reads
+          // only once every part has one — the look's reading or a person's.
+          if (asked.data.parts && asked.data.parts.length > 0) {
+            parts = asked.data.parts.map(partRowOf);
+            const blocked = readsOf(partKinds(parts)).blocked;
+            // The name's guess was for the file as one kind; it goes, so the
+            // footer stops counting it as filled in from the name.
+            update(item.key, { parts, status: blocked ? "needs-kind" : item.status, note: null, suggested: "", suggestedFrom: null, evidence: null });
+            if (blocked) continue;
           } else {
-            // IT LOOKED AND COULD NOT TELL. A name guess is KEPT — it is still
-            // one click from being accepted — and what the document said goes
-            // beside it in slate rather than replacing it.
-            const named = item.suggestedFrom === "name";
-            update(item.key, {
-              evidence: named ? item.evidence : evidence,
-              note: named && evidence ? `Looked at the document and could not tell: ${evidence}` : null,
-            });
-          }
-          choice = read;
+            // HELD WITH A READER SUGGESTED (a bill or schedule whose cells read
+            // as a bill's): offered BESIDE an empty box, one click to accept,
+            // and nothing registered until somebody does. The name's guess was
+            // for the file it named; the document's reading replaces it.
+            if (asked.data.held && asked.data.suggestion) {
+              update(item.key, {
+                status: "needs-kind",
+                held: asked.data.held,
+                heldSuggestion: choiceFor(asked.data.suggestion),
+                heldSuggestionEvidence: asked.data.evidence ?? null,
+                suggested: "",
+                suggestedFrom: null,
+                evidence: null,
+                note: null,
+              });
+              continue;
+            }
+            // THE NAME AND THE MODEL DISAGREE (K1): held, with the name's
+            // suggestion kept in the box and the model's offered beside it. A
+            // person chooses; nothing is registered or read until they do.
+            //
+            // AND THE MODEL'S READING CARRIES ITS COST (F4): a bill the model
+            // will transcribe says so beside the offer, as the unheld row does.
+            if (asked.data.held && asked.data.modelDecision) {
+              update(item.key, {
+                status: "needs-kind",
+                held: asked.data.held,
+                alternative: choiceFor(asked.data.modelDecision),
+                alternativeEvidence: withPdfBill(asked.data.evidence ?? null, asked.data.pdfBill ?? null),
+              });
+              continue;
+            }
+            if (read) {
+              // THE DOCUMENT BEATS THE NAME, and the evidence moves with it: a
+              // suggestion and the sentence under it are one reading, or the row
+              // cites a cover page for something it worked out from a filename.
+              update(item.key, { suggested: read, evidence, suggestedFrom: "model", note: null });
+            } else {
+              // IT LOOKED AND COULD NOT TELL. A name guess is KEPT — it is still
+              // one click from being accepted — and what the document said goes
+              // beside it in slate rather than replacing it.
+              const named = item.suggestedFrom === "name";
+              update(item.key, {
+                evidence: named ? item.evidence : evidence,
+                note: named && evidence ? `Looked at the document and could not tell: ${evidence}` : null,
+              });
+            }
+            choice = read;
 
-          // KNOWN, AND NOT SOMETHING THIS APP READS (§6.10.a row 8). Different
-          // from "nobody knows yet": the file stays, the dropdown stays open in
-          // case the answer was wrong, and the reason is printed as an error
-          // rather than as the grey evidence line — because there is an action
-          // in it, and it is not on this screen.
-          const unsupported = asked.data.unsupported ?? null;
-          if (unsupported) {
-            update(item.key, { status: "needs-kind", error: unsupported, errorDetail: asked.data.unsupportedDetail ?? null });
-            continue;
-          }
+            // KNOWN, AND NOT SOMETHING THIS APP READS (§6.10.a row 8). Different
+            // from "nobody knows yet": the file stays, the dropdown stays open in
+            // case the answer was wrong, and the reason is printed as an error
+            // rather than as the grey evidence line — because there is an action
+            // in it, and it is not on this screen.
+            const unsupported = asked.data.unsupported ?? null;
+            if (unsupported) {
+              update(item.key, { status: "needs-kind", error: unsupported, errorDetail: asked.data.unsupportedDetail ?? null });
+              continue;
+            }
 
-          // THE MODEL AND THE PDF'S TEXT DISAGREE (C1): the model named some
-          // other kind and the text is a bill's table. Held, in amber, with the
-          // next step in the sentence; the model's own reading stays beside it.
-          const held = asked.data.held ?? null;
-          if (held) {
-            update(item.key, { status: "needs-kind", held });
-            continue;
-          }
+            // THE MODEL AND THE PDF'S TEXT DISAGREE (C1): the model named some
+            // other kind and the text is a bill's table. Held, in amber, with the
+            // next step in the sentence; the model's own reading stays beside it.
+            const held = asked.data.held ?? null;
+            if (held) {
+              update(item.key, { status: "needs-kind", held });
+              continue;
+            }
 
-          if (!choice) {
-            // Uploaded and kept. A second press registers it once somebody has
-            // said what it is, with no second upload and no second reading.
-            update(item.key, { status: "needs-kind" });
-            continue;
+            if (!choice) {
+              // Uploaded and kept. A second press registers it once somebody has
+              // said what it is, with no second upload and no second reading.
+              update(item.key, { status: "needs-kind" });
+              continue;
+            }
           }
+        }
+
+        // A MIXED FILE IS REGISTERED AS ITS READS, one per reader.
+        if (parts) {
+          if (!(await registerReads(item, parts, pathname))) return;
+          continue;
         }
 
         const entry = CHOICES.find((option) => option.value === choice);
@@ -692,10 +922,14 @@ export default function IntakeBatchUpload({
           // again would read the same text the same way. The kind is cleared
           // so a person says what it is instead (C1).
           const detail = typeof res.data?.detail === "string" ? res.data.detail : null;
+          // THE SERVER ANSWERED, SO THE NEXT SEND IS A NEW REQUEST. Its replay
+          // guard hands the same id the FIRST attempt back, failed or not, so
+          // a retry under it could never succeed; only a lost answer keeps it.
+          const registrationRequestId = nextRequestId(item.registrationRequestId, res);
           if (res.status === 400 && detail && entry.importType === "boq") {
-            update(item.key, { status: "needs-kind", choice: "", suggested: "", error: res.error, errorDetail: detail });
+            update(item.key, { status: "needs-kind", choice: "", suggested: "", error: res.error, errorDetail: detail, registrationRequestId });
           } else {
-            update(item.key, { status: "failed", error: res.error, errorDetail: null });
+            update(item.key, { status: "failed", error: res.error, errorDetail: null, registrationRequestId });
           }
           continue;
         }
@@ -740,12 +974,19 @@ export default function IntakeBatchUpload({
       // "Emails" row links; several close the panel over that Documents card,
       // whose "Emails" group lists them. With a pack, the pack, as always —
       // the emails beside it are under "Emails" too.
+      //
+      // A FILE WHOSE EVERY PART WAS LEFT OUT made nothing, so a press of only
+      // such files has no pack and no email to go to: the panel stays, with
+      // "Nothing read from this file." on the row, rather than closing on a
+      // press that did nothing anyone can see.
       setQueue((current) => {
         const id = batchId.current;
         const waiting = current.some((row) => row.status === "needs-kind" || row.status === "failed" || row.duplicate);
         const emails = current.filter((row) => row.emailRunId);
         if (waiting) {
           queueMicrotask(() => onRegistered?.());
+        } else if (!id && emails.length === 0 && current.some((row) => row.nothingRead)) {
+          // Nothing registered anywhere: nothing to refresh, nothing to show elsewhere.
         } else {
           queueMicrotask(() => onUploaded?.());
           if (id) window.location.href = `/dashboard/projects/${projectId}/intake/${id}`;
@@ -768,7 +1009,7 @@ export default function IntakeBatchUpload({
   // NOR A FILE HELD FOR A PERSON (F4, 2026-11-20): the press skips one whose
   // box nobody has answered — "Try identifying again" is its own press — so
   // counting it promised a call the press does not make.
-  const toIdentify = pending.filter((item) => !settledKind(item) && item.status !== "needs-kind").length;
+  const toIdentify = pending.filter((item) => !item.parts && !settledKind(item) && item.status !== "needs-kind").length;
   const namedFromFilename = queue.filter((item) => item.suggestedFrom === "name" && !item.choice).length;
   const tally = uploadTally(queue);
   const showTally = busy || queue.some((item) => item.pathname);
@@ -788,7 +1029,34 @@ export default function IntakeBatchUpload({
   // printed under every held file, including thirty the model had been asked
   // about and a pack where every call had failed for want of a key — true of
   // the second only by accident, and false of the first.
-  const heldSent = held.filter((item) => item.sentToModel).length;
+  //
+  // AND A FILE PARTLY READ IS NOT "NOT IDENTIFIED" (2026-11-21, the review): a
+  // file whose bill part came back held after its drawings registered has
+  // been identified and read in part. It is counted, and said, apart.
+  const heldPartly = held.filter((item) => item.parts?.some((part) => part.read?.registered));
+  // NOR IS A FILE WHOSE SURVEY CAME BACK IN PARTS, one of which needs a
+  // person (the walk, 2026-11-21): it was identified, part by part. It has its
+  // own count and its own sentence; "could not be identified" is kept for a
+  // file that genuinely came back unidentified.
+  const heldForPart = held.filter((item) => item.parts && !heldPartly.includes(item));
+  const heldUnread = held.filter((item) => !item.parts);
+  const heldSent = heldUnread.filter((item) => item.sentToModel).length;
+
+  // A PART IN A READ IS NEVER RE-ANSWERED: the box is disabled, and this
+  // refuses too, because a disabled select is a screen and not a guarantee.
+  const choosePart = (key: string, index: number, value: string) =>
+    setQueue((current) =>
+      current.map((item) =>
+        item.key === key && item.parts
+          ? {
+              ...item,
+              parts: item.parts.map((part, at) =>
+                at === index && !part.read?.registered && !part.read?.inDoubt ? { ...part, choice: value, error: null, errorDetail: null } : part,
+              ),
+            }
+          : item,
+      ),
+    );
 
   const label = busy
     ? "Working…"
@@ -971,7 +1239,7 @@ export default function IntakeBatchUpload({
             const unchecked = Boolean(item.suggested) && !item.choice;
             return (
               <li key={item.key} className="flex flex-wrap items-center gap-2 px-3 py-2">
-                {item.status !== "done" && item.status !== "refused" ? (
+                {item.status !== "done" && item.status !== "refused" && !item.parts ? (
                   <input
                     type="checkbox"
                     aria-label={`Tick ${item.file.name}`}
@@ -994,6 +1262,7 @@ export default function IntakeBatchUpload({
                   {item.file.name}
                 </span>
 
+                {!item.parts && (
                 <select
                   aria-label={`Kind of ${item.file.name}`}
                   value={shownKind(item)}
@@ -1010,6 +1279,7 @@ export default function IntakeBatchUpload({
                     </option>
                   ))}
                 </select>
+                )}
 
                 <span className="text-xs text-neutral-500 w-24 text-right">
                   {item.status === "uploading" && `${item.progress}%`}
@@ -1021,7 +1291,7 @@ export default function IntakeBatchUpload({
                     ) : (
                       <span className="text-amber-700">Say which</span>
                     ))}
-                  {item.status === "done" && "Added"}
+                  {item.status === "done" && (item.nothingRead ? "Nothing read" : "Added")}
                   {item.status === "failed" && <span className="text-red-700">Failed</span>}
                   {item.status === "refused" && (
                     <span className="text-red-700">{item.tooLarge ? "Too large" : "Cannot be read"}</span>
@@ -1047,7 +1317,19 @@ export default function IntakeBatchUpload({
                     app's own primitive — dashed blue, its evidence required
                     beside it, one click to accept. The select stays, because
                     changing it to something else is the other half. */}
-                {unchecked ? (
+                {item.parts ? (
+                  // A MIXED FILE: a box per part, and nothing about the file
+                  // as a whole to accept.
+                  <UploadFileParts
+                    fileName={item.file.name}
+                    parts={item.parts}
+                    choices={CHOICES}
+                    shortLabel={shortLabel}
+                    busy={busy}
+                    locked={item.status === "done"}
+                    onChoose={(index, value) => choosePart(item.key, index, value)}
+                  />
+                ) : unchecked ? (
                   <SuggestButton
                     className="w-full"
                     value={shortLabel(item.suggested)}
@@ -1068,6 +1350,17 @@ export default function IntakeBatchUpload({
                     value={shortLabel(item.alternative)}
                     evidence={item.alternativeEvidence ? `The model read: ${item.alternativeEvidence}` : "The model's reading"}
                     onAccept={() => update(item.key, { choice: item.alternative })}
+                    disabled={busy}
+                  />
+                )}
+                {/* A HELD FILE'S SUGGESTION, beside its empty box: one click
+                    records it, which the box could not. */}
+                {item.heldSuggestion && !item.choice && item.status === "needs-kind" && (
+                  <SuggestButton
+                    className="w-full"
+                    value={shortLabel(item.heldSuggestion)}
+                    evidence={item.heldSuggestionEvidence ?? ""}
+                    onAccept={() => update(item.key, { choice: item.heldSuggestion })}
                     disabled={busy}
                   />
                 )}
@@ -1094,6 +1387,8 @@ export default function IntakeBatchUpload({
                 {item.warning && <p className="w-full text-xs text-amber-700">{item.warning}</p>}
                 {item.held && <p className="w-full text-xs text-amber-700">{item.held}</p>}
                 {item.note && <p className="w-full text-xs text-neutral-500">{item.note}</p>}
+                {item.nothingRead && <p className="w-full text-xs text-neutral-500">Nothing read from this file.</p>}
+                {item.surveyNote && <p className="w-full text-xs text-neutral-500 whitespace-pre-line break-words">{item.surveyNote}</p>}
               </li>
             );
           })}
@@ -1109,25 +1404,38 @@ export default function IntakeBatchUpload({
         >
           {label}
         </button>
-        {held.length > 0 && (
+        {heldUnread.length > 0 && (
           <p className="text-xs text-amber-700">
-            {held.length === 1 ? "One file could not be identified" : `${held.length} files could not be identified`} —
-            say what {held.length === 1 ? "it is" : "they are"} and press again. Nothing has been read for{" "}
-            {held.length === 1 ? "it" : "them"}
+            {heldUnread.length === 1 ? "One file could not be identified" : `${heldUnread.length} files could not be identified`} —
+            say what {heldUnread.length === 1 ? "it is" : "they are"} and press again. Nothing has been read for{" "}
+            {heldUnread.length === 1 ? "it" : "them"}
             {heldSent === 0 ? (
               <>, so nothing has been charged.</>
-            ) : heldSent === held.length ? (
+            ) : heldSent === heldUnread.length ? (
               <>
-                ; {held.length === 1 ? "it was" : `all ${held.length} were`} sent to the model to be identified, one small
+                ; {heldUnread.length === 1 ? "it was" : `all ${heldUnread.length} were`} sent to the model to be identified, one small
                 call each.
               </>
             ) : (
               <>
                 ; {heldSent} {heldSent === 1 ? "was" : "were"} sent to the model to be identified, one small call each,
-                and the other {held.length - heldSent} {held.length - heldSent === 1 ? "was" : "were"} never sent, so
-                nothing was charged for {held.length - heldSent === 1 ? "it" : "those"}.
+                and the other {heldUnread.length - heldSent} {heldUnread.length - heldSent === 1 ? "was" : "were"} never sent, so
+                nothing was charged for {heldUnread.length - heldSent === 1 ? "it" : "those"}.
               </>
             )}
+          </p>
+        )}
+        {heldForPart.length > 0 && (
+          <p className="text-xs text-amber-700">
+            {heldForPart.length === 1 ? "One file has a part that needs you" : `${heldForPart.length} files have a part that needs you`} —
+            say what it is and press again. Nothing has been read for {heldForPart.length === 1 ? "it" : "them"} yet;{" "}
+            {heldForPart.length === 1 ? "it was" : "each was"} sent to the model once to be identified.
+          </p>
+        )}
+        {heldPartly.length > 0 && (
+          <p className="text-xs text-amber-700">
+            {heldPartly.length === 1 ? "One file is partly read" : `${heldPartly.length} files are partly read`} — say what the
+            rest of {heldPartly.length === 1 ? "it is" : "them is"} and press again. The parts already added are being read.
           </p>
         )}
       </div>

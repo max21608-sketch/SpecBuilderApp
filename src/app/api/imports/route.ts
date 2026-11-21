@@ -89,6 +89,7 @@ import { describeDuplicate, recordMessageUnlessKnown } from "@/lib/email-ingest"
 import { assignMessage } from "@/lib/email-registration";
 import { withTransaction, transactionErrorResponse, type TxnSql } from "@/lib/db-transaction";
 import { MAX_MODEL_PDF_BYTES } from "@/lib/upload-limits";
+import { SourcePartSchema, normalisePart, partLabel, partPageCount, partRefusal, type SourcePart } from "@/lib/source-part";
 import {
   PDF_BILL_SHEET,
   pdfBillRefusal,
@@ -131,6 +132,10 @@ const Registration = z
     // The delivery this file arrived in. Optional: a single file uploaded on
     // its own is still a perfectly good import.
     batchId: UUID.optional(),
+    // The part of the file this read is for (open intake): some pages of a
+    // PDF or some sheets of a workbook. Absent for the whole file, which is
+    // every registration before parts and every file with one kind in it.
+    part: SourcePartSchema.optional(),
   })
   .strict();
 
@@ -156,6 +161,21 @@ export async function POST(request: Request): Promise<Response> {
     return json({ ok: false, error: issue?.message ?? "That upload is not valid.", field: issue?.path.join(".") }, 400);
   }
   const input = parsed.data;
+
+  // A part is refused in words before anything is read or recorded: what it
+  // may name depends only on the file's kind and the reader, and the page
+  // count is checked where the PDF's bytes are read (`registerSpecDocument`).
+  if (input.part) {
+    const normal = normalisePart(input.part);
+    if (!normal.ok) return json({ ok: false, error: normal.error, field: "part" }, 400);
+    const refused = partRefusal(normal.part, {
+      sourceKind: intakeSourceKind(input.filename, input.contentType),
+      documentKind: input.importType === "spec_document" ? input.documentKind : null,
+      pageCount: null,
+    });
+    if (refused) return json({ ok: false, error: refused, field: "part" }, 400);
+    input.part = normal.part;
+  }
 
   const project = await sql`select id from projects where id = ${input.projectId}`;
   if (!project[0]) return json({ ok: false, error: "No such project." }, 404);
@@ -370,6 +390,13 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
     }
     const scanned = scannedPdfRefusal("pdf", pdfHasTextLayer(pdf.bytes));
     if (scanned) return json({ ok: false, error: scanned, field: "filename" }, 400);
+    // Pages past the end are refused here, where the bytes are already in
+    // hand. An uncountable PDF proceeds (`countPdfPages`' abstention), and the
+    // read refuses then if the file really is shorter.
+    if (input.part) {
+      const refused = partRefusal(input.part, { sourceKind: kind, documentKind: input.documentKind, pageCount: countPdfPages(pdf.bytes) });
+      if (refused) return json({ ok: false, error: refused, field: "part" }, 400);
+    }
   }
 
   try {
@@ -384,6 +411,7 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
         documentKind: input.documentKind as DocumentKind,
         registrationRequestId: input.registrationRequestId ?? null,
         actor,
+        sourcePart: input.part ?? null,
         attach: async () => {
           const attachment = await txn`
             insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
@@ -427,6 +455,16 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
 
 // ---- BOQ, uploaded to the blob store ---------------------------------------
 async function registerBlobBoq(input: Registered, actor: string): Promise<Response> {
+  // A REPLAYED REGISTRATION IS ANSWERED BEFORE ANYTHING IS READ OR STORED
+  // (open intake, the design's trap 4). Until 2026-11-20 no bill path wrote
+  // `registration_request_id`, so a retried request — a lost response, a part
+  // registered again — made a second bill: a second attachment, a second
+  // stored workbook, a second set of lines to confirm. Asked here, first, so a
+  // replay of a PDF bill does not even rebuild its workbook; asked again inside
+  // each insert's transaction, where the unique index settles a race.
+  const replayed = await replayedBill(input.registrationRequestId);
+  if (replayed) return replayed;
+
   // A BOQ is a grid, and a client exports that grid as .xlsx or as .csv. The
   // DECLARED import type is what says this file is a bill; the extension only
   // says how to read its bytes. A PDF is one too when it was printed from a
@@ -447,6 +485,33 @@ async function registerBlobBoq(input: Registered, actor: string): Promise<Respon
     throw cause;
   }
 
+  // A PART OF A WORKBOOK names its sheets, and one the workbook does not hold
+  // is refused HERE, in words, with nothing recorded: a bill staged without the
+  // sheet a person filed is a bill with a hole nobody asked for. The sheets
+  // read for the check are the ones parsed, so the file is read once. A file
+  // that is not a workbook at all is left to the parse, which records the
+  // failed run exactly as it does for a whole file.
+  let sheets: Awaited<ReturnType<typeof readSpreadsheetSheets>> | undefined;
+  if (input.part?.kind === "sheets") {
+    try {
+      sheets = await readSpreadsheetSheets(blob.bytes, input.filename, blob.contentType || input.contentType || "");
+    } catch {
+      sheets = undefined;
+    }
+    const held = sheets;
+    const missing = held ? input.part.sheets.filter((name) => !held.some((sheet) => sheet.sheet === name)) : [];
+    if (missing.length > 0) {
+      return json(
+        {
+          ok: false,
+          error: `This bill is filed as ${partLabel({ kind: "sheets", sheets: missing })}, which this workbook does not hold. A sheet may have been renamed since the file was surveyed — upload it again.`,
+          field: "part",
+        },
+        400,
+      );
+    }
+  }
+
   return parseBoqInto(input.projectId, input.filename, blob.bytes, actor, true, {
     attach: async (txn) => {
       const attachment = await txn`
@@ -459,7 +524,53 @@ async function registerBlobBoq(input: Registered, actor: string): Promise<Respon
     },
     batchId: input.batchId ?? null,
     contentType: blob.contentType || input.contentType || "",
+    registrationRequestId: input.registrationRequestId ?? null,
+    part: input.part ?? null,
+    sheets,
   });
+}
+
+/**
+ * The bill a registration request already made, answered as a replayed
+ * specification document is (`reused: true`, 200), or null. Nothing is read,
+ * stored or recorded for a replay.
+ */
+async function replayedBill(requestId: string | null | undefined, exec: TxnSql = sql): Promise<Response | null> {
+  const earlier = await billRegisteredBefore(requestId, exec);
+  return earlier ? replayAnswer(earlier) : null;
+}
+
+type EarlierBill = { id: string; status: string; error: string | null };
+
+async function billRegisteredBefore(requestId: string | null | undefined, exec: TxnSql): Promise<EarlierBill | null> {
+  if (!requestId) return null;
+  const rows = await exec`select id, status, error from intake_runs where registration_request_id = ${requestId}`;
+  if (!rows[0]) return null;
+  return { id: String(rows[0].id), status: String(rows[0].status), error: rows[0].error == null ? null : String(rows[0].error) };
+}
+
+/**
+ * A REPLAY ANSWERS AS THE FIRST REQUEST ENDED, failure included. A bill whose
+ * parse FAILED is a run with `status = 'failed'`, and answering its replay
+ * `ok: true` told the screen a bill that never read had been added — a lost
+ * response, retried, turned a failure into "Added". So a failed run is
+ * answered as the failure it was, with its sentence, and the screen mints a
+ * fresh request id for the next try (`nextRequestId`: the server answered).
+ * A run still parsing, or parsed, is the success it is or will be.
+ */
+function replayAnswer(earlier: EarlierBill): Response {
+  if (earlier.status === "failed") {
+    return json({ ok: false, error: earlier.error ?? "This bill could not be read.", importId: earlier.id, reused: true }, 422);
+  }
+  return json({ ok: true, importId: earlier.id, reused: true, sourcePreserved: true }, 200);
+}
+
+/**
+ * A transaction that lost the race on `intake_runs_registration_request_key`
+ * to a concurrent copy of itself: the other one's run, or the ordinary failure.
+ */
+async function replayOrFailure(requestId: string | null | undefined, cause: unknown): Promise<Response> {
+  return (await replayedBill(requestId).catch(() => null)) ?? transactionErrorResponse(cause);
 }
 
 // ---- BOQ, uploaded as a PDF -------------------------------------------------
@@ -501,18 +612,30 @@ async function registerPdfBoq(input: Registered, actor: string, store: PictureSt
   // charged yet — and the review starts the transcription
   // (`/api/imports/[id]/transcribe`), because it takes minutes and this route
   // has one. A PDF that could not be opened at all is still refused.
+  // A PART'S PAGES PAST THE END are refused here, where the bytes are in hand,
+  // before a workbook is built or a transcription registered. An uncountable
+  // PDF proceeds (`countPdfPages`' abstention), as it does for a document.
+  const part = input.part ?? null;
+  if (part) {
+    const refused = partRefusal(part, { sourceKind: "pdf", documentKind: null, pageCount: countPdfPages(blob.bytes) });
+    if (refused) return json({ ok: false, error: refused, field: "part" }, 400);
+  }
+
   const scanned = scannedPdfRefusal("pdf", pdfHasTextLayer(blob.bytes));
   if (scanned) return registerPdfForTranscription(input, actor, blob, "scanned");
 
+  // A PART IS READ BY ITS PAGES ONLY (the design's trap 6): another document
+  // in the same PDF printing a table of its own is not this bill's columns
+  // changing. Each row keeps its page in the whole file.
   const registers = await loadBoqReadingRegisters(sql);
-  const read = await readPdfBill(blob.bytes, { aliases: registers.aliases });
+  const read = await readPdfBill(blob.bytes, { aliases: registers.aliases, part });
   if (!read.ok) {
     if (isTranscribable(read.code)) return registerPdfForTranscription(input, actor, blob, read.code);
     return json({ ok: false, error: pdfBillRefusal(read.code), detail: read.detail, code: read.code, field: "filename" }, 400);
   }
 
   const workbook = await pdfBillWorkbook(read, PDF_BILL_SHEET);
-  const workbookPathname = pdfBillWorkbookPathname(blob.pathname);
+  const workbookPathname = pdfBillWorkbookPathname(blob.pathname, part);
   const workbookFilename = pdfBillWorkbookFilename(input.filename);
   try {
     await store(workbookPathname, workbook.bytes, XLSX_CONTENT_TYPE);
@@ -553,6 +676,8 @@ async function registerPdfBoq(input: Registered, actor: string, store: PictureSt
           pages: workbook.rowPages,
           // What the reader doubts per line (C10), only where it doubts something.
           ...(workbook.rowFlags ? { flags: workbook.rowFlags } : {}),
+          // Only where the bill is part of the PDF, so a whole PDF stages as before.
+          ...(part ? { part } : {}),
         },
       };
     },
@@ -560,6 +685,8 @@ async function registerPdfBoq(input: Registered, actor: string, store: PictureSt
     contentType: XLSX_CONTENT_TYPE,
     // The phase is named after the PDF, not after "… (read from PDF)".
     phaseFilename: input.filename,
+    registrationRequestId: input.registrationRequestId ?? null,
+    part,
   });
 }
 
@@ -577,12 +704,20 @@ async function registerPdfForTranscription(
   code: TranscribableReason,
 ): Promise<Response> {
   const pageCount = countPdfPages(blob.bytes);
+  const part: SourcePart | null = input.part ?? null;
   const pdfTranscription: PdfTranscription = { state: "waiting", reason: transcriptionReason(code), pageCount };
+  const requestId = input.registrationRequestId ?? null;
   // The PDF's attachment and the run that names it stand or fall together: an
   // attachment with no run is a stored bill nobody can open from any screen.
   let importId: string;
+  let reused: EarlierBill | null = null;
   try {
     importId = await withTransaction(async (txn) => {
+      const earlier = await billRegisteredBefore(requestId, txn);
+      if (earlier) {
+        reused = earlier;
+        return earlier.id;
+      }
       const pdfAttachment = await txn`
         insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
         values ('project', ${input.projectId}, 'boq_pdf', ${blob.pathname}, ${input.filename},
@@ -595,19 +730,31 @@ async function registerPdfForTranscription(
         filename: input.filename,
         sourcePreserved: true,
         sheets: [],
-        pdfSource: { attachmentId, filename: input.filename, sheet: PDF_BILL_SHEET, firstRow: 0, pages: [] },
+        pdfSource: {
+          attachmentId,
+          filename: input.filename,
+          sheet: PDF_BILL_SHEET,
+          firstRow: 0,
+          pages: [],
+          // The transcription windows over these pages only (the transcribe route).
+          ...(part ? { part } : {}),
+        },
         pdfTranscription,
       };
       const run = await txn`
-        insert into intake_runs (project_id, attachment_id, batch_id, source_kind, status, parsed, created_by, updated_by)
-        values (${input.projectId}, ${attachmentId}, ${input.batchId ?? null}, 'boq_xlsx', 'parsed', ${JSON.stringify(staged)}::jsonb, ${actor}, ${actor})
+        insert into intake_runs
+          (project_id, attachment_id, batch_id, source_kind, status, parsed,
+           registration_request_id, source_part, created_by, updated_by)
+        values (${input.projectId}, ${attachmentId}, ${input.batchId ?? null}, 'boq_xlsx', 'parsed', ${JSON.stringify(staged)}::jsonb,
+                ${requestId}, ${part ? JSON.stringify(part) : null}::jsonb, ${actor}, ${actor})
         returning id
       `;
       return recordedId(run);
     });
   } catch (cause) {
-    return transactionErrorResponse(cause);
+    return replayOrFailure(requestId, cause);
   }
+  if (reused) return replayAnswer(reused);
   return json(
     {
       ok: true,
@@ -618,7 +765,8 @@ async function registerPdfForTranscription(
       sourcePreserved: true,
       needsColumns: 0,
       // The review starts the model's transcription, one charged read; the upload row has said so.
-      transcribe: { reason: pdfTranscription.reason, pages: pageCount },
+      // A part is transcribed by its own pages, so those are the pages it costs.
+      transcribe: { reason: pdfTranscription.reason, pages: part ? partPageCount(part) : pageCount },
     },
     201,
   );
@@ -688,8 +836,16 @@ async function parseBoqInto(
     contentType?: string;
     /** The name a phase is proposed from, where it is not `filename` (a PDF bill). */
     phaseFilename?: string;
+    /** The browser's id for this press, so a retried request returns this run (trap 4). */
+    registrationRequestId?: string | null;
+    /** The part of the file this bill is (open intake), stored on the run; null for the whole file. */
+    part?: SourcePart | null;
+    /** The workbook's sheets, where the caller has already read them to check the part. */
+    sheets?: Awaited<ReturnType<typeof readSpreadsheetSheets>>;
   } = {},
 ): Promise<Response> {
+  const requestId = options.registrationRequestId ?? null;
+  const part = options.part ?? null;
   // THE ATTACHMENTS AND THE RUN ARE ONE WRITE. They were separate statements,
   // so a failure between them left an attachment row no run named — a stored
   // bill no screen can reach — and the next upload of the same file made a
@@ -698,27 +854,34 @@ async function parseBoqInto(
   // failed, which is a state the Documents tab shows.
   let runId: string;
   let pdfSource: PdfBillSource | undefined;
+  let reused: EarlierBill | null = null;
   try {
-    ({ runId, pdfSource } = await withTransaction(async (txn) => {
+    ({ runId, pdfSource, reused } = await withTransaction(async (txn) => {
+      const earlier = await billRegisteredBefore(requestId, txn);
+      if (earlier) return { runId: earlier.id, pdfSource: undefined, reused: earlier };
       const attached = options.attach ? await options.attach(txn) : null;
       const run = await txn`
-        insert into intake_runs (project_id, attachment_id, batch_id, source_kind, status, created_by, updated_by)
-        values (${projectId}, ${attached?.attachmentId ?? null}, ${options.batchId ?? null}, 'boq_xlsx', 'parsing', ${actor}, ${actor})
+        insert into intake_runs
+          (project_id, attachment_id, batch_id, source_kind, status,
+           registration_request_id, source_part, created_by, updated_by)
+        values (${projectId}, ${attached?.attachmentId ?? null}, ${options.batchId ?? null}, 'boq_xlsx', 'parsing',
+                ${requestId}, ${part ? JSON.stringify(part) : null}::jsonb, ${actor}, ${actor})
         returning id
       `;
-      return { runId: recordedId(run), pdfSource: attached?.pdfSource };
+      return { runId: recordedId(run), pdfSource: attached?.pdfSource, reused: null as EarlierBill | null };
     }));
   } catch (cause) {
-    return transactionErrorResponse(cause);
+    return replayOrFailure(requestId, cause);
   }
+  if (reused) return replayAnswer(reused);
 
   // Terminal vs retryable is decided per step, not by one outer try/catch. A
   // file that is not a spreadsheet never becomes one, so it is terminal and
   // says why. A spreadsheet whose COLUMNS nobody recognised is not: since 0040
   // it stages `needsColumns` and the review asks a person to map it.
   try {
-    const sheets = await readSpreadsheetSheets(bytes, filename, options.contentType ?? "");
-    const parsed = parseBoqSheets(sheets, await loadBoqReadingRegisters(sql));
+    const sheets = options.sheets ?? (await readSpreadsheetSheets(bytes, filename, options.contentType ?? ""));
+    const parsed = parseBoqSheets(sheets, await loadBoqReadingRegisters(sql), { part });
     // ONLY AN EMPTY WORKBOOK IS REFUSED NOW. A workbook no heading could be
     // read on comes back `ok: false` with every sheet staged as needing its
     // columns, and is PARSED, not failed: the refusal was a dead end — the

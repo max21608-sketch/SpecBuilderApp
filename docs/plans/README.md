@@ -21,6 +21,45 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-11-21 — Open intake, Stages 0–2: a mixed pack is surveyed into parts and read by part
+
+Max, 2026-11-20: *"we can be given stuff in whatever format. It could all be
+mixed into one document. It could be in 3, 5, 10 separate documents. Doesn't
+matter … by teaching it limits that I thought would increase its productivity,
+it's actually made it worse."* Then: *"plan and then build the taking in a mix
+of documents … to really high quality."*
+
+- **The plan:** `open-intake-2026-11-20.md` — measure, survey, route and read,
+  piece together. **The build design and what was verified:**
+  `open-intake-build-2026-11-20.md`. **The traps:**
+  `docs/load-bearing/email-and-inbox.md`, "A file is surveyed into parts…".
+- **Also that day:** the upload's file check moved from Haiku 4.5 to Haiku 5.5
+  (Max; Opus 5.5 stays for every read, no Fable trial), which exposed two
+  regressions a hand test caught — the reason Stage 0 (an eval with answer
+  keys) was built first.
+- **Decided by measurement, twice:** adding knowledge or genre wording to the
+  survey prompt made it worse on every attempt (four wordings, six keys, two
+  runs each). The bill-or-schedule doubt is settled by the bill reader in code
+  and a person's press, not by the prompt.
+- **Decided in the design:** a READ is every part of one file that goes to the
+  same reader (so a drawing and its specification sheet stay one item with a
+  preamble between them); the whole PDF is sent and pages stay the file's;
+  what a read reports from outside its part is dropped and said; a file with
+  one reader is registered exactly as before.
+- **Migration 0065** (`intake_runs.source_part`), applied to the local stack
+  only. **Max applies it to the sandbox and to pilot before this code deploys
+  to either**: `node --env-file=.env.local db/run-migrations.mjs` (sandbox),
+  `node --env-file=.env.pilot.local db/run-migrations.mjs --yes-pilot`
+  (pilot, after a backup). The other session holds 0061–0064 for the chase
+  build; the runner keys on filename, so the order they land in does not
+  matter.
+- **State:** committed locally; not pushed; nothing deployed. Human acceptance
+  outstanding.
+- **Still open:** Stage 3 (model-proposed links, after the item-review
+  design); Stage 4 (retiring the label list); email attachments as parts; Max's
+  check of the four real answer keys; whether the survey's standing hold on
+  procurement schedules is acceptable as one press per file.
+
 ## 2026-11-20 — Production readiness: the app walked as a new client, four fix branches on `prod-ready`
 
 Max, 2026-11-20: "get this app production ready in a few days … a very

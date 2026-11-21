@@ -79,6 +79,7 @@ import SheetHeader from "@/components/imports/SheetHeader";
 import { SheetColumns, StructureReadNotes, structurePending, useStructureRead } from "@/components/imports/StructureRead";
 import BillLineRow, { FamilyHeading, GroupGap, listOf, type BillLinePlace } from "@/components/imports/BillLineRow";
 import type { NextStep } from "@/lib/next-step";
+import { documentLabel } from "@/lib/source-part";
 
 /** The index of the first sheet that is not dropped, or 0 where every sheet is (or there are none). */
 function firstLiveSheet(sheets: readonly { ignored?: boolean }[]): number {
@@ -319,7 +320,7 @@ export default function BoqReview({
     <>
       <PageHeader
         crumbs={[crumb]}
-        title={run.filename ?? "Bill of quantities"}
+        title={run.filename ? documentLabel(run.filename, run.sourcePart) : "Bill of quantities"}
         subtitle={
           <>
             {/* WHAT THIS SCREEN COST, FIRST. Every other review screen in the

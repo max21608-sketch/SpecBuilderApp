@@ -13,6 +13,7 @@
 // Nothing here decides anything. There is no matching to do and no vocabulary
 // to resolve: a note is text a human reads, edits and accepts.
 import type { RawPreambleNote } from "@/lib/extraction-schema";
+import type { SourcePart } from "@/lib/source-part";
 
 export type PreambleNote = {
   id: string;
@@ -35,6 +36,12 @@ export type StagedPreamble = {
   schemaVersion: 1;
   kind: "preamble";
   filename: string | null;
+  /**
+   * The part of the file this read was for (open intake), absent for the
+   * whole file — so every document staged before parts is unchanged. Its
+   * pages are the FILE's pages, as every page on this document is.
+   */
+  sourcePart?: SourcePart | null;
   documentNotes: string | null;
   notes: PreambleNote[];
 };

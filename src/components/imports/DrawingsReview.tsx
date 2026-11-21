@@ -63,6 +63,7 @@ import { cardHasPending, configurationCards } from "@/lib/configuration-cards";
 import ReviewItemList, { type ReviewItemLine } from "@/components/imports/ReviewItemList";
 import { describePartialConfirm } from "@/lib/confirm-partial";
 import { attemptRestartable } from "@/lib/extraction-claim";
+import { documentLabel, type SourcePart } from "@/lib/source-part";
 
 type Run = {
   id: string;
@@ -73,6 +74,8 @@ type Run = {
   error: string | null;
   document_kind: "shop_drawings";
   filename: string | null;
+  /** Which part of the file this read is for (open intake); null or absent for the whole file. */
+  sourcePart?: SourcePart | null;
   claim_live: boolean | null;
   within_deadline: boolean | null;
   claim_count: number;
@@ -668,7 +671,7 @@ export default function DrawingsReview({
     <>
       <PageHeader
         crumbs={crumb ? [crumb] : undefined}
-        title={run?.filename ?? "Shop drawings"}
+        title={run?.filename ? documentLabel(run.filename, run.sourcePart) : "Shop drawings"}
         subtitle={
           <>
             {DOCUMENT_KIND_LABELS.shop_drawings}
@@ -734,7 +737,7 @@ export default function DrawingsReview({
       undefined,
       <Card title={deferred ? "These drawings are waiting for a slot" : "These drawings have not been read"}>
         <p className="text-neutral-600">
-          {run.filename ?? "This document"} · {DOCUMENT_KIND_LABELS.shop_drawings}
+          {run.filename ? documentLabel(run.filename, run.sourcePart) : "This document"} · {DOCUMENT_KIND_LABELS.shop_drawings}
         </p>
         <div className="mt-2">
           <DocumentState run={{ status: run.status, waitingForSlot: run.waitingForSlot }} />

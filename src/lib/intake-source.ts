@@ -4,6 +4,7 @@ import { inflateSync } from "node:zlib";
 import { intakeSourceKind } from "@/lib/intake-source-types";
 import { MAX_MODEL_PDF_PAGES } from "@/lib/upload-limits";
 import { displayKey, displayedNumber, type SheetDisplay } from "@/lib/sheet-display";
+import { partLabel, sheetInPart, type SourcePart } from "@/lib/source-part";
 
 export type DocumentSource =
   | { type: "pdf"; base64: string }
@@ -304,8 +305,35 @@ function showsText(content: string): boolean {
   return blocks.some((block) => /\bT[jJ]\b|\)\s*['"]/.test(block));
 }
 
-export async function prepareDocumentSource(bytes: Buffer, filename: string, contentType: string): Promise<DocumentSource> {
+/**
+ * The document as the model is sent it.
+ *
+ * `part` (open intake) is the part of the file this read is for, null for the
+ * whole file:
+ *   * a part of a WORKBOOK keeps only its sheets, in the text AND in `sheets`
+ *     — the row windows plan from `sheets`, and a part filtered in one but not
+ *     the other would read the other sheets in windows. The cell caps then
+ *     count the part's cells only. A named sheet the file does not hold fails
+ *     the read in words: reading the rest would stage a part with a hole in it
+ *     that nobody asked for;
+ *   * a part of a PDF sends the WHOLE file, untouched. Its pages stay the
+ *     file's pages — every staged page, swatch crop and page link reads them —
+ *     so the part is told to the model (`partInstruction`) and enforced on
+ *     what comes back (`part-filter.ts`), never cut out of the bytes.
+ */
+export async function prepareDocumentSource(
+  bytes: Buffer,
+  filename: string,
+  contentType: string,
+  part: SourcePart | null = null,
+): Promise<DocumentSource> {
   const kind = intakeSourceKind(filename, contentType);
+  if (part?.kind === "pages" && kind !== "pdf") {
+    throw new Error("This read is for some pages of a PDF, and this file is not a PDF. Upload it again without naming pages.");
+  }
+  if (part?.kind === "sheets" && kind !== "xlsx") {
+    throw new Error("This read is for some sheets of a workbook, and this file is not an .xlsx workbook. Upload it again without naming sheets.");
+  }
   if (kind === "pdf") {
     const pages = countPdfPages(bytes);
     // Null falls through on purpose — see `countPdfPages`.
@@ -313,6 +341,14 @@ export async function prepareDocumentSource(bytes: Buffer, filename: string, con
       throw new Error(
         `This PDF has ${pages} pages. One read takes at most ${MAX_MODEL_PDF_PAGES}, which is the model's own limit — split it and upload the parts separately.`,
       );
+    }
+    if (part?.kind === "pages" && pages !== null) {
+      const last = part.ranges[part.ranges.length - 1]?.to ?? 0;
+      if (last > pages) {
+        throw new Error(
+          `This read is for ${partLabel(part)}, and the PDF has ${pages} page${pages === 1 ? "" : "s"}. Upload it again with the pages it holds.`,
+        );
+      }
     }
     return { type: "pdf", base64: bytes.toString("base64") };
   }
@@ -334,7 +370,18 @@ export async function prepareDocumentSource(bytes: Buffer, filename: string, con
     return { type: "email", text: buildEmailModelText(envelope).text };
   }
   if (kind === "xlsx" || kind === "csv" || kind === "tsv") {
-    const sheets = await readSpreadsheetSheets(bytes, filename, contentType, { display: false });
+    const all = await readSpreadsheetSheets(bytes, filename, contentType, { display: false });
+    let sheets = all;
+    if (part?.kind === "sheets") {
+      const missing = part.sheets.filter((name) => !all.some((sheet) => sheet.sheet === name));
+      if (missing.length > 0) {
+        throw new Error(
+          `This read is for ${partLabel({ kind: "sheets", sheets: missing })}, which this workbook does not hold. ` +
+            "A sheet may have been renamed since the file was surveyed — upload it again.",
+        );
+      }
+      sheets = all.filter((sheet) => sheetInPart(part, sheet.sheet));
+    }
     return { type: "spreadsheet", text: spreadsheetSheetsToText(sheets), sheets };
   }
   throw new Error("Unsupported intake file. Upload a PDF, .xlsx, .csv, .tsv or .eml file.");

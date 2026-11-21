@@ -91,6 +91,7 @@ import type { StructureRowReading } from "@/lib/boq-structure";
  */
 import type { PdfBillSource } from "@/lib/pdf-bill-source";
 import type { PdfTranscription } from "@/lib/pdf-bill-checks";
+import { sheetInPart, type SourcePart } from "@/lib/source-part";
 export type { BoqRowKind } from "@/lib/boq-row-kinds";
 
 export type BoqLine = {
@@ -1120,31 +1121,55 @@ export function proposePhaseNames<T extends { sheetName: string; proposedRunName
   );
 }
 
+/**
+ * Why a sheet the upload did not file as part of the bill is staged ignored.
+ * The review prints it beside "Include this sheet", which still works.
+ */
+export const NOT_IN_BILL_PART_REASON = "Not filed as part of the bill at upload.";
+
+/**
+ * Every sheet, read and staged.
+ *
+ * `options.part` (open intake): the sheets the upload filed as the bill, where
+ * the workbook holds other documents too (a finishes sheet beside the bill
+ * sheets). EVERY sheet is still read and staged, in the workbook's order —
+ * the model's structure read pairs a staged sheet to its source by name and
+ * then by INDEX, so staging fewer sheets would pair the wrong ones — and a
+ * sheet outside the part is staged `ignored` with `NOT_IN_BILL_PART_REASON`,
+ * so a person can still include it, knowingly. Whether "another sheet read"
+ * (`unreadSheet`) is asked of the part's sheets only: a finishes sheet that
+ * happens to read must not set aside the bill sheet the person filed. A part
+ * of PAGES says nothing about sheets and changes nothing here.
+ */
 export function parseBoqSheets(
   sheets: { sheet: string; data: SheetData; display?: SheetDisplay }[],
   registers: Partial<BoqReadingRegisters> = {},
+  options: { part?: SourcePart | null } = {},
 ): BoqParseResult {
   if (sheets.length === 0) return { ok: false, error: "The file has no sheets." };
+  const part = options.part ?? null;
+  const inPart = (index: number) => !part || sheetInPart(part, sheets[index]?.sheet ?? "");
 
   const vocabulary = vocabularyOf(registers.aliases ?? REFERENCE_BOQ_ALIASES);
   const size = (layout: BoqLayout) => Object.keys(layout.mapping).length + (layout.keep?.length ?? 0);
   const layouts = [...(registers.layouts ?? [])].sort((a, b) => size(b) - size(a));
 
   const readings = sheets.map(({ sheet, data, display }) => readSheet(sheet, data, vocabulary, layouts, display));
-  const anyRead = readings.some((reading) => reading.sheet !== null);
+  const anyRead = readings.some((reading, index) => reading.sheet !== null && inPart(index));
 
   /** The nearest miss on any sheet, kept only so a refusal can name it. */
   let closest: HeaderAttempt | null = null;
-  for (const reading of readings) {
-    if (reading.sheet || !reading.closest) continue;
+  for (const [index, reading] of readings.entries()) {
+    if (reading.sheet || !reading.closest || !inPart(index)) continue;
     if (headerScore(reading.closest) > (closest ? headerScore(closest) : 0)) closest = reading.closest;
   }
 
-  const staged = readings.map(
-    (reading, index) =>
+  const staged = readings.map((reading, index) => {
+    const read =
       reading.sheet ??
-      unreadSheet(sheets[index]?.sheet ?? "", sheets[index]?.data ?? [], reading.closest, vocabulary, anyRead),
-  );
+      unreadSheet(sheets[index]?.sheet ?? "", sheets[index]?.data ?? [], reading.closest, vocabulary, anyRead);
+    return inPart(index) ? read : { ...read, ignored: true, ignoredReason: NOT_IN_BILL_PART_REASON };
+  });
 
   if (!anyRead) return { ok: false, error: noHeaderError(closest, vocabulary, "workbook"), sheets: staged };
   return { ok: true, sheets: staged };

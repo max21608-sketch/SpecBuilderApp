@@ -46,6 +46,7 @@ import ExcelJS from "exceljs";
 import { foldHeading } from "@/lib/boq-roles";
 import { REFERENCE_BOQ_ALIASES, type BoqAlias } from "@/lib/boq-import";
 import { readPrintedNumber } from "@/lib/printed-number";
+import { pageInPart, partPathSuffix, type SourcePart } from "@/lib/source-part";
 
 import { type PdfBillFailureCode } from "@/lib/pdf-bill-source";
 
@@ -519,11 +520,20 @@ function median(values: number[]): number {
  * with no header of its own continues the last one's columns, which is how a
  * spreadsheet prints without repeated titles; a later page printing a
  * DIFFERENT header is refused, because two tables in one file are two bills.
+ *
+ * `part` (open intake): the pages of a PDF that also holds other documents.
+ * Only those pages are read — a drawing's dimension table or a preamble's
+ * schedule on a page outside the part would otherwise be "a later page
+ * printing a different header" and refuse the bill — and every row keeps the
+ * page it has in the WHOLE file, never a page counted from the part's first.
+ * `pageCount` is still the whole file's.
  */
 export function readPdfBillPages(
   pages: PdfTextItem[][],
-  options: { aliases?: readonly BoqAlias[] } = {},
+  options: { aliases?: readonly BoqAlias[]; part?: SourcePart | null } = {},
 ): PdfBillRead {
+  const part = options.part ?? null;
+  const inPart = (index: number) => !part || pageInPart(part, index + 1);
   const aliases = options.aliases ?? REFERENCE_BOQ_ALIASES;
   const folded = (role: string) => new Set(aliases.filter((alias) => alias.role === role).map((alias) => foldHeading(alias.term)));
   const vocabulary: Vocabulary = {
@@ -532,7 +542,7 @@ export function readPdfBillPages(
     code: folded("code"),
     description: folded("itemDescription"),
   };
-  if (pages.every((items) => items.length === 0)) {
+  if (pages.every((items, index) => !inPart(index) || items.length === 0)) {
     return { ok: false, code: "no_text", detail: "None of its pages carries any text." };
   }
   let header: Header | null = null;
@@ -540,6 +550,7 @@ export function readPdfBillPages(
   let several: string[] | null = null;
   const rows: PdfBillRow[] = [];
   for (let index = 0; index < pages.length; index++) {
+    if (!inPart(index)) continue;
     const items = pages[index]!;
     const search = findHeader(items, vocabulary);
     if (!search.found) several ??= search.several;
@@ -621,7 +632,10 @@ export async function pdfTextItems(bytes: Uint8Array): Promise<PdfTextItem[][]> 
 }
 
 /** `readPdfBillPages` over a PDF's bytes. Never throws: a PDF it cannot open is `unreadable`. */
-export async function readPdfBill(bytes: Uint8Array, options: { aliases?: readonly BoqAlias[] } = {}): Promise<PdfBillRead> {
+export async function readPdfBill(
+  bytes: Uint8Array,
+  options: { aliases?: readonly BoqAlias[]; part?: SourcePart | null } = {},
+): Promise<PdfBillRead> {
   let pages: PdfTextItem[][];
   try {
     pages = await pdfTextItems(bytes);
@@ -674,9 +688,16 @@ export async function pdfBillWorkbook(
   };
 }
 
-/** The workbook's pathname, BESIDE the PDF's: same project prefix, the PDF's name and the suffix. */
-export function pdfBillWorkbookPathname(pdfPathname: string): string {
-  return `${pdfPathname.replace(/\.pdf$/i, "")}${PDF_BILL_WORKBOOK_SUFFIX}`;
+/**
+ * The workbook's pathname, BESIDE the PDF's: same project prefix, the PDF's
+ * name and the suffix. A bill read from PART of a PDF names its pages in the
+ * suffix (`… (read from PDF, pages 1-12).xlsx`): two bills read from one PDF
+ * would otherwise be stored at one pathname, the second silently replacing
+ * the first's source under a run that still names it.
+ */
+export function pdfBillWorkbookPathname(pdfPathname: string, part: SourcePart | null = null): string {
+  const base = pdfPathname.replace(/\.pdf$/i, "");
+  return part ? `${base} (read from PDF, ${partPathSuffix(part)}).xlsx` : `${base}${PDF_BILL_WORKBOOK_SUFFIX}`;
 }
 
 /** The workbook's filename, from the PDF's. */

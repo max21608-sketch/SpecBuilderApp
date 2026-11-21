@@ -35,6 +35,7 @@ import { buttonClass } from "@/components/ui/Button";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import type { Tone } from "@/components/ui/tone";
 import type { RecordDocument, RecordDocumentKind, RecordDocumentsResult } from "@/lib/record-documents";
+import { documentLabel } from "@/lib/source-part";
 
 /** A timestamp, not a `date` column — so `Date` is safe here. */
 function arrived(iso: string | null): string {
@@ -110,7 +111,7 @@ export function RecordDocumentsTable({ result }: { result: RecordDocumentsResult
                   <Td>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="break-all font-medium text-neutral-900">
-                        {document.filename ?? "File not kept"}
+                        {document.filename ? documentLabel(document.filename, document.sourcePart) : "File not kept"}
                       </span>
                       <Chip tone={kindTone(document.kind)}>{document.kindLabel}</Chip>
                     </div>

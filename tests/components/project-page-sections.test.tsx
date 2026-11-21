@@ -217,6 +217,22 @@ describe("the overview", () => {
     expect(screen.getByText("f.pdf")).toBeInTheDocument();
   });
 
+  // Open intake, 2026-11-20: two reads of ONE file are two rows, and each is
+  // named by its part, never the same filename printed twice.
+  it("names each read of one file by its part", async () => {
+    serve({
+      documents: [
+        doc({ id: "doc-1", filename: "Pack.pdf", source_kind: "boq_xlsx", document_kind: null, sourcePart: { kind: "pages", ranges: [{ from: 1, to: 12 }] } }),
+        doc({ id: "doc-2", filename: "Pack.pdf", sourcePart: { kind: "pages", ranges: [{ from: 13, to: 30 }] } }),
+        doc({ id: "doc-3", filename: "Whole.pdf", sourcePart: null }),
+      ],
+    });
+    await screen.findByText("First pack");
+    expect(screen.getByRole("link", { name: "Pack.pdf — pages 1–12" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Pack.pdf — pages 13–30" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Whole.pdf" })).toBeInTheDocument();
+  });
+
   // U5, 2026-11-20: an email uploaded in the same drop as a pack was listed
   // under "Uploaded before deliveries were grouped", which was untrue of it.
   it("lists an email apart from the packs under its own heading, never as pre-pack", async () => {

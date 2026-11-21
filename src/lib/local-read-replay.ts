@@ -23,13 +23,25 @@ export function readReplayEnabled(env: Record<string, string | undefined> = proc
   return env.LOCAL_STACK === "1" && env.APP_ENV === "development" && Boolean(env.LOCAL_READ_REPLAY_DIR);
 }
 
-/** The saved raw model response for this document's bytes, or null. */
-export function replayedResponse(base64: string, env: Record<string, string | undefined> = process.env): unknown | null {
+/**
+ * The saved raw model response for this document's bytes, or null.
+ *
+ * `part` is `partKey` of the part being read, or null for the whole file. A
+ * part's key is sha256(base64 + part): every read of one PDF sends the same
+ * bytes, and keyed on the bytes alone each part would replay the whole file's
+ * saved answer. A whole file's key is unchanged, so every index written before
+ * parts still answers.
+ */
+export function replayedResponse(
+  base64: string,
+  env: Record<string, string | undefined> = process.env,
+  part: string | null = null,
+): unknown | null {
   if (!readReplayEnabled(env)) return null;
   const dir = String(env.LOCAL_READ_REPLAY_DIR);
   try {
     const index = JSON.parse(fs.readFileSync(path.join(dir, "index.json"), "utf8")) as Record<string, string>;
-    const sha = createHash("sha256").update(base64).digest("hex");
+    const sha = createHash("sha256").update(part ? base64 + part : base64).digest("hex");
     const file = index[sha];
     if (!file) return null;
     const saved = JSON.parse(fs.readFileSync(path.isAbsolute(file) ? file : path.join(dir, file), "utf8")) as { ok?: boolean; rawResponse?: unknown };

@@ -12,6 +12,14 @@
 // IT DOES SPEND MONEY, one small call per document, on the fast model rather
 // than the extraction one. The upload screen says so before anything uploads.
 //
+// THE LOOK IS THE SURVEY, AND IT ANSWERS IN PARTS (open intake, 2026-11-20).
+// A file is no longer one kind: `surveyFile` says what is where, and a file
+// with two or more parts to read is answered per part (`parts[]`). A file
+// with ONE part — every pack before that day — is answered in exactly the
+// shape and by exactly the rules the file check's answer was, which is the
+// line not to cross: a change that made a single-kind file answer differently
+// would change every pack. A scan and an `.eml` keep the old look.
+//
 // THE BLOB IS ADDRESSED BY PATHNAME, NEVER BY URL, and the pathname is checked
 // against the project's own prefix before a byte is read — `blob-source.ts`,
 // unchanged. A classification is a hint on a screen, but the READ that produces
@@ -27,8 +35,16 @@ import { countPdfPages, prepareDocumentSource, pdfHasTextLayer } from "@/lib/int
 import {
   classifyDocument,
   KIND_FROM_GENRE,
+  SCANNED_PDF,
   scannedPdfRefusal,
+  type ClassifyResult,
 } from "@/lib/document-classify";
+import { partReader, surveyFile, SURVEY_MODEL } from "@/lib/pack-survey";
+import type { PartPlace, SurveyPart } from "@/lib/pack-survey-types";
+import { parseBoqSheets } from "@/lib/boq-import";
+import { billProbeEvidence, billProbeHeld, isProbedForBill, probeOfPdfBill, probeOfSheets, settleBillTabs, type BillProbe } from "@/lib/bill-probe";
+import { partOfPlace, type ClassifiedPart, type PdfBillNote } from "@/lib/upload-reads";
+import { partPageCount } from "@/lib/source-part";
 import type { ClassifyFailureCode } from "@/lib/classify-failure";
 import { guessKindFromName, nameModelDisagreement } from "@/lib/document-name-guess";
 import { MAX_MODEL_PDF_BYTES, MAX_MODEL_PDF_PAGES } from "@/lib/upload-limits";
@@ -36,7 +52,7 @@ import { pdfBillRefusal, readPdfBill } from "@/lib/pdf-bill";
 import { isTranscribable, transcriptionReason, type TranscribableReason } from "@/lib/pdf-bill-checks";
 
 /** What the upload row says of a PDF bill the model will transcribe. */
-function transcribeNote(code: TranscribableReason, pages: number | null): { lines: number; pages: number; transcribe: true; reason: string } {
+function transcribeNote(code: TranscribableReason, pages: number | null): PdfBillNote & { transcribe: true; reason: string } {
   return { lines: 0, pages: pages ?? 0, transcribe: true, reason: transcriptionReason(code) };
 }
 import { loadBoqReadingRegisters } from "@/lib/boq-stage";
@@ -60,11 +76,7 @@ function registersUnread(cause: unknown): null {
   return null;
 }
 
-/** The saved headings the PDF-bill reader uses, or none where they could not be loaded. */
-async function billReadingOptions(): Promise<NonNullable<Parameters<typeof readPdfBill>[1]>> {
-  const registers = await loadBoqReadingRegisters(sql).catch(registersUnread);
-  return registers ? { aliases: registers.aliases } : {};
-}
+type Registers = Awaited<ReturnType<typeof loadBoqReadingRegisters>>;
 
 /**
  * The HTTP status a failed look answers with. The body is what the screen
@@ -203,7 +215,134 @@ export async function POST(request: Request): Promise<Response> {
 
   const pages =
     source.type === "pdf" ? (countPdfPages(blob.bytes) ?? input.pages ?? null) : null;
-  const result = await classifyDocument(source, { pages: pages !== null && pages <= MAX_MODEL_PDF_PAGES ? pages : null });
+  const lookPages = pages !== null && pages <= MAX_MODEL_PDF_PAGES ? pages : null;
+
+  // THE SAVED HEADINGS AND LAYOUTS, loaded at most once a request and only
+  // where a bill is actually tried. Per request, never per module: a layout a
+  // person saves a minute ago must read the next file.
+  let registersLoad: Promise<Registers | null> | null = null;
+  const registers = () => (registersLoad ??= loadBoqReadingRegisters(sql).catch(registersUnread));
+  /** The saved headings the PDF-bill reader uses, or none where they could not be loaded. */
+  const billReadingOptions = async (): Promise<NonNullable<Parameters<typeof readPdfBill>[1]>> => {
+    const loaded = await registers();
+    return loaded ? { aliases: loaded.aliases } : {};
+  };
+
+  /**
+   * What the bill reader makes of one part, for nothing: a PDF part through
+   * `readPdfBill` on its own pages, a sheet through `parseBoqSheets` with the
+   * saved headings and layouts — the readers registration would use.
+   */
+  const probeBill = async (part: SurveyPart): Promise<{ probe: BillProbe | null; pdfBill: PdfBillNote | null }> => {
+    const loaded = await registers();
+    const sourcePart = partOfPlace(part.place);
+    if (source.type === "pdf") {
+      const read = await readPdfBill(blob.bytes, { ...(await billReadingOptions()), part: sourcePart });
+      const probe = probeOfPdfBill(read, loaded?.aliases);
+      return { probe, pdfBill: read.ok ? { lines: read.rows.length, pages: (sourcePart && partPageCount(sourcePart)) ?? read.pageCount } : null };
+    }
+    if (source.type === "spreadsheet" && source.sheets) {
+      return { probe: probeOfSheets(parseBoqSheets(source.sheets, loaded ?? {}, { part: sourcePart })), pdfBill: null };
+    }
+    return { probe: null, pdfBill: null };
+  };
+
+  /**
+   * A mixed file, answered per part. The same rules a single file gets where
+   * they are about a PART — a bill PDF's text read on its own pages, a bill or
+   * schedule tried by the bill reader — and none about the FILE: no name rule.
+   */
+  const classifyParts = async (parts: SurveyPart[]): Promise<ClassifiedPart[]> => {
+    const answered: ClassifiedPart[] = [];
+    const namedSheets = new Map<string, number>();
+    for (const part of parts) {
+      if (part.place.kind === "sheet") namedSheets.set(part.place.sheet, (namedSheets.get(part.place.sheet) ?? 0) + 1);
+    }
+    // One at a time: each read is in-process work on bytes already in hand,
+    // and a mixed PDF of several bills would otherwise parse it N times at once.
+    for (const part of parts) {
+      const nothingToRead = Boolean(part.nothingToRead);
+      const answer: ClassifiedPart = {
+        place: part.place,
+        genre: part.genre,
+        decision: partReader(part),
+        certain: part.certain,
+        evidence: part.evidence,
+        held: null,
+        suggestion: null,
+        unsupported: null,
+        unsupportedDetail: null,
+        itemCodes: part.itemCodes,
+        finishCodes: part.finishCodes,
+        pdfBill: null,
+        nothingToRead,
+      };
+      answered.push(answer);
+      if (nothingToRead) continue;
+      if (part.place.kind === "sheet" && (namedSheets.get(part.place.sheet) ?? 0) > 1) {
+        // A SHEET IS THE SMALLEST PART OF A WORKBOOK A READ TAKES. Two kinds
+        // on one sheet are said, not split: a person chooses one for the
+        // sheet, or leaves this part out. Decided by two parts naming the
+        // sheet, never by a part carrying rows — the survey keeps a range
+        // only there (`pack-survey.ts`), and a range on a sheet nobody else
+        // names said nothing but "the whole sheet" (the walk, 2026-11-21).
+        answer.decision = null;
+        answer.held = SHEET_HOLDS_TWO_KINDS;
+        continue;
+      }
+      if (isProbedForBill(part)) {
+        const tried = await probeBill(part);
+        const found = billProbeEvidence(tried.probe);
+        if (found) {
+          answer.held = billProbeHeld(part);
+          answer.suggestion = KIND_FROM_GENRE.bill_of_quantities;
+          answer.pdfBill = tried.pdfBill;
+          answer.evidence = [found, part.evidence].filter(Boolean).join(" ");
+        }
+        continue;
+      }
+      if (source.type === "pdf" && answer.decision?.importType !== "boq" && !NOT_A_BILL.has(part.genre)) {
+        // C1, PER PART: one rule for files and parts. A part the survey
+        // called some schedule (or could not place) whose text is a bill's
+        // table is HELD with the single file's own sentence — and, a part
+        // having a box of its own, the bill suggested in it, one click away.
+        const read = await readPdfBill(blob.bytes, { ...(await billReadingOptions()), part: partOfPlace(part.place) });
+        if (read.ok) {
+          answer.decision = null;
+          answer.held = tableHeld(part.genre, read.rows.length);
+          answer.suggestion = KIND_FROM_GENRE.bill_of_quantities;
+          const own = partOfPlace(part.place);
+          answer.pdfBill = { lines: read.rows.length, pages: (own && partPageCount(own)) ?? read.pageCount };
+        }
+        continue;
+      }
+      if (answer.decision?.importType === "boq" && source.type === "pdf") {
+        const sourcePart = partOfPlace(part.place);
+        const read = await readPdfBill(blob.bytes, { ...(await billReadingOptions()), part: sourcePart });
+        const partPages = (sourcePart && partPageCount(sourcePart)) ?? countPdfPages(blob.bytes);
+        if (read.ok) answer.pdfBill = { lines: read.rows.length, pages: partPages ?? read.pageCount };
+        else if (isTranscribable(read.code)) answer.pdfBill = transcribeNote(read.code, partPages);
+        else {
+          answer.decision = null;
+          answer.unsupported = pdfBillRefusal(read.code);
+          answer.unsupportedDetail = read.detail;
+        }
+      }
+    }
+    return answered;
+  };
+
+  // ============================================================================
+  // A SCAN IS LOOKED AT BY THE FILE CHECK, AS IT ALWAYS WAS.
+  //
+  // The survey answers in parts and a part is read from text; a scan has none,
+  // and the one thing a scan may be filed as — a bill, to be transcribed — is
+  // a whole-file decision C2 already makes. So a scan keeps today's look and
+  // today's answers, unchanged, and only a file with text is surveyed.
+  // ============================================================================
+  if (scanned) return scannedAnswer(await classifyDocument(source, { pages: lookPages }), countPdfPages(blob.bytes));
+
+  const surveyed = await surveyFile(source, { filename: input.filename, pageCount: lookPages });
 
   // ============================================================================
   // THE MODEL ANSWERING "UNCLEAR" AND THE CALL FAILING ARE DIFFERENT ANSWERS.
@@ -220,75 +359,82 @@ export async function POST(request: Request): Promise<Response> {
   // again"; the file is stored either way, and a person can still choose the
   // kind by hand, which is where this app was before any of this existed.
   // ============================================================================
-  if (!result.ok) {
-    return json(
-      { ok: false, code: result.code, error: result.error, charged: result.charged, model: result.model },
-      FAILURE_STATUS[result.code],
-    );
-  }
+  if (!surveyed.ok) return failureAnswer(surveyed);
 
   // ============================================================================
-  // A BILL IN A PDF IS READ BY ITS TEXT, BY CODE, BEFORE IT IS FILED (C1).
+  // ONE PART TO READ, OR SEVERAL.
   //
-  // The model said what the document IS; whether its cells can be put back is
-  // code's to answer, from the bytes already in hand, and it costs nothing.
-  // A table holds and the row is filed as a bill — registration reads it
-  // again and builds the workbook (`/api/imports`). Anything else is HELD with
-  // one short sentence and the detail beside it, before a byte is registered:
-  // filing it as a bill would only fail one press later. Still nothing is
-  // written here.
+  // A part with nothing to read (a cover, an index) is set aside first. ONE
+  // part left is a single-kind file, which is every pack before this build:
+  // the part is put in the shape the file check gave, and every rule below
+  // runs on it exactly as it ran on that — the name disagreement, the PDF
+  // bill, a schedule whose text is a bill's table — so its answer cannot
+  // drift. TWO OR MORE is a mixed file, answered per part, and the name rule
+  // does not apply: a filename cannot describe a mix.
   // ============================================================================
-  if (scanned) {
-    if (result.decision?.importType === "boq") {
+  // ONE TAB OF A BILL IS NOT HELD FOR ITS DOUBT beside a certain bill tab
+  // (`settleBillTabs`): the Panther bill's VE tab, "uncertain only because it
+  // is a variant", held the whole workbook on every upload. Settled before
+  // anything below reads the parts, so a workbook whose every sheet is then
+  // the bill is the single whole-file bill it always was.
+  const surveyParts = source.type === "spreadsheet" ? settleBillTabs(surveyed.survey.parts) : surveyed.survey.parts;
+  // THE MODEL'S OWN NOTE, AND ONLY THAT, goes to the row. Code's bookkeeping
+  // — "merged from 11 parts", "Pages 25–30 are in no part" — is in
+  // `survey.note` for the eval; on a screen it is developer voice, and an
+  // uncovered page already has its own held row saying so.
+  const note = surveyed.survey.modelNote?.trim() || null;
+  const gaps = surveyed.survey.gaps ?? { dropped: 0, uncovered: [], doubled: false };
+  const readable = surveyParts.filter((part) => !part.nothingToRead);
+  // NEVER ONE WHOLE READ WHEN PART OF THE ANSWER WAS SET ASIDE. A part the
+  // survey gave and code dropped, pages or a sheet no part covers, pages two
+  // parts claim: each means the parts left are not the whole file, and
+  // collapsing them into one read would read the rest — a bill, say — as
+  // whatever the parts left happen to be, with no press. Answered per part,
+  // with what no part covers as parts of its own, held, so a person sees it.
+  const incomplete = gaps.dropped > 0 || gaps.uncovered.length > 0 || gaps.doubled;
+  const fallback = surveyParts.length === 1 && surveyParts[0]!.place.kind === "whole";
+  const whole = incomplete ? null : wholeFileRead(readable);
+  if (!fallback && !whole && (readable.length >= 2 || incomplete)) {
+    const answered = [...(await classifyParts(surveyParts)), ...gaps.uncovered.map(uncoveredPart)];
+    const sheetOrder = (sheet: string) => {
+      const at = source.type === "spreadsheet" ? (source.sheets?.findIndex((candidate) => candidate.sheet === sheet) ?? -1) : -1;
+      return at < 0 ? Number.MAX_SAFE_INTEGER : at;
+    };
+    answered.sort((a, b) => {
+      if (a.place.kind === "pages" && b.place.kind === "pages") return a.place.from - b.place.from;
+      if (a.place.kind === "sheet" && b.place.kind === "sheet") return sheetOrder(a.place.sheet) - sheetOrder(b.place.sheet);
+      return 0;
+    });
+    return json({ ok: true, parts: answered, note, charged: true }, 200);
+  }
+  const sole = whole ?? readable[0] ?? null;
+  const result = soleResult(sole, surveyParts);
+
+  // BILL OR SCHEDULE GOES TO CODE (`bill-probe.ts`). Held either way; where
+  // the cells read as a bill's, the box says Bill and the evidence says why.
+  if (sole && isProbedForBill(sole)) {
+    const tried = await probeBill(sole);
+    const found = billProbeEvidence(tried.probe);
+    if (found) {
       return json(
         {
           ok: true,
-          genre: result.genre,
-          decision: result.decision,
-          pdfBill: transcribeNote("scanned", countPdfPages(blob.bytes)),
-          unsupported: null,
-          titleText: result.titleText,
-          evidence: result.evidence,
-          certain: result.certain,
-          charged: true,
-        },
-        200,
-      );
-    }
-    // A SCAN THE MODEL FILED AS SOME SCHEDULE, OR COULD NOT PLACE, may be the
-    // bill — the fast model files a procurement schedule as an FF&E schedule
-    // (C1, measured). Held, C1's way, with the next step in the sentence:
-    // choosing Bill has it transcribed. A scanned drawing, spec sheet, preamble
-    // or message is still refused: nothing here reads pictures of those.
-    if (!NOT_A_BILL.has(result.genre)) {
-      return json(
-        {
-          ok: true,
+          // The survey's own note on the file, shown on its row.
+          note,
           genre: result.genre,
           decision: null,
           unsupported: null,
-          held: `${GENRE_WORDS[result.genre] ? `Read as ${GENRE_WORDS[result.genre]}; its` : "Its"} pages are pictures, with no text a program can read. If it is the bill, choose Bill of quantities: the model will transcribe it (one charged read) and mark every line for you to check against its page.`,
-          titleText: result.titleText,
-          evidence: result.evidence,
-          certain: result.certain,
+          held: billProbeHeld(sole),
+          suggestion: KIND_FROM_GENRE.bill_of_quantities,
+          pdfBill: tried.pdfBill,
+          titleText: null,
+          evidence: [found, result.evidence].filter(Boolean).join(" "),
+          certain: false,
           charged: true,
         },
         200,
       );
     }
-    return json(
-      {
-        ok: true,
-        genre: result.genre,
-        decision: null,
-        unsupported: scanned,
-        titleText: result.titleText,
-        evidence: result.evidence || "the pages carry no text, only images",
-        certain: result.certain,
-        charged: true,
-      },
-      200,
-    );
   }
 
   // ============================================================================
@@ -317,6 +463,7 @@ export async function POST(request: Request): Promise<Response> {
     return json(
       {
         ok: true,
+        note,
         genre: result.genre,
         decision: null,
         unsupported: null,
@@ -338,7 +485,18 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  let pdfBill: { lines: number; pages: number; transcribe?: true; reason?: string } | null = null;
+  // ============================================================================
+  // A BILL IN A PDF IS READ BY ITS TEXT, BY CODE, BEFORE IT IS FILED (C1).
+  //
+  // The model said what the document IS; whether its cells can be put back is
+  // code's to answer, from the bytes already in hand, and it costs nothing.
+  // A table holds and the row is filed as a bill — registration reads it
+  // again and builds the workbook (`/api/imports`). Anything else is HELD with
+  // one short sentence and the detail beside it, before a byte is registered:
+  // filing it as a bill would only fail one press later. Still nothing is
+  // written here.
+  // ============================================================================
+  let pdfBill: PdfBillNote | null = null;
   if (modelBillRead) {
     const read = modelBillRead;
     // CODE COULD NOT PUT ITS TEXT BACK INTO A TABLE: the model transcribes it
@@ -350,6 +508,7 @@ export async function POST(request: Request): Promise<Response> {
       return json(
         {
           ok: true,
+          note,
           genre: result.genre,
           decision: null,
           unsupported: pdfBillRefusal(read.code),
@@ -387,10 +546,11 @@ export async function POST(request: Request): Promise<Response> {
       return json(
         {
           ok: true,
+          note,
           genre: result.genre,
           decision: null,
           unsupported: null,
-          held: `${GENRE_WORDS[result.genre] ? `Read as ${GENRE_WORDS[result.genre]}, but its` : "Its"} text is a table of ${read.rows.length} line${read.rows.length === 1 ? "" : "s"} with a quantity on each: if it is the bill, choose Bill of quantities.`,
+          held: tableHeld(result.genre, read.rows.length),
           pdfBill: { lines: read.rows.length, pages: read.pageCount },
           titleText: result.titleText,
           evidence: result.evidence,
@@ -405,6 +565,7 @@ export async function POST(request: Request): Promise<Response> {
   return json(
     {
       ok: true,
+      note,
       genre: result.genre,
       decision: result.decision,
       // A bill in a PDF whose text reads as a table: how much of it, for the row.
@@ -420,6 +581,179 @@ export async function POST(request: Request): Promise<Response> {
       charged: true,
       // Said on the row: a long document is identified by the reading model,
       // and somebody reading the cost of a pack is owed that.
+    },
+    200,
+  );
+}
+
+/** Said above each part of a sheet two parts name. */
+const SHEET_HOLDS_TWO_KINDS =
+  "This sheet seems to hold two kinds of document. A sheet is read whole: choose one kind for it, or don't read it.";
+
+/** Said above pages or a sheet no part of the survey's answer covers. */
+const UNCOVERED_HELD = "No part of the file covers these pages — say what they are, or don't read them.";
+const UNCOVERED_SHEET_HELD = "No part of the file covers this sheet — say what it is, or don't read it.";
+
+/**
+ * C1's sentence: a PDF (or a part of one) the model did not call a bill whose
+ * text is a table with a quantity on every line. One sentence for a file and a
+ * part, so the rule cannot read differently in the two places.
+ */
+function tableHeld(genre: string, lines: number): string {
+  return `${GENRE_WORDS[genre] ? `Read as ${GENRE_WORDS[genre]}, but its` : "Its"} text is a table of ${lines} line${lines === 1 ? "" : "s"} with a quantity on each: if it is the bill, choose Bill of quantities.`;
+}
+
+/** A place no part covers, as a part a person must answer. */
+function uncoveredPart(place: PartPlace): ClassifiedPart {
+  return {
+    place,
+    genre: "unclear",
+    decision: null,
+    certain: false,
+    evidence: "",
+    held: place.kind === "sheet" ? UNCOVERED_SHEET_HELD : UNCOVERED_HELD,
+    suggestion: null,
+    unsupported: null,
+    unsupportedDetail: null,
+    itemCodes: [],
+    finishCodes: [],
+    pdfBill: null,
+    nothingToRead: false,
+  };
+}
+
+/**
+ * ONE READ FOR THE WHOLE FILE, or null where the parts are not that.
+ *
+ * Every readable part settled on the SAME reader, none held, and nothing the
+ * survey said set aside or missing: a drawing set with a cover and a blank
+ * divider is one drawing set, whatever count of parts the survey gave round
+ * the blank page. Answered as the single file it is — today's shape, the
+ * whole file, `source_part` null — so its read keeps the filename's drawing
+ * number and gets no part instruction and no filter. The part standing for
+ * the file takes the genre covering the most of it, as `mergeByReader` does,
+ * and is certain because every member was settled.
+ */
+function wholeFileRead(readable: SurveyPart[]): SurveyPart | null {
+  if (readable.length < 2) return null;
+  const readers = readable.map((part) => partReader(part));
+  const first = readers[0];
+  if (!first || readers.some((reader) => !reader || reader.importType !== first.importType || reader.documentKind !== first.documentKind)) {
+    return null;
+  }
+  const size = (part: SurveyPart) => (part.place.kind === "pages" ? part.place.to - part.place.from + 1 : 1);
+  const byGenre = new Map<SurveyPart["genre"], number>();
+  for (const part of readable) byGenre.set(part.genre, (byGenre.get(part.genre) ?? 0) + size(part));
+  let genre = readable[0]!.genre;
+  for (const [candidate, weight] of byGenre) if (weight > (byGenre.get(genre) ?? 0)) genre = candidate;
+  return {
+    place: { kind: "whole" },
+    genre,
+    certain: true,
+    weighedAgainst: null,
+    evidence: readable.map((part) => part.evidence).filter(Boolean).join(" / "),
+    itemCodes: [...new Set(readable.flatMap((part) => part.itemCodes))],
+    finishCodes: [...new Set(readable.flatMap((part) => part.finishCodes))],
+    nothingToRead: false,
+  };
+}
+
+/** A failed look, in the code, sentence and status the upload row reads. */
+function failureAnswer(result: Extract<ClassifyResult, { ok: false }>): Response {
+  return json(
+    { ok: false, code: result.code, error: result.error, charged: result.charged, model: result.model },
+    FAILURE_STATUS[result.code],
+  );
+}
+
+/**
+ * The one part of a single-kind file in the shape the file check answered
+ * in, so every rule after the look reads it unchanged. No part left at all —
+ * every part a cover or an index — is the whole file for a person to say:
+ * unclear, not certain, the survey's own words beside it.
+ */
+function soleResult(sole: SurveyPart | null, parts: SurveyPart[]): Extract<ClassifyResult, { ok: true }> {
+  if (!sole) {
+    return {
+      ok: true,
+      genre: "unclear",
+      decision: null,
+      unsupported: null,
+      titleText: null,
+      evidence: parts.map((part) => part.evidence).filter(Boolean).join(" / "),
+      certain: false,
+      model: SURVEY_MODEL,
+    };
+  }
+  return {
+    ok: true,
+    genre: sole.genre,
+    // `partReader` is `fileDocument`'s decision: the weighed-against rule
+    // settles a doubt between two genres read the same way, as it did.
+    decision: partReader(sole),
+    unsupported: null,
+    // The survey quotes its evidence and gives no separate title.
+    titleText: null,
+    evidence: sole.evidence,
+    certain: sole.certain,
+    model: SURVEY_MODEL,
+  };
+}
+
+/**
+ * A scanned PDF, looked at by the file check (C2): a bill the model is sure
+ * of is filed to be transcribed, a schedule or an unplaced scan is held with
+ * the way to have it transcribed, and anything else is refused in words.
+ */
+function scannedAnswer(result: ClassifyResult, scannedPages: number | null): Response {
+  if (!result.ok) return failureAnswer(result);
+  if (result.decision?.importType === "boq") {
+    return json(
+      {
+        ok: true,
+        genre: result.genre,
+        decision: result.decision,
+        pdfBill: transcribeNote("scanned", scannedPages),
+        unsupported: null,
+        titleText: result.titleText,
+        evidence: result.evidence,
+        certain: result.certain,
+        charged: true,
+      },
+      200,
+    );
+  }
+  // A SCAN THE MODEL FILED AS SOME SCHEDULE, OR COULD NOT PLACE, may be the
+  // bill — the fast model files a procurement schedule as an FF&E schedule
+  // (C1, measured). Held, C1's way, with the next step in the sentence:
+  // choosing Bill has it transcribed. A scanned drawing, spec sheet, preamble
+  // or message is still refused: nothing here reads pictures of those.
+  if (!NOT_A_BILL.has(result.genre)) {
+    return json(
+      {
+        ok: true,
+        genre: result.genre,
+        decision: null,
+        unsupported: null,
+        held: `${GENRE_WORDS[result.genre] ? `Read as ${GENRE_WORDS[result.genre]}; its` : "Its"} pages are pictures, with no text a program can read. If it is the bill, choose Bill of quantities: the model will transcribe it (one charged read) and mark every line for you to check against its page.`,
+        titleText: result.titleText,
+        evidence: result.evidence,
+        certain: result.certain,
+        charged: true,
+      },
+      200,
+    );
+  }
+  return json(
+    {
+      ok: true,
+      genre: result.genre,
+      decision: null,
+      unsupported: SCANNED_PDF,
+      titleText: result.titleText,
+      evidence: result.evidence || "the pages carry no text, only images",
+      certain: result.certain,
+      charged: true,
     },
     200,
   );

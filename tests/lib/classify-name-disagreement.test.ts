@@ -15,6 +15,7 @@ import { buildPdfOfPages } from "../fixtures/build-pdf.mjs";
 import { twoRowHeaderWorkbook } from "../fixtures/build-boq";
 import { guessKindFromName, nameModelDisagreement } from "@/lib/document-name-guess";
 import { KIND_FROM_GENRE } from "@/lib/document-kinds";
+import { lookAnswer } from "../fixtures/look-answers";
 
 const create = vi.hoisted(() => vi.fn());
 
@@ -78,11 +79,10 @@ async function classify(filename: string, contentType = "application/pdf") {
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 }
 
+// Re-pinned for open intake: the look is the survey, answered here as the one
+// whole-file part a single-kind file is (`look-answers.ts`).
 function answers(genre: string, evidence = "a table of items with finishes") {
-  create.mockResolvedValue({
-    content: [{ type: "tool_use", id: "t1", name: "record_document_kind", input: { genre, titleText: null, evidence, certain: true } }],
-    stop_reason: "tool_use",
-  });
+  create.mockImplementation(lookAnswer({ genre, titleText: null, evidence, certain: true }));
 }
 
 describe("nameModelDisagreement", () => {

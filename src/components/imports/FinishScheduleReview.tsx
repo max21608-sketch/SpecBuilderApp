@@ -61,6 +61,7 @@ import {
   type StagedFinishSchedule,
 } from "@/lib/finish-schedule";
 import { attemptRestartable } from "@/lib/extraction-claim";
+import { documentLabel, type SourcePart } from "@/lib/source-part";
 
 type Run = {
   id: string;
@@ -68,6 +69,8 @@ type Run = {
   version: number;
   error: string | null;
   filename: string | null;
+  /** Which part of the file this read is for (open intake); null or absent for the whole file. */
+  sourcePart?: SourcePart | null;
   claim_live: boolean | null;
   within_deadline: boolean | null;
   claim_count: number;
@@ -419,7 +422,7 @@ export default function FinishScheduleReview({
     <>
       <PageHeader
         crumbs={[crumb]}
-        title={run?.filename ?? "Finishes schedule"}
+        title={run?.filename ? documentLabel(run.filename, run.sourcePart) : "Finishes schedule"}
         subtitle={
           <>
             {DOCUMENT_KIND_LABELS.finishes_schedule} · on{" "}
@@ -462,7 +465,7 @@ export default function FinishScheduleReview({
     return shell(
       <Card title={deferred ? "This schedule is waiting for a slot" : "This schedule has not been read"}>
         <p className="text-neutral-600">
-          {run.filename ?? "This document"} · {DOCUMENT_KIND_LABELS.finishes_schedule}
+          {run.filename ? documentLabel(run.filename, run.sourcePart) : "This document"} · {DOCUMENT_KIND_LABELS.finishes_schedule}
         </p>
         <div className="mt-2">
           <DocumentState run={{ status: run.status, waitingForSlot: run.waitingForSlot }} />

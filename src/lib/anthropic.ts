@@ -35,6 +35,7 @@ import { answerRequest, readAnswer } from "@/lib/model-request";
 // independent knobs -- see the header of extraction-claim.ts.
 import { MODEL_DEADLINE_MS } from "@/lib/extraction-claim";
 import { replayedResponse } from "@/lib/local-read-replay";
+import { partKey, type SourcePart } from "@/lib/source-part";
 
 // Opus, not Sonnet, from 2026-09-23. Max: "I'm not too bothered about how long
 // this extraction process takes, or how much it costs in API cost … the key
@@ -627,6 +628,14 @@ export type ExtractionOptions = {
    */
   instruction?: string;
   /**
+   * The part of the file this read is for (`source-part.ts`), where it is not
+   * the whole file. Read ONLY by the local replay key: the instruction carries
+   * the part to the model, and every read of one PDF sends the same bytes, so
+   * a key on the bytes alone would answer each part's read with one saved
+   * answer.
+   */
+  part?: SourcePart | null;
+  /**
    * EVAL HARNESS ONLY. Nothing in the app sets these; every default below is
    * the app's own. They exist so `npm run eval:drawings` can ask the same
    * document of another model, at another effort, or under an earlier prompt
@@ -724,6 +733,11 @@ export async function extractSpecDocument(
             source: { type: "base64" as const, media_type: "application/pdf" as const, data: source.base64 },
           },
           { type: "text" as const, text: prompt },
+          // A PART OF A PDF (open intake): which pages are this read's, after
+          // the prompt as the spreadsheet's instruction is. Absent for a whole
+          // file, so every read registered before parts sends the request it
+          // always sent — `anthropic-request.test.ts` pins that.
+          ...(options.instruction ? [{ type: "text" as const, text: options.instruction }] : []),
         ]
       : [
           { type: "text" as const, text: source.text },
@@ -745,7 +759,7 @@ export async function extractSpecDocument(
 
   // LOCAL STACK ONLY (`local-read-replay.ts`): a saved response stands in for
   // the API. Off everywhere a real read happens.
-  const replayed = source.type === "pdf" ? replayedResponse(source.base64) : null;
+  const replayed = source.type === "pdf" ? replayedResponse(source.base64, process.env, options.part ? partKey(options.part) : null) : null;
   if (replayed) {
     const response = replayed as ModelResponse;
     const read = readExtractionResponse(response, documentKind, options.promptVariant);
