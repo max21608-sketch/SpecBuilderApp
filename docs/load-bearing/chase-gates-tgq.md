@@ -841,6 +841,16 @@ GIVES it. `requirements.audience` is `in_house` | `cam` | `client`, seed data;
   edit route refuses one only when it is added, so a draft written before the
   rule opens, edits and downloads with its body as stored
   (`tests/db/chase-audience.test.ts`, byte for byte).
+  **A line already in such a draft is FLAGGED, not left silent** (review A1,
+  2026-11-21). Three routes reach it: seed 0015 after the draft, "Put it
+  back", and a colleague re-roled to designer (`email_drafts.contact_version`
+  is written and read by nothing). `/api/drafts` marks each line `nowOurs`
+  by `audienceRefusal` off the live question (with the project's route) and
+  the LIVE contact row's role, and counts `nowOursCount` on an editable
+  draft; the card says "N questions in this draft are now ours to answer —
+  remove them, or generate a new chase" with each named and Remove beside
+  it. It is ADVISORY like `tierChanged`, never a stale reason: making it one
+  would refuse "Yes, I sent it" on every old draft (the chased_at trap).
 - **Neither the client wording nor "ask the client" touches the snapshot or
   `spec_answers`.** The wording is `requirements.client_prompt`, frozen per
   line in `email_draft_items.asked_as` beside `context_snapshot`, never in it

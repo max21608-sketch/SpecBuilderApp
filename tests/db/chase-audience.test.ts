@@ -268,6 +268,11 @@ describeIfDb("chase audiences (0062)", () => {
     const opened = inventory.drafts.find((d: { id: string }) => d.id === draftId);
     expect(opened.body).toBe(body);
     expect(opened.items.every((item: { staleReasons: string[] }) => item.staleReasons.length === 0)).toBe(true);
+    // FLAGGED, NOT SILENT, AND NOT STALE (review A1): the in-house line is
+    // named as ours to answer, the client line is not, and nothing is refused.
+    expect(opened.nowOursCount).toBe(1);
+    const flags = Object.fromEntries(opened.items.map((item: { requirementId: string; nowOurs: boolean }) => [item.requirementId, item.nowOurs]));
+    expect(flags).toEqual({ [inHouseId]: true, [comId]: false });
 
     // DOWNLOAD: the message file carries the stored body, byte for byte.
     const { GET: eml } = await import("@/app/api/drafts/[id]/eml/route");
@@ -328,6 +333,32 @@ describeIfDb("chase audiences (0062)", () => {
   // Decision E: a question worded for us is never sent. "Ask the client" is
   // the CAM's way out (decision D), so an in-house question is refused in
   // words and nothing is stored (chase review A2).
+  // REVIEW A1, the third route into the state: a colleague's draft holds
+  // in-house lines by right; re-role the colleague to a designer and those
+  // lines are flagged on the card, read off the LIVE contact row.
+  it("flags a colleague's in-house lines once the colleague is re-roled to a designer, and refuses nothing", async () => {
+    expect((await generate(colleagueId, [comId, inHouseId])).status).toBe(201);
+    const { GET } = await import("@/app/api/drafts/route");
+    const open = async () =>
+      ((await (await GET(new Request(`http://localhost/api/drafts?projectId=${projectId}`))).json()).drafts as {
+        contact_id: string;
+        status: string;
+        nowOursCount: number;
+        staleCount: number;
+        items: { requirementId: string; nowOurs: boolean }[];
+      }[]).find((d) => d.contact_id === colleagueId && d.status === "draft")!;
+    expect((await open()).nowOursCount).toBe(0);
+    await client.query(`update project_contacts set role = 'designer', updated_by = 'qa' where id = $1`, [colleagueId]);
+    try {
+      const flagged = await open();
+      expect(flagged.nowOursCount).toBe(1);
+      expect(flagged.staleCount).toBe(0);
+      expect(flagged.items.find((item) => item.requirementId === inHouseId)?.nowOurs).toBe(true);
+    } finally {
+      await client.query(`update project_contacts set role = 'internal', updated_by = 'qa' where id = $1`, [colleagueId]);
+    }
+  });
+
   it("refuses to move an IN-HOUSE question to the client, in words, and stores nothing", async () => {
     const res = await route({ questionKey: "field:191", askClient: true });
     expect(res.status).toBe(409);

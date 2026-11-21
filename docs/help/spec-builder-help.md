@@ -424,7 +424,11 @@ Project → **"Chase N"**.
    client questions." Untick it, or answer it on the Fill-in screen. A
    designer's email shows each question in the client's words ("Fabric 1"),
    never the BWS field name; an area question says "one answer for each
-   area". A draft made before this works as it did.
+   area". A draft made before this works as it did — but if it holds a
+   question that is now ours, the card says "N questions in this draft are
+   now ours to answer — remove them, or generate a new chase", with each one
+   named and **Remove** beside it. It still downloads and can still be
+   marked sent.
 3. **"Open in Outlook (.eml)"** downloads the draft. Open it, check it, and
    send it from your own Outlook. The app sends nothing.
 4. Back in the app press **"I've sent this"** → "Yes, I sent it". This is what
@@ -641,6 +645,7 @@ email to Max with the document name: the reading may need improving.
 | "…the category cannot change on this item. Keep it, and answer those questions where they are." | Its questions were already chased. By design. If the category is truly wrong, email Max |
 | "Nobody can be asked yet." | Add a contact whose "Designer code" matches the bill's (5.8) |
 | "I've sent this" is greyed out | Download the draft first with "Open in Outlook (.eml)" |
+| "N questions in this draft are now ours to answer — remove them, or generate a new chase" | Press Remove beside each, or draft the email again. Nothing is refused: the question changed hands (a re-seed, "Put it back", or the contact made a designer) after the draft was written |
 | "N of the M questions in this email changed after it was written. Regenerate the draft…" | Draft the email again, download that one, send that |
 | "This draft changed while you were looking at it. Reload, re-download the .eml, and confirm again." | Do exactly that |
 | "No project chosen. A chase is about one project." | Open the project and press "Chase" there |

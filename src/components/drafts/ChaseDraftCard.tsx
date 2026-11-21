@@ -48,6 +48,13 @@ export type DraftItem = {
    * claim about an answer, so a TGQ re-seed must not invalidate every draft.
    */
   tierChanged: boolean;
+  /**
+   * The line asks an in-house or CAM question of a designer or a client
+   * (review A1): seed 0015 after the draft, "Put it back", or the contact
+   * re-roled. ADVISORY like `tierChanged`: the draft still opens, edits,
+   * downloads and can be marked sent; the card names it with Remove beside it.
+   */
+  nowOurs: boolean;
 };
 
 export type Draft = {
@@ -75,6 +82,8 @@ export type Draft = {
   void_reason: string | null;
   items: DraftItem[];
   staleCount: number;
+  /** Lines in an editable draft that are no longer the client's to answer. */
+  nowOursCount: number;
 };
 
 // Keyed by `StaleReason`, so an entry for a reason the loader no longer
@@ -309,6 +318,35 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
         </Note>
       )}
 
+      {/* ---- lines that are no longer the client's (review A1) ----------
+          Highlighted where they are, each with its Remove beside it. Not a
+          refusal: an old draft still downloads and can be marked sent. */}
+      {editable && draft.nowOursCount > 0 && (
+        <Note tone="warn">
+          {draft.nowOursCount} question{draft.nowOursCount === 1 ? " in this draft is" : "s in this draft are"} now ours
+          to answer — remove {draft.nowOursCount === 1 ? "it" : "them"}, or generate a new chase.
+          <ul className="mt-1 space-y-0.5">
+            {draft.items
+              .filter((item) => item.nowOurs)
+              .map((item) => (
+                <li key={`${item.recordId}:${item.requirementId}`} className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono">{item.recordLabel}</span>
+                  <span>{fieldDisplayName(item.prompt)}</span>
+                  <Button
+                    size="xs"
+                    variant="quiet"
+                    disabled={busy}
+                    aria-label={`Remove ${fieldDisplayName(item.prompt)} on ${item.recordLabel}`}
+                    onClick={() => void removeQuestion(item)}
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+          </ul>
+        </Note>
+      )}
+
       {error && (
         <Note tone="danger">
           {error}
@@ -375,6 +413,11 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                     {/* ADVISORY, never a blocker: a question moving between the
                         two halves is a reading of the gate model, not a claim
                         about the answer. */}
+                    {editable && item.nowOurs && (
+                      <Chip tone="warn" className="mr-2">
+                        now ours to answer
+                      </Chip>
+                    )}
                     {item.tierChanged && item.staleReasons.length === 0 && (
                       <Chip tone="warn" className="mr-2">
                         {item.tier === "to_quote" ? "no longer blocking the quote" : "now blocking the quote"} —
