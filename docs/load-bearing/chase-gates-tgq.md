@@ -919,7 +919,19 @@ one-word label containing it, and any label whose words all appear in it. So
 an alias is chosen by running the corpus (`vocab:gap`, 613 labels on the
 local stack, 2026-11-21) through the resolver with and without it, and only
 the forms that moved nothing but what they were meant to were seeded:
-"Swivel", "Seat build", "Studs / nailing".
+"Swivel" and "Studs / nailing".
+
+- **"Seat build" was seeded and REMOVED (review, 2026-11-21).** A label that
+  names TWO things is not one of them: "Seat & back build" scored 1.0 against
+  the two-word alias and landed, confidently, on Seat upholstery build alone.
+  The alias added nothing else — "SEAT BUILD" lands on field 11 through the
+  prompt "Seat upholstery build" with no alias — so it went, and 0016 deletes
+  exactly that seeded row from a database that ran the first version. Run
+  every multi-word alias against "X & Y" forms of itself before seeding it.
+- **"STUDS/NAILING" with no spaces is a known MISS, left alone**:
+  `normaliseName` does not split "/", so it is one word and reaches nothing. A
+  miss is a row a person places; widening the normaliser to make it land
+  moves every label with a slash in it, and is not a seed change.
 
 - **"Back cushions" is NOT an alias**: any alias holding "cushions" lands the
   corpus's own fabric callout "cushions (seat, back, bolster)" and a bare
