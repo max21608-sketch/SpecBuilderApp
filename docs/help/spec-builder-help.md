@@ -389,9 +389,11 @@ answers one question across many items.
 - **Who answers it.** Every question is the client's, the CAM's or ours
   ("In-house"). "Filter by who answers" → "CAM only" is the list to take to
   the CAM; it hides the rest and changes no count. A CAM or in-house question
-  carries its label; if nobody here knows it, press **"Ask the client"** and,
-  on this project only, it goes in the chase. It then says "Asked of the
-  client on this project", with **"Put it back"**.
+  carries its label. If nobody here knows a **CAM** question, press **"Ask
+  the client"** and, on this project only, it goes in the chase. It then says
+  "Asked of the client on this project", with **"Put it back"**. An
+  **in-house** question has no such button: it is ours to answer and is never
+  sent to the client.
 - **"By area — answered once for each area".** Indoor or outdoor, floor type,
   wall build and "fully outdoor or partially protected" are answered once for
   an area such as "Restaurant" and written to every item in it. An item that

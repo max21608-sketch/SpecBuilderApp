@@ -19,7 +19,7 @@
 // insert to move, a delete to move back), and by the screen saying "asked of
 // the client on this project" beside the question.
 //
-// ---- THE TWO RULES ------------------------------------------------------
+// ---- THE THREE RULES ----------------------------------------------------
 //
 //  - THE PROJECT ROW IS LOCKED FIRST. The generate route locks it too, so a
 //    route moving while a chase is generated queues rather than interleaves:
@@ -28,6 +28,8 @@
 //    covers it on every cheat sheet on the project that asks it, and the key
 //    must be one an item in scope asks — anything else is refused, never
 //    stored for a question that does not exist here.
+//  - ONLY A CAM QUESTION MOVES. An in-house one is refused in words
+//    (decision E: never sent); a client one is already the client's.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { questionGroupKey } from "@/lib/chase-grouping";
@@ -80,6 +82,17 @@ export async function setQuestionRoute(
   if (askClient) {
     if (seedAudience === "client") {
       throw new DomainConflictError("already_client", "That is already a client question; a chase can ask it as it is.");
+    }
+    // ONLY A CAM QUESTION MOVES (chase review A2, 2026-11-21). Decision D gives
+    // "ask the client" to the CAM who does not know an answer; decision E says
+    // a question worded for us is never sent. The button is not offered on an
+    // in-house question, and this is the write boundary saying so in words.
+    // Putting one back stays open, for a route stored before this rule.
+    if (seedAudience === "in_house") {
+      throw new DomainConflictError(
+        "in_house",
+        "That is an in-house question — ours to answer, and in-house questions are never sent to the client. Answer it here. Nothing was changed.",
+      );
     }
     await txn`
       insert into project_question_routes (project_id, question_key, audience, created_by, updated_by)

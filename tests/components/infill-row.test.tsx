@@ -278,6 +278,14 @@ describe("InfillRow — who answers it", () => {
     expect(reload).toHaveBeenCalled();
   });
 
+  // Decision E: an in-house question is never sent, so the button is not
+  // offered on one (chase review A2) — it names who answers it and stops.
+  it("names an in-house question and offers NO way to ask the client", () => {
+    renderRow({ audience: "in_house", seedAudience: "in_house", prompt: "Assembly guide required", questionKey: "field:191" });
+    expect(screen.getByText("In-house")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ask the client" })).not.toBeInTheDocument();
+  });
+
   it("says a moved question is asked of the client on this project, and can put it back", async () => {
     const user = userEvent.setup();
     const { route } = renderRow({ audience: "client", seedAudience: "in_house", questionKey: "field:191" });

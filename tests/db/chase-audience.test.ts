@@ -290,18 +290,18 @@ describeIfDb("chase audiences (0062)", () => {
     expect(Number(edited.template_version)).toBe(4);
   });
 
-  it("moves ONE question to the client for ONE project, audited, and back", async () => {
+  it("moves ONE CAM question to the client for ONE project, audited, and back", async () => {
     const { loadOutstanding } = await import("@/lib/chase-drafts");
     const audience = async (pid: string, rid: string) =>
-      (await loadOutstanding(pid)).find((q) => q.requirementId === inHouseId && q.recordId === rid)!;
+      (await loadOutstanding(pid)).find((q) => q.requirementId === camId && q.recordId === rid)!;
 
-    expect((await audience(projectId, recordId)).audience).toBe("in_house");
-    const moved = await route({ questionKey: "field:191", askClient: true });
+    expect((await audience(projectId, recordId)).audience).toBe("cam");
+    const moved = await route({ questionKey: "prompt:__qa toe agreement", askClient: true });
     expect(moved.status).toBe(200);
     const here = await audience(projectId, recordId);
-    expect(here).toMatchObject({ audience: "client", seedAudience: "in_house" });
+    expect(here).toMatchObject({ audience: "client", seedAudience: "cam" });
     // Another project asking the same question is untouched.
-    expect((await audience(otherProjectId, otherRecordId)).audience).toBe("in_house");
+    expect((await audience(otherProjectId, otherRecordId)).audience).toBe("cam");
     const audit = await client.query(
       `select action from audit_log where table_name = 'project_question_routes' and new_values->>'project_id' = $1`,
       [projectId],
@@ -309,23 +309,38 @@ describeIfDb("chase audiences (0062)", () => {
     expect(audit.rows.map((row) => row.action)).toEqual(["insert"]);
 
     // Now a designer may be asked it.
-    expect((await generate(designerId, [comId, inHouseId])).status).toBe(201);
+    expect((await generate(designerId, [comId, camId])).status).toBe(201);
 
     // And back: the route is deleted, the delete is audited, and it is refused again.
-    expect((await route({ questionKey: "field:191", askClient: false })).status).toBe(200);
-    expect((await audience(projectId, recordId)).audience).toBe("in_house");
+    expect((await route({ questionKey: "prompt:__qa toe agreement", askClient: false })).status).toBe(200);
+    expect((await audience(projectId, recordId)).audience).toBe("cam");
     const deleted = await client.query(
       `select count(*)::int as n from audit_log where table_name = 'project_question_routes' and action = 'delete' and old_values->>'project_id' = $1`,
       [projectId],
     );
     expect(deleted.rows[0].n).toBe(1);
-    const res = await generate(designerId, [comId, inHouseId]);
+    const res = await generate(designerId, [comId, camId]);
     expect(res.status).toBe(409);
+  });
+
+  // Decision E: a question worded for us is never sent. "Ask the client" is
+  // the CAM's way out (decision D), so an in-house question is refused in
+  // words and nothing is stored (chase review A2).
+  it("refuses to move an IN-HOUSE question to the client, in words, and stores nothing", async () => {
+    const res = await route({ questionKey: "field:191", askClient: true });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe("in_house");
+    expect(body.error).toMatch(/in-house/i);
+    expect(body.error).toMatch(/never sent/);
+    const rows = await client.query(`select count(*)::int as n from project_question_routes where project_id = $1`, [projectId]);
+    expect(rows.rows[0].n).toBe(0);
   });
 
   // AUDIT A4 OF THE CHASE REVIEW: write_audit() takes a DELETE's actor from
   // the old row's updated_by, so B putting back A's move was logged as A.
   it("audits Put it back under the person who pressed it, not the one who moved it", async () => {
+    const mark = Number((await client.query(`select coalesce(max(id), 0) as id from audit_log`)).rows[0].id);
     session.email = "__qa-mover@example.test";
     try {
       expect((await route({ questionKey: "prompt:__qa toe agreement", askClient: true })).status).toBe(200);
@@ -335,8 +350,9 @@ describeIfDb("chase audiences (0062)", () => {
         `select action, changed_by from audit_log
           where table_name = 'project_question_routes' and coalesce(old_values, new_values)->>'project_id' = $1
             and coalesce(old_values, new_values)->>'question_key' = 'prompt:__qa toe agreement'
+            and id > $2
           order by id`,
-        [projectId],
+        [projectId, mark],
       );
       const deleted = rows.rows.filter((row) => row.action === "delete");
       expect(deleted).toHaveLength(1);

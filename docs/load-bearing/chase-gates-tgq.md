@@ -851,8 +851,12 @@ GIVES it. `requirements.audience` is `in_house` | `cam` | `client`, seed data;
   specification content — and is accounted for by its audit trigger (insert to
   move, delete to move back; the row is stamped `updated_by` with the person
   putting it back BEFORE the delete, because `write_audit()` takes a delete's
-  actor from the old row and B's "Put it back" was logged as A — review A4) and by the row saying so on screen. It locks the
-  project, as the generate route does, so a chase reads one audience.
+  actor from the old row and B's "Put it back" was logged as A — review A4)
+  and by the row saying so on screen. It locks the project, as the generate
+  route does, so a chase reads one audience. **Only a CAM question moves**
+  (review A2): the button is offered on a CAM question alone, and the route
+  refuses an in-house one in words (`in_house`) — decision E says those are
+  never sent. Putting one back stays open, for a route stored before.
 - **An external recipient reads the client wording and NO BWS field name**
   (`recipient` on `buildChaseEmail`, decided off the contact row's role; absent
   is external, the direction that never shows a client a BWS name). A

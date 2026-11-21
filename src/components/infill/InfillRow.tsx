@@ -286,7 +286,9 @@ export default function InfillRow({
           {ours && (
             <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-neutral-600">
               <Chip tone="plain">{QUESTION_AUDIENCE_LABELS[question.audience]}</Chip>
-              {onRoute && (
+              {/* A CAM QUESTION ONLY (review A2): an in-house one is never
+                  sent (decision E), and the route refuses it in words. */}
+              {onRoute && question.audience === "cam" && (
                 <Button
                   size="xs"
                   variant="quiet"
