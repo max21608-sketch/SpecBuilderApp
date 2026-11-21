@@ -45,6 +45,12 @@
 // screen with an empty box and nothing is read for it, which costs nothing.
 // Choosing one by hand always wins over the suggestion.
 //
+// A FILE CAN HOLD SEVERAL DOCUMENTS (open intake, 2026-11-20). The look is a
+// survey, and a file it finds two or more parts in shows a box per part
+// (`UploadFileParts.tsx`); the press registers one READ per reader
+// (`upload-reads.ts`), each with its own place and request id. A file with one
+// read is a file row exactly as before. Still ONE charged look per file.
+//
 // STARTING AN INTAKE SPENDS MONEY, and this screen is still where that is said:
 // one small call per file to work out what it is, then one full read per
 // specification document. A bill of quantities is parsed by code and costs
@@ -61,6 +67,15 @@ import SuggestButton from "@/components/ui/SuggestButton";
 import Button from "@/components/ui/Button";
 import { checkUploadCounted } from "@/lib/upload-check";
 import { isPdfUpload, pdfUploadVerdict, type UploadVerdict } from "@/lib/upload-limits";
+import UploadFileParts, { type PartReadState } from "@/components/projects/UploadFileParts";
+import {
+  kindOfPart,
+  nextRequestId,
+  readsOf,
+  SKIP_PART,
+  type ClassifiedPart,
+  type PartRow,
+} from "@/lib/upload-reads";
 import {
   CLASSIFY_FAILURE_BANNER,
   classifyFailureFromResponse,
@@ -204,6 +219,21 @@ type Queued = {
   sentToModel: boolean;
   /** The browser's page count, passed to classify as a hint. Null when not counted. */
   pages: number | null;
+  /**
+   * THE FILE'S PARTS, where the look found two or more to read (open intake).
+   * Null for every single-kind file, which keeps today's row exactly: one
+   * box, one registration, `registrationRequestId` above.
+   */
+  parts: PartRow[] | null;
+  /**
+   * One request id PER READ, by the read's key (`readsOf`), made the first
+   * time the read is sent and kept for a retry of it — never shared between
+   * reads, and replaced once the server has answered it with an error
+   * (`nextRequestId`).
+   */
+  readIds: Record<string, string>;
+  /** How each read went, by the same key: shown on the parts it covers. */
+  readStates: Record<string, PartReadState>;
 };
 
 /**
@@ -231,6 +261,30 @@ function withPdfBill(
 
 /** What will be used for a file: what somebody chose, else what was read. */
 const kindOf = (item: Queued) => item.choice || item.suggested;
+
+/** A file's parts as `readsOf` takes them. */
+const partKinds = (parts: PartRow[]) => parts.map((part) => ({ place: part.place, kind: kindOfPart(part) }));
+
+/**
+ * Has a person said enough for the press to act on this held file? A file
+ * row: its box. A file with parts: EVERY part — a file half answered
+ * registers nothing (`readsOf`).
+ */
+const answered = (item: Queued) => (item.parts ? !readsOf(partKinds(item.parts)).blocked : Boolean(item.choice));
+
+/** One part of the look's answer as the row holds it. */
+function partRowOf(part: ClassifiedPart): PartRow {
+  const base = { place: part.place, choice: "", held: part.held, error: part.unsupported, errorDetail: part.unsupportedDetail };
+  // A COVER OR AN INDEX STARTS AT "DON'T READ THIS PART", and it is the
+  // look's reading, shown and one change away like any other.
+  if (part.nothingToRead) {
+    return { ...base, suggested: SKIP_PART, settled: true, evidence: part.evidence || "Nothing here is read for a specification." };
+  }
+  const read = choiceFor(part.decision);
+  if (read) return { ...base, suggested: read, settled: true, evidence: withPdfBill(part.evidence, part.decision ? part.pdfBill : null) ?? "" };
+  // HELD, WITH OR WITHOUT A SUGGESTION: shown, offered, and filed by nobody.
+  return { ...base, suggested: choiceFor(part.suggestion), settled: false, evidence: part.evidence };
+}
 
 /**
  * HELD BECAUSE THE NAME AND THE MODEL DISAGREE (K1), and nobody has said which.
@@ -284,7 +338,9 @@ function uploadTally(queue: Queued[]) {
   return queue.reduce(
     (acc, item) => {
       if (item.pathname) acc.stored += 1;
-      if (item.status !== "refused" && shownKind(item)) acc.identified += 1;
+      if (item.status !== "refused" && (item.parts ? item.parts.some((part) => part.choice || part.suggested) : shownKind(item))) {
+        acc.identified += 1;
+      }
       if (item.status === "registering" || (item.status === "done" && !item.note && !item.duplicate)) acc.beingRead += 1;
       // Registered, and its read is queued behind the pack's in-flight cap. It
       // starts on its own and needs nobody, which is why it is not in the
@@ -380,6 +436,9 @@ export default function IntakeBatchUpload({
         failure: null,
         sentToModel: false,
         pages: null,
+        parts: null,
+        readIds: {},
+        readStates: {},
         };
       });
     // TOO LARGE FOR ONE READ is refused here too, before a byte is stored:
@@ -408,7 +467,7 @@ export default function IntakeBatchUpload({
   // says how many will be.
   const pending = queue.filter((item) => item.status !== "done" && item.status !== "refused");
   const held = queue.filter((item) => item.status === "needs-kind");
-  const heldAndAnswered = held.filter((item) => item.choice);
+  const heldAndAnswered = held.filter(answered);
 
   // ============================================================================
   // THIRTY BOXES, SET IN ONE GO (plan any-bill, step 3). Max, on the Miami
@@ -424,8 +483,12 @@ export default function IntakeBatchUpload({
   // ============================================================================
   const [ticked, setTicked] = useState<Set<string>>(() => new Set());
   const [bulkKind, setBulkKind] = useState("");
-  /** A row whose kind can still be set: not registered, not refused. */
-  const settable = pending;
+  /**
+   * A row whose kind can still be set: not registered, not refused — and a
+   * WHOLE FILE. A file with parts has a kind per part, and a bulk choice
+   * written over all of them would be the bulk control deciding a mix.
+   */
+  const settable = pending.filter((item) => !item.parts);
   const tickedRows = settable.filter((item) => ticked.has(item.key));
   const allTicked = settable.length > 0 && tickedRows.length === settable.length;
   /**
@@ -482,6 +545,90 @@ export default function IntakeBatchUpload({
   }
 
   /**
+   * A MIXED FILE'S READS, one registration per reader (`readsOf`), each with
+   * its own request id and its own outcome shown on the parts it covers. A
+   * read already registered is never sent again; a failed one is, under the
+   * id `nextRequestId` says. Returns false where the pack itself could not be
+   * made, which stops the press as it does for a single file.
+   */
+  async function registerReads(item: Queued, parts: PartRow[], pathname: string): Promise<boolean> {
+    const plan = readsOf(partKinds(parts));
+    if (plan.blocked) {
+      update(item.key, { status: "needs-kind" });
+      return true;
+    }
+    const ids = { ...item.readIds };
+    const states = { ...item.readStates };
+    let rows = parts;
+    let heldAgain = false;
+    for (const read of plan.reads) {
+      if (states[read.key]?.state === "done" || states[read.key]?.state === "waiting") continue;
+      const entry = CHOICES.find((option) => option.value === read.kind);
+      if (!entry) continue;
+      const batch = await ensureBatch();
+      if (!batch) return false;
+      ids[read.key] ??= crypto.randomUUID();
+      states[read.key] = { state: "registering", message: null };
+      update(item.key, { status: "registering", failure: null, held: null, readIds: { ...ids }, readStates: { ...states } });
+      const res = await apiFetch<{
+        importId?: string;
+        autoRead?: { dispatched: boolean; error?: string; waiting?: boolean; note?: string };
+      }>("/api/imports", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          batchId: batch,
+          importType: entry.importType,
+          documentKind: entry.documentKind,
+          pathname,
+          filename: item.file.name,
+          contentType: item.file.type,
+          size: item.file.size,
+          registrationRequestId: ids[read.key],
+          ...(read.part ? { part: read.part } : {}),
+        }),
+      });
+      if (!res.ok) {
+        ids[read.key] = nextRequestId(ids[read.key]!, res);
+        const detail = typeof res.data?.detail === "string" ? res.data.detail : null;
+        if (res.status === 400 && detail && entry.importType === "boq") {
+          // A BILL WHOSE TEXT IS NOT A TABLE: its parts go back to a person,
+          // as a whole file's box does (C1), with the reason on them.
+          delete states[read.key];
+          heldAgain = true;
+          rows = rows.map((row, index) =>
+            read.partIndexes.includes(index) ? { ...row, choice: "", suggested: "", settled: false, error: res.error, errorDetail: detail } : row,
+          );
+        } else {
+          states[read.key] = { state: "failed", message: res.error };
+        }
+        continue;
+      }
+      const autoRead = res.data.autoRead;
+      const waiting = autoRead?.dispatched === false && autoRead.waiting === true;
+      states[read.key] =
+        autoRead && !autoRead.dispatched && !waiting
+          ? { state: "failed", message: autoRead.error ?? "Stored, but not queued for reading." }
+          : { state: waiting ? "waiting" : "done", message: waiting ? (autoRead?.note ?? null) : null };
+    }
+    const outcomes = plan.reads.map((read) => states[read.key]?.state);
+    const failed = outcomes.includes("failed");
+    const waitingNote = plan.reads.map((read) => states[read.key]).find((state) => state?.state === "waiting")?.message ?? null;
+    update(item.key, {
+      parts: rows,
+      readIds: { ...ids },
+      readStates: { ...states },
+      status: heldAgain ? "needs-kind" : failed ? "failed" : "done",
+      progress: heldAgain || failed ? item.progress : 100,
+      // The tally reads `note` as "waiting for a slot"; the parts say which.
+      note: !heldAgain && !failed ? waitingNote : null,
+      error: null,
+    });
+    return true;
+  }
+
+  /**
    * The press, over every file — or over ONE, for "Try identifying again". A
    * retry is the same path with the held-row guard lifted for that file: it is
    * already stored, so nothing is uploaded twice, and it is looked at again.
@@ -502,7 +649,7 @@ export default function IntakeBatchUpload({
         // HELD FOR A KIND AND STILL UNANSWERED. Skipped rather than guessed at:
         // reading it under the wrong prompt spends a call on output that
         // answers a different question. A retry of THIS file is the exception.
-        if (item.status === "needs-kind" && !item.choice && item.key !== onlyKey) continue;
+        if (item.status === "needs-kind" && !answered(item) && item.key !== onlyKey) continue;
 
         let pathname = item.pathname;
         let pages = item.pages;
@@ -539,7 +686,8 @@ export default function IntakeBatchUpload({
         // classified twice — but a NAME is not a reading, so a file the
         // filename rule guessed at is still looked at here.
         let choice = settledKind(item);
-        if (!choice) {
+        let parts = item.parts;
+        if (!choice && !parts) {
           update(item.key, { status: "reading", failure: null });
           const asked = await apiFetch<{
             decision: { importType: string; documentKind: string | null } | null;
@@ -556,6 +704,10 @@ export default function IntakeBatchUpload({
             held?: string | null;
             /** Held because the NAME says another kind: what the model read it as (K1). */
             modelDecision?: { importType: string; documentKind: string | null } | null;
+            /** Held, with a reader suggested: a bill or a schedule whose cells read as a bill's. */
+            suggestion?: { importType: string; documentKind: string | null } | null;
+            /** Two or more parts to read: the file is answered per part. */
+            parts?: ClassifiedPart[];
             evidence?: string;
             titleText?: string | null;
             charged?: boolean;
@@ -593,64 +745,95 @@ export default function IntakeBatchUpload({
           update(item.key, {
             sentToModel: item.sentToModel || asked.data.charged !== false,
           });
-          // THE NAME AND THE MODEL DISAGREE (K1): held, with the name's
-          // suggestion kept in the box and the model's offered beside it. A
-          // person chooses; nothing is registered or read until they do.
-          //
-          // AND THE MODEL'S READING CARRIES ITS COST (F4): a bill the model
-          // will transcribe says so beside the offer, as the unheld row does.
-          if (asked.data.held && asked.data.modelDecision) {
-            update(item.key, {
-              status: "needs-kind",
-              held: asked.data.held,
-              alternative: choiceFor(asked.data.modelDecision),
-              alternativeEvidence: withPdfBill(asked.data.evidence ?? null, asked.data.pdfBill ?? null),
-            });
-            continue;
-          }
-          if (read) {
-            // THE DOCUMENT BEATS THE NAME, and the evidence moves with it: a
-            // suggestion and the sentence under it are one reading, or the row
-            // cites a cover page for something it worked out from a filename.
-            update(item.key, { suggested: read, evidence, suggestedFrom: "model", note: null });
+          // A MIXED FILE: a kind per part, and the press goes on to its reads
+          // only once every part has one — the look's reading or a person's.
+          if (asked.data.parts && asked.data.parts.length > 0) {
+            parts = asked.data.parts.map(partRowOf);
+            const blocked = readsOf(partKinds(parts)).blocked;
+            // The name's guess was for the file as one kind; it goes, so the
+            // footer stops counting it as filled in from the name.
+            update(item.key, { parts, status: blocked ? "needs-kind" : item.status, note: null, suggested: "", suggestedFrom: null, evidence: null });
+            if (blocked) continue;
           } else {
-            // IT LOOKED AND COULD NOT TELL. A name guess is KEPT — it is still
-            // one click from being accepted — and what the document said goes
-            // beside it in slate rather than replacing it.
-            const named = item.suggestedFrom === "name";
-            update(item.key, {
-              evidence: named ? item.evidence : evidence,
-              note: named && evidence ? `Looked at the document and could not tell: ${evidence}` : null,
-            });
-          }
-          choice = read;
+            // HELD WITH A READER SUGGESTED (a bill or schedule whose cells read
+            // as a bill's): the box shows it, amber, one click to accept, and
+            // nothing is registered until somebody does.
+            if (asked.data.held && asked.data.suggestion) {
+              update(item.key, {
+                status: "needs-kind",
+                held: asked.data.held,
+                suggested: choiceFor(asked.data.suggestion),
+                suggestedFrom: "model",
+                evidence: asked.data.evidence ?? null,
+                note: null,
+              });
+              continue;
+            }
+            // THE NAME AND THE MODEL DISAGREE (K1): held, with the name's
+            // suggestion kept in the box and the model's offered beside it. A
+            // person chooses; nothing is registered or read until they do.
+            //
+            // AND THE MODEL'S READING CARRIES ITS COST (F4): a bill the model
+            // will transcribe says so beside the offer, as the unheld row does.
+            if (asked.data.held && asked.data.modelDecision) {
+              update(item.key, {
+                status: "needs-kind",
+                held: asked.data.held,
+                alternative: choiceFor(asked.data.modelDecision),
+                alternativeEvidence: withPdfBill(asked.data.evidence ?? null, asked.data.pdfBill ?? null),
+              });
+              continue;
+            }
+            if (read) {
+              // THE DOCUMENT BEATS THE NAME, and the evidence moves with it: a
+              // suggestion and the sentence under it are one reading, or the row
+              // cites a cover page for something it worked out from a filename.
+              update(item.key, { suggested: read, evidence, suggestedFrom: "model", note: null });
+            } else {
+              // IT LOOKED AND COULD NOT TELL. A name guess is KEPT — it is still
+              // one click from being accepted — and what the document said goes
+              // beside it in slate rather than replacing it.
+              const named = item.suggestedFrom === "name";
+              update(item.key, {
+                evidence: named ? item.evidence : evidence,
+                note: named && evidence ? `Looked at the document and could not tell: ${evidence}` : null,
+              });
+            }
+            choice = read;
 
-          // KNOWN, AND NOT SOMETHING THIS APP READS (§6.10.a row 8). Different
-          // from "nobody knows yet": the file stays, the dropdown stays open in
-          // case the answer was wrong, and the reason is printed as an error
-          // rather than as the grey evidence line — because there is an action
-          // in it, and it is not on this screen.
-          const unsupported = asked.data.unsupported ?? null;
-          if (unsupported) {
-            update(item.key, { status: "needs-kind", error: unsupported, errorDetail: asked.data.unsupportedDetail ?? null });
-            continue;
-          }
+            // KNOWN, AND NOT SOMETHING THIS APP READS (§6.10.a row 8). Different
+            // from "nobody knows yet": the file stays, the dropdown stays open in
+            // case the answer was wrong, and the reason is printed as an error
+            // rather than as the grey evidence line — because there is an action
+            // in it, and it is not on this screen.
+            const unsupported = asked.data.unsupported ?? null;
+            if (unsupported) {
+              update(item.key, { status: "needs-kind", error: unsupported, errorDetail: asked.data.unsupportedDetail ?? null });
+              continue;
+            }
 
-          // THE MODEL AND THE PDF'S TEXT DISAGREE (C1): the model named some
-          // other kind and the text is a bill's table. Held, in amber, with the
-          // next step in the sentence; the model's own reading stays beside it.
-          const held = asked.data.held ?? null;
-          if (held) {
-            update(item.key, { status: "needs-kind", held });
-            continue;
-          }
+            // THE MODEL AND THE PDF'S TEXT DISAGREE (C1): the model named some
+            // other kind and the text is a bill's table. Held, in amber, with the
+            // next step in the sentence; the model's own reading stays beside it.
+            const held = asked.data.held ?? null;
+            if (held) {
+              update(item.key, { status: "needs-kind", held });
+              continue;
+            }
 
-          if (!choice) {
-            // Uploaded and kept. A second press registers it once somebody has
-            // said what it is, with no second upload and no second reading.
-            update(item.key, { status: "needs-kind" });
-            continue;
+            if (!choice) {
+              // Uploaded and kept. A second press registers it once somebody has
+              // said what it is, with no second upload and no second reading.
+              update(item.key, { status: "needs-kind" });
+              continue;
+            }
           }
+        }
+
+        // A MIXED FILE IS REGISTERED AS ITS READS, one per reader.
+        if (parts) {
+          if (!(await registerReads(item, parts, pathname))) return;
+          continue;
         }
 
         const entry = CHOICES.find((option) => option.value === choice);
@@ -692,10 +875,14 @@ export default function IntakeBatchUpload({
           // again would read the same text the same way. The kind is cleared
           // so a person says what it is instead (C1).
           const detail = typeof res.data?.detail === "string" ? res.data.detail : null;
+          // THE SERVER ANSWERED, SO THE NEXT SEND IS A NEW REQUEST. Its replay
+          // guard hands the same id the FIRST attempt back, failed or not, so
+          // a retry under it could never succeed; only a lost answer keeps it.
+          const registrationRequestId = nextRequestId(item.registrationRequestId, res);
           if (res.status === 400 && detail && entry.importType === "boq") {
-            update(item.key, { status: "needs-kind", choice: "", suggested: "", error: res.error, errorDetail: detail });
+            update(item.key, { status: "needs-kind", choice: "", suggested: "", error: res.error, errorDetail: detail, registrationRequestId });
           } else {
-            update(item.key, { status: "failed", error: res.error, errorDetail: null });
+            update(item.key, { status: "failed", error: res.error, errorDetail: null, registrationRequestId });
           }
           continue;
         }
@@ -768,7 +955,7 @@ export default function IntakeBatchUpload({
   // NOR A FILE HELD FOR A PERSON (F4, 2026-11-20): the press skips one whose
   // box nobody has answered — "Try identifying again" is its own press — so
   // counting it promised a call the press does not make.
-  const toIdentify = pending.filter((item) => !settledKind(item) && item.status !== "needs-kind").length;
+  const toIdentify = pending.filter((item) => !item.parts && !settledKind(item) && item.status !== "needs-kind").length;
   const namedFromFilename = queue.filter((item) => item.suggestedFrom === "name" && !item.choice).length;
   const tally = uploadTally(queue);
   const showTally = busy || queue.some((item) => item.pathname);
@@ -789,6 +976,25 @@ export default function IntakeBatchUpload({
   // about and a pack where every call had failed for want of a key — true of
   // the second only by accident, and false of the first.
   const heldSent = held.filter((item) => item.sentToModel).length;
+
+  /** Per part, the state of the read it went into, by the read's key. */
+  const partReadStates = (item: Queued): (PartReadState | null)[] => {
+    const parts = item.parts ?? [];
+    const plan = readsOf(partKinds(parts));
+    return parts.map((_, index) => {
+      const read = plan.reads.find((candidate) => candidate.partIndexes.includes(index));
+      return read ? (item.readStates[read.key] ?? null) : null;
+    });
+  };
+
+  const choosePart = (key: string, index: number, value: string) =>
+    setQueue((current) =>
+      current.map((item) =>
+        item.key === key && item.parts
+          ? { ...item, parts: item.parts.map((part, at) => (at === index ? { ...part, choice: value, error: null, errorDetail: null } : part)) }
+          : item,
+      ),
+    );
 
   const label = busy
     ? "Working…"
@@ -971,7 +1177,7 @@ export default function IntakeBatchUpload({
             const unchecked = Boolean(item.suggested) && !item.choice;
             return (
               <li key={item.key} className="flex flex-wrap items-center gap-2 px-3 py-2">
-                {item.status !== "done" && item.status !== "refused" ? (
+                {item.status !== "done" && item.status !== "refused" && !item.parts ? (
                   <input
                     type="checkbox"
                     aria-label={`Tick ${item.file.name}`}
@@ -994,6 +1200,7 @@ export default function IntakeBatchUpload({
                   {item.file.name}
                 </span>
 
+                {!item.parts && (
                 <select
                   aria-label={`Kind of ${item.file.name}`}
                   value={shownKind(item)}
@@ -1010,6 +1217,7 @@ export default function IntakeBatchUpload({
                     </option>
                   ))}
                 </select>
+                )}
 
                 <span className="text-xs text-neutral-500 w-24 text-right">
                   {item.status === "uploading" && `${item.progress}%`}
@@ -1047,7 +1255,20 @@ export default function IntakeBatchUpload({
                     app's own primitive — dashed blue, its evidence required
                     beside it, one click to accept. The select stays, because
                     changing it to something else is the other half. */}
-                {unchecked ? (
+                {item.parts ? (
+                  // A MIXED FILE: a box per part, and nothing about the file
+                  // as a whole to accept.
+                  <UploadFileParts
+                    fileName={item.file.name}
+                    parts={item.parts}
+                    readStates={partReadStates(item)}
+                    choices={CHOICES}
+                    shortLabel={shortLabel}
+                    busy={busy}
+                    locked={item.status === "done"}
+                    onChoose={(index, value) => choosePart(item.key, index, value)}
+                  />
+                ) : unchecked ? (
                   <SuggestButton
                     className="w-full"
                     value={shortLabel(item.suggested)}
