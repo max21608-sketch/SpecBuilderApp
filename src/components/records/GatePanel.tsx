@@ -59,6 +59,7 @@ import type { Palette } from "@/lib/palettes";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
+import ProvisionalModelNote from "@/components/ui/ProvisionalModelNote";
 import Button, { buttonClass } from "@/components/ui/Button";
 import { gateRowRole, questionForField } from "@/lib/chase-counts";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
@@ -140,6 +141,7 @@ export default function GatePanel({
   categoryName = null,
   chaseHref = null,
   projectWideHref = null,
+  provisionalNote = null,
 }: {
   gates: Record<Gate, GateStatus> | null;
   matrixFields?: MatrixFieldRow[] | null;
@@ -150,6 +152,11 @@ export default function GatePanel({
   chaseHref?: string | null;
   /** The project overview's Project-wide card, where those questions are answered once. */
   projectWideHref?: string | null;
+  /**
+   * The seed's sentence where these gates come from a type nobody has
+   * confirmed (0061: the AI-drafted cabinetry model). Printed first, as it is.
+   */
+  provisionalNote?: string | null;
 }) {
   const [showAll, setShowAll] = useState<Partial<Record<Gate, boolean>>>({});
   const [why, setWhy] = useState(false);
@@ -288,6 +295,8 @@ export default function GatePanel({
 
   return (
     <>
+      {/* AN AI DRAFT SAYS SO, FIRST, in the seed's words (0061). */}
+      <ProvisionalModelNote notes={provisionalNote} className="mb-3" />
       <div className="grid grid-cols-1 gap-4 min-[900px]:grid-cols-3">
         {GATES.map((gate) => {
           const status = gates[gate];
@@ -419,7 +428,9 @@ export default function GatePanel({
         }
         actions={
           <CardHeadingNote>
-            Gate model, 17 Sept{categoryName ? ` · ${categoryName}` : ""} ·{" "}
+            {/* His model is dated 17 Sept; a provisional one says its own date above. */}
+            {provisionalNote ? "Gate model" : "Gate model, 17 Sept"}
+            {categoryName ? ` · ${categoryName}` : ""} ·{" "}
             {matrixFields?.length ?? 0} fields{why ? "" : " · collapsed by default"}
           </CardHeadingNote>
         }
@@ -508,8 +519,7 @@ export default function GatePanel({
           is still where the assumptions themselves are listed. */}
       <Note tone="warn" title="These gate rules are provisional.">
         Which categories use which gate model, and which questions block a quote, were set on 17 Sept so the work could
-        start, and are still being confirmed. TG2 is not modelled yet, and the cabinetry categories have no gate rules
-        written.
+        start, and are still being confirmed. TG2 is not modelled yet.
       </Note>
     </>
   );

@@ -59,6 +59,7 @@ import Tip from "@/components/ui/Tip";
 import Pill from "@/components/ui/Pill";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
+import ProvisionalModelNote from "@/components/ui/ProvisionalModelNote";
 import Card from "@/components/ui/Card";
 import PageBody from "@/components/ui/PageBody";
 import PageHeader from "@/components/ui/PageHeader";
@@ -835,6 +836,15 @@ function ProjectOverview() {
                     The other {summary.tgqFromMatrix} use their category&rsquo;s gate model. The figure can only come
                     down as gate models are written.
                   </Note>
+                )}
+                {/* AN AI-DRAFTED GATE MODEL SAYS SO (0061, seed 0014), in the
+                    seed's own words — the summary carries them; no copy here. */}
+                {summary.tgqFromProvisional > 0 && (
+                  <ProvisionalModelNote
+                    notes={summary.provisionalNotes}
+                    suffix={`${summary.tgqFromProvisional} of these items`}
+                    className="mx-4 mt-3"
+                  />
                 )}
                 <Table>
                   <tbody>

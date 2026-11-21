@@ -94,7 +94,7 @@ function project(over: Record<string, unknown> = {}) {
   };
 }
 
-function serve(over: { project?: Record<string, unknown>; documents?: unknown[] } = {}) {
+function serve(over: { project?: Record<string, unknown>; documents?: unknown[]; summary?: Record<string, unknown> } = {}) {
   routes.current = {
     [`/api/projects/${PROJECT}`]: {
       project: project(over.project),
@@ -120,6 +120,7 @@ function serve(over: { project?: Record<string, unknown>; documents?: unknown[] 
         tgqFromFallback: 3,
         disagreements: 2,
         disagreementRunId: "run-1",
+        ...over.summary,
       },
       state: "active",
       documents: over.documents ?? [
@@ -180,6 +181,22 @@ describe("the overview", () => {
     expect(screen.getByText("and 1 more")).toBeInTheDocument();
     expect(screen.getByText("Still being read")).toBeInTheDocument();
     expect(screen.getAllByText(/specs due/).length).toBeGreaterThan(0);
+  });
+
+  // 0061 / seed 0014: an AI-drafted gate model says so beside the TGQ figure,
+  // in the seed's own words, which the summary carries.
+  it("prints the provisional model's sentence where TGQ comes from one", async () => {
+    const sentence = "Provisional cabinetry gate model, drafted by AI on 20 Nov 2026, not yet confirmed by Matthew";
+    serve({ summary: { tgqFromProvisional: 4, provisionalNotes: [sentence] } });
+    await screen.findByRole("heading", { level: 1, name: /T90001/ });
+    expect(screen.getByText(new RegExp(sentence))).toBeInTheDocument();
+    expect(screen.getByText(/4 of these items/)).toBeInTheDocument();
+  });
+
+  it("prints no provisional sentence where no item is on a provisional model", async () => {
+    serve();
+    await screen.findByRole("heading", { level: 1, name: /T90001/ });
+    expect(screen.queryByText(/drafted by AI/)).not.toBeInTheDocument();
   });
 
   it("accepts every suggested level in one request", async () => {

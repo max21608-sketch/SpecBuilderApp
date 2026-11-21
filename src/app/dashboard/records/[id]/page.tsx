@@ -72,6 +72,7 @@ function RecordView() {
   const [missing, setMissing] = useState(false);
   const [savingCategory, setSavingCategory] = useState(false);
   const [savingLevel, setSavingLevel] = useState(false);
+  const [savingMatrixType, setSavingMatrixType] = useState(false);
   /**
    * WHICH TAB. The record was one page of four stacked sections — the specs,
    * the checklist, the gates and the history — and the checklist alone is 43
@@ -174,6 +175,28 @@ function RecordView() {
     } finally {
       // Always reset: an HTML error page must not leave the select disabled.
       setSavingLevel(false);
+    }
+  }
+
+  /**
+   * Accept the suggested type, or set one a person chose (null: the sheet's
+   * union). The project's matrix-types route, which re-derives the suggestion
+   * and refuses if this record moved since it was drawn.
+   */
+  async function setMatrixType(mode: "accept" | "set", code: string | null) {
+    if (!data) return;
+    setSavingMatrixType(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/projects/${data.record.project_id}/matrix-types`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode, records: [{ id: data.record.id, version: data.record.version, matrixType: code }] }),
+      });
+      await reloadThen(res.ok ? null : res.error);
+    } finally {
+      // Always reset: an HTML error page must not leave the control disabled.
+      setSavingMatrixType(false);
     }
   }
 
@@ -378,6 +401,10 @@ function RecordView() {
         readiness={readiness}
         chaseHref={chaseHref}
         chaseWhy={chaseWhy}
+        matrixType={data.matrixType ?? null}
+        savingMatrixType={savingMatrixType}
+        setMatrixType={setMatrixType}
+        provisionalNote={data.provisionalNote ?? null}
         onAddSpec={() => {
           setTab("specs");
           setAddingSpec(true);
@@ -490,6 +517,7 @@ function RecordView() {
             categoryName={record.category_name}
             chaseHref={chaseHref}
             projectWideHref={projectWideHref}
+            provisionalNote={data.provisionalNote ?? null}
           />
         )}
 

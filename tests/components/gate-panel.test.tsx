@@ -276,4 +276,20 @@ describe("the gate panel", () => {
     // An id-less row carries no title at all — never "BWS field —".
     expect(screen.queryByTitle(/BWS field (—|null|undefined)/)).not.toBeInTheDocument();
   });
+
+  // 0061 / seed 0014: a model nobody has confirmed SAYS SO, in the seed's own
+  // words, at the top of the panel. The sentence is data
+  // (`spec_matrix_categories.provisional_note`), so the test passes it in;
+  // the panel holds no copy of it.
+  it("prints the provisional model's own sentence when the record's gates come from one", () => {
+    const sentence = "Provisional cabinetry gate model, drafted by AI on 20 Nov 2026, not yet confirmed by Matthew";
+    renderPanel({ provisionalNote: sentence });
+    expect(screen.getByText(sentence, { exact: false })).toBeInTheDocument();
+  });
+
+  it("prints no provisional sentence for a model somebody wrote, and no longer says cabinetry has none", () => {
+    renderPanel({ provisionalNote: null });
+    expect(screen.queryByText(/drafted by AI/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cabinetry categories have no gate rules/)).not.toBeInTheDocument();
+  });
 });

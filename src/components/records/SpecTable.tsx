@@ -46,6 +46,7 @@ import Tip from "@/components/ui/Tip";
 import StatTile from "@/components/ui/StatTile";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
+import ProvisionalModelNote from "@/components/ui/ProvisionalModelNote";
 import { TONE } from "@/components/ui/tone";
 import SuggestButton from "@/components/ui/SuggestButton";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
@@ -144,6 +145,17 @@ export type SpecRecord = {
   level_suggested_reason: string | null;
   /** The optimistic lock, for the inline level accept. */
   version: number;
+  /**
+   * 0061, decision B: a person's accepted gate-model type within a sheet
+   * covering several, its name, or the app's suggestion with its reason
+   * (computed by the route, never stored; only where the accept would write
+   * it). All optional, so an older payload still renders.
+   */
+  matrix_type?: string | null;
+  matrix_type_name?: string | null;
+  matrix_type_suggestion?: { code: string; name: string; reason: string } | null;
+  /** The seed's sentence where this row's gates come from a provisional model (0061). */
+  provisional_note?: string | null;
   /** Derived per read, never stored: see /api/records. */
   waiting: number;
   /** null where the record has no level — not the same as "nothing is blocking". */
@@ -476,6 +488,7 @@ export default function SpecTable({
   // the file.
   const [showRetired, setShowRetired] = useState(false);
   const [acceptingLevels, setAcceptingLevels] = useState(false);
+  const [acceptingTypes, setAcceptingTypes] = useState(false);
   /** Which single row's suggestion is being filed, if any. */
   const [acceptingRow, setAcceptingRow] = useState<string | null>(null);
   /**
@@ -691,6 +704,33 @@ export default function SpecTable({
   }
 
   /**
+   * Accept the SUGGESTED TYPES on these rows (0061, decision B): each row's
+   * id, the version it was drawn at and the type it showed. The route
+   * re-derives every suggestion under the lock and refuses the whole press if
+   * one moved, so nothing is accepted that this screen did not show.
+   */
+  async function acceptTypes(rows: SpecRecord[]) {
+    const accepted = rows.filter((row) => row.matrix_type_suggestion);
+    if (accepted.length === 0) return;
+    setAcceptingTypes(true);
+    try {
+      const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/matrix-types`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: "accept",
+          records: accepted.map((row) => ({ id: row.id, version: row.version, matrixType: row.matrix_type_suggestion!.code })),
+        }),
+      });
+      // Reload first, then report, as acceptLevels does.
+      await load();
+      if (!res.ok) setError(res.error);
+    } finally {
+      setAcceptingTypes(false);
+    }
+  }
+
+  /**
    * Agree with ONE row's suggestion, at the version the row was rendered at.
    *
    * The run-wide button exists because 22 items must not mean 22 visits; this
@@ -785,6 +825,14 @@ export default function SpecTable({
   const suggestedBreakdown = [...new Set(suggested.map((record) => record.level_suggested))]
     .map((level) => `${suggested.filter((record) => record.level_suggested === level).length} ${level}`)
     .join(", ");
+  // SUGGESTED TYPES (0061): the route only sends one where its accept would
+  // write it, so every row carrying one is in the press.
+  const typeSuggested = records.filter((record) => record.matrix_type_suggestion);
+  const typeBreakdown = [...new Set(typeSuggested.map((record) => record.matrix_type_suggestion!.name))]
+    .map((name) => `${typeSuggested.filter((record) => record.matrix_type_suggestion!.name === name).length} ${name}`)
+    .join(", ");
+  // A PROVISIONAL MODEL, said once over the table in the seed's own words.
+  const provisionalRows = records.filter((record) => record.status === "active" && record.provisional_note);
 
   /**
    * The run's own numbers, for the tiles.
@@ -910,6 +958,36 @@ export default function SpecTable({
           each row carries its own reading beside the button.
         </Note>
       )}
+
+      {/* WHICH OF HIS TYPES (0061, decision B). Each row shows its suggestion
+          with its reason under the category, so the press below accepts
+          nothing this screen has not shown. Its own button, never a select. */}
+      {typeSuggested.length > 0 && (
+        <Note
+          tone="info"
+          title={`${typeSuggested.length} item${typeSuggested.length === 1 ? "" : "s"} ${
+            typeSuggested.length === 1 ? "has" : "have"
+          } a suggested type`}
+          actions={
+            <SuggestButton
+              size="sm"
+              value={`Accept ${typeSuggested.length} suggested type${typeSuggested.length === 1 ? "" : "s"}`}
+              evidence={typeBreakdown}
+              busy={acceptingTypes}
+              onAccept={() => void acceptTypes(typeSuggested)}
+            />
+          }
+        >
+          — read off each item&rsquo;s name. A typed item is asked only its type&rsquo;s questions; until then it is
+          asked every type&rsquo;s on its sheet.
+        </Note>
+      )}
+
+      {/* A PROVISIONAL GATE MODEL SAYS SO, in the seed's words (0061). */}
+      <ProvisionalModelNote
+        notes={provisionalRows.map((record) => record.provisional_note)}
+        suffix={`${provisionalRows.length} item${provisionalRows.length === 1 ? "" : "s"} on this phase`}
+      />
 
       {/* THE RUN'S NUMBERS, AND EACH ONE NARROWS THE TABLE.
           ==================================================================
@@ -1570,6 +1648,20 @@ export default function SpecTable({
                             </Link>
                             {!record.requirements_authored && (
                               <span className="ml-1 text-xs text-amber-800">(not yet defined)</span>
+                            )}
+                            {/* Its accepted type, or the suggestion with its
+                                reason: one press accepts this row alone. */}
+                            {record.matrix_type_name && (
+                              <span className="block text-xs text-neutral-500">{record.matrix_type_name}</span>
+                            )}
+                            {record.matrix_type_suggestion && (
+                              <SuggestButton
+                                value={record.matrix_type_suggestion.name}
+                                evidence={record.matrix_type_suggestion.reason}
+                                busy={acceptingTypes}
+                                onAccept={() => void acceptTypes([record])}
+                                className="mt-0.5 flex-col items-start gap-0.5"
+                              />
                             )}
                           </>
                         ) : (

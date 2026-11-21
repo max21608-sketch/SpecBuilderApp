@@ -20,7 +20,7 @@ import Chip from "@/components/ui/Chip";
 import SuggestButton from "@/components/ui/SuggestButton";
 import RecordTitle from "@/components/records/RecordTitle";
 import { TONE } from "@/components/ui/tone";
-import type { Payload, SpecRecord } from "@/components/records/record-payload";
+import type { MatrixTypeState, Payload, SpecRecord } from "@/components/records/record-payload";
 
 export default function RecordHeader({
   record,
@@ -36,6 +36,10 @@ export default function RecordHeader({
   chaseWhy,
   onAddSpec,
   tabs,
+  matrixType = null,
+  savingMatrixType = false,
+  setMatrixType,
+  provisionalNote = null,
 }: {
   record: SpecRecord;
   data: Pick<Payload, "mockup" | "designerContact" | "twins">;
@@ -58,8 +62,20 @@ export default function RecordHeader({
   /** Add a spec by hand: the page opens the Specs tab with the form showing. */
   onAddSpec: () => void;
   tabs: React.ReactNode;
+  /** Which of his types the item is, on a sheet covering several (0061). Null on a one-type sheet. */
+  matrixType?: MatrixTypeState | null;
+  savingMatrixType?: boolean;
+  /** "accept" the suggestion shown, or "set" a type a person chose (null: the sheet's union). */
+  setMatrixType?: (mode: "accept" | "set", code: string | null) => Promise<void>;
+  /** The seed's sentence where this record's gates come from a provisional model. Printed as it is. */
+  provisionalNote?: string | null;
 }) {
   const [why, setWhy] = useState(false);
+  const [choosingType, setChoosingType] = useState(false);
+  const chooseType = (code: string | null) => {
+    setChoosingType(false);
+    void setMatrixType?.("set", code);
+  };
   // ---- the header's subtitle, which is a row of places to go ---------------
   //
   // Everything in it either is a link or is a chip saying what is not set.
@@ -132,6 +148,50 @@ export default function RecordHeader({
       ) : (
         <Chip tone="warn">no category</Chip>
       )}
+      {/* WHICH OF HIS TYPES (0061, decision B): a suggestion with its reason is
+          one press from a decision; a decision is a plain chip a person can
+          change. Untyped is today's behaviour (the sheet's union), so it is
+          not flagged — only offered. */}
+      {matrixType && (
+        <>
+          <span aria-hidden>·</span>
+          {matrixType.accepted ? (
+            <Chip>{matrixType.accepted.name}</Chip>
+          ) : matrixType.suggestion ? (
+            <SuggestButton
+              value={matrixType.suggestion.name}
+              evidence={matrixType.suggestion.reason}
+              busy={savingMatrixType}
+              onAccept={() => void setMatrixType?.("accept", matrixType.suggestion!.code)}
+            />
+          ) : null}
+          <button
+            type="button"
+            aria-expanded={choosingType}
+            disabled={savingMatrixType}
+            onClick={() => setChoosingType((open) => !open)}
+            className="text-xs underline decoration-dotted hover:text-neutral-800"
+          >
+            {matrixType.accepted ? "Change type" : "Choose type"}
+          </button>
+          {choosingType && (
+            <span className="flex flex-wrap items-center gap-1">
+              {matrixType.options
+                .filter((option) => option.code !== matrixType.accepted?.code)
+                .map((option) => (
+                  <Button key={option.code} variant="quiet" size="xs" onClick={() => chooseType(option.code)}>
+                    {option.name}
+                  </Button>
+                ))}
+              {matrixType.accepted && (
+                <Button variant="quiet" size="xs" onClick={() => chooseType(null)}>
+                  Any of them
+                </Button>
+              )}
+            </span>
+          )}
+        </>
+      )}
       <span aria-hidden>·</span>
       {level ? (
         <Chip>{ITEM_LEVEL_LABELS[level]}</Chip>
@@ -166,6 +226,8 @@ export default function RecordHeader({
       {!data.designerContact && record.designer && (
         <><span aria-hidden>·</span><span>designer {record.designer}</span></>
       )}
+      {/* A PROVISIONAL GATE MODEL SAYS SO, in the seed's words (0061). */}
+      {provisionalNote && <span className={`basis-full text-xs ${TONE.warn.text}`}>{provisionalNote}</span>}
     </span>
   );
 
