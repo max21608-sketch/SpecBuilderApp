@@ -805,8 +805,9 @@ accepts its guesses before confirming.
 
 `db/migrations/0062_question_audience.sql`, `db/seed/0015_question_audience.sql`,
 `src/lib/chase-grouping.ts` (`questionAudience`, `isClientQuestion`,
-`inChaseAsk`), `src/lib/chase-drafts.ts` (`loadQuestionRoutes`,
-`groupByContact`), `src/lib/chase-audience.ts`, `src/lib/question-routes.ts`,
+`inChaseAsk`), `src/lib/chase-drafts.ts` (`groupByContact`),
+`src/lib/question-audience-routes.ts` (`loadQuestionRoutes`, `routedAudience`),
+`src/lib/chase-audience.ts`, `src/lib/question-routes.ts`,
 `src/app/api/projects/[id]/question-routes/route.ts`,
 `src/lib/chase-template.ts` (`TEMPLATE_VERSION` 4), `src/components/infill/InfillRow.tsx`
 
@@ -823,6 +824,14 @@ GIVES it. `requirements.audience` is `in_house` | `cam` | `client`, seed data;
   overview, the preselection and the blocked panel identical; the designer
   tab's LIST dropped the readiness questions its default filter already hid.
   Order: migrate, deploy, seed.
+- **Every reader of the audience reads the ROUTED one** (review A5,
+  2026-11-21). `question-audience-routes.ts` holds the one loader and the one
+  lookup; the chase (`loadOutstanding`, `loadQuestionsByKey`), the record's
+  gate rows (`loadGateContext` → `questionsForRecord`, per record's project,
+  because a category's questions are shared across projects and a route is
+  not) and `/api/records/[id]`'s answers all apply it. Before this the record
+  read the seed's alone — latent while every non-client gate row was
+  project-wide, and a "button says N (differs)" the day one is not.
 - **The audience decides the chase, never the kind, with no fallback.**
   `AudienceReadable`, `GroupableQuestion`, `SelectableQuestion`,
   `GateQuestion` and the record payload REQUIRE it, so a payload that forgets

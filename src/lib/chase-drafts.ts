@@ -24,17 +24,15 @@ import {
   type AnswerState,
   type ItemLevel,
   type QuestionAudience,
-  isQuestionAudience,
   isSettled,
   normaliseAnswerScope,
   normaliseItemLevel,
-  normaliseQuestionAudience,
 } from "@/lib/spec-vocab";
 import { questionTierOrNull, tgqMatrixFor, type QuestionTier, type SheetTgqMatrix } from "@/lib/tgq";
 import { loadTgqMatrices } from "@/lib/gate-load";
 import { numberingFromRow, recordLabel, recordNoLabel, recordShortLabel } from "@/lib/record-label";
 import type { ChaseGroup } from "@/lib/chase-template";
-import { questionGroupKey } from "@/lib/chase-grouping";
+import { loadQuestionRoutes, routedAudience, type QuestionRoutes } from "@/lib/question-audience-routes";
 
 /**
  * A SPLIT BILL LINE IS A HEADING, in SQL, once.
@@ -919,31 +917,10 @@ export async function loadOutstanding(
   return rows.map((row) => toOutstandingQuestion(row, matrices, routes));
 }
 
-/** `project_question_routes`, per project, keyed by `questionGroupKey`. */
-export type QuestionRoutes = Map<string, Map<string, QuestionAudience>>;
-
-/**
- * Each project's "ask the client" (0062): one question moved to another
- * audience for that project alone. Read ONCE per load, beside the matrices,
- * and applied per row by the question's own key — `questionGroupKey`, so a
- * move covers the question on every cheat sheet that asks it.
- */
-export async function loadQuestionRoutes(exec: SqlExecutor, projectIds: string[]): Promise<QuestionRoutes> {
-  const routes: QuestionRoutes = new Map();
-  if (projectIds.length === 0) return routes;
-  const rows = await exec`
-    select project_id, question_key, audience from project_question_routes
-     where project_id = any(${projectIds}::uuid[])
-  `;
-  for (const row of rows) {
-    if (!isQuestionAudience(row.audience)) continue;
-    const key = String(row.project_id);
-    const byKey = routes.get(key) ?? new Map<string, QuestionAudience>();
-    byKey.set(String(row.question_key), row.audience);
-    routes.set(key, byKey);
-  }
-  return routes;
-}
+// The route loader and its lookup live in `question-audience-routes.ts`, so
+// the record's gate rows read the same ones (chase review A5). Re-exported so
+// nothing that imported them from here moved.
+export { loadQuestionRoutes, type QuestionRoutes } from "@/lib/question-audience-routes";
 
 function toOutstandingQuestion(row: Row, matrices: Map<string, SheetTgqMatrix>, routes: QuestionRoutes): OutstandingQuestion {
   const recordNo = Number(row.record_no);
@@ -1018,14 +995,13 @@ function toOutstandingQuestion(row: Row, matrices: Map<string, SheetTgqMatrix>, 
 
 /** The seed's audience, and the project's route over it where there is one. */
 function audienceOf(row: Row, routes: QuestionRoutes): { audience: QuestionAudience; seedAudience: QuestionAudience } {
-  const seedAudience = normaliseQuestionAudience(row.audience);
-  const key = questionGroupKey({
+  return routedAudience(routes, String(row.project_id), {
     requirementId: String(row.requirement_id),
     prompt: String(row.prompt ?? ""),
     jsonId: row.field_json_id === null || row.field_json_id === undefined ? null : Number(row.field_json_id),
     localKey: row.local_key === null || row.local_key === undefined ? null : String(row.local_key),
+    audience: row.audience,
   });
-  return { audience: routes.get(String(row.project_id))?.get(key) ?? seedAudience, seedAudience };
 }
 
 /**

@@ -45,6 +45,7 @@
 // it from a row number, so the day Matthew confirms the model is a re-seed.
 // ============================================================================
 import type { SqlLike } from "@/lib/record-atoms";
+import { loadQuestionRoutes, routedAudience, type QuestionRoutes } from "@/lib/question-audience-routes";
 import { normaliseQuestionAudience, type AnswerState } from "@/lib/spec-vocab";
 import type { SheetTgqMatrix } from "@/lib/tgq";
 import { effectiveMatrixType } from "@/lib/matrix-type";
@@ -92,6 +93,15 @@ export type GateContext = {
    * of a gate's rows is a question, a slot, a record column or project-wide.
    */
   questionsByCategory: Map<string, ItemTgqQuestion[]>;
+  /**
+   * Each record's project and the projects' "ask the client" routes (0062),
+   * so a record's questions carry the ROUTED audience the chase reads
+   * (`questionsForRecord`, chase review A5). A category's questions are
+   * shared across projects; the route is not. Optional so a hand-built
+   * context (a pure test) reads the seed's audience.
+   */
+  projectByRecord?: Map<string, string>;
+  questionRoutes?: QuestionRoutes;
 };
 
 const EMPTY: GateContext = {
@@ -103,6 +113,8 @@ const EMPTY: GateContext = {
   slotsByRecord: new Map(),
   localsByRecord: new Map(),
   questionsByCategory: new Map(),
+  projectByRecord: new Map(),
+  questionRoutes: new Map(),
 };
 
 export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promise<GateContext> {
@@ -314,6 +326,13 @@ export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promi
     questionsByCategory.set(key, list);
   }
 
+  // WHO ANSWERS EACH QUESTION ON THIS RECORD'S PROJECT (chase review A5): the
+  // seed's audience above is per category; a person's "Ask the client" is per
+  // project, and the chase reads it. `questionsForRecord` applies it.
+  const projectRows = await exec`select id, project_id from spec_records where id = any(${recordIds}::uuid[])`;
+  const projectByRecord = new Map(projectRows.map((row) => [String(row.id), String(row.project_id)]));
+  const questionRoutes = await loadQuestionRoutes(exec, [...new Set(projectByRecord.values())]);
+
   return {
     fieldsByCategory,
     typesByCategory,
@@ -323,7 +342,34 @@ export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promi
     slotsByRecord,
     localsByRecord,
     questionsByCategory,
+    projectByRecord,
+    questionRoutes,
   };
+}
+
+/**
+ * One record's checklist questions, each with the audience the CHASE reads:
+ * the seed's, or this record's project's route over it (chase review A5). The
+ * gate rows' chase/readiness split reads it, so the record's "Why" and the
+ * chase screen cannot disagree about a question a person moved.
+ */
+export function questionsForRecord(context: GateContext, record: { id: string; categoryId: string | null }): ItemTgqQuestion[] {
+  if (!record.categoryId) return [];
+  const projectId = context.projectByRecord?.get(record.id);
+  const allRoutes = context.questionRoutes;
+  const routes = projectId && allRoutes ? allRoutes.get(projectId) : undefined;
+  const questions = context.questionsByCategory.get(record.categoryId) ?? [];
+  if (!allRoutes || !routes || routes.size === 0) return questions;
+  return questions.map((question) => ({
+    ...question,
+    audience: routedAudience(allRoutes, projectId, {
+      requirementId: question.requirement_id,
+      prompt: question.prompt,
+      jsonId: question.json_id,
+      localKey: question.local_key,
+      audience: question.audience,
+    }).audience,
+  }));
 }
 
 /**
@@ -375,7 +421,7 @@ export function itemTgqForRecord(
   const gates = gatesForRecord(context, record);
   return itemTgq({
     tgqGateRows: gates ? gates.TGQ.fields : null,
-    questions: record.categoryId ? (context.questionsByCategory.get(record.categoryId) ?? []) : [],
+    questions: questionsForRecord(context, record),
     outstanding,
   });
 }
