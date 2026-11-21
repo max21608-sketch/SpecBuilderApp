@@ -479,6 +479,14 @@ record still gets no gate view, and its TGQ is still the placeholder. When it
 is seeded, every row's `notes` and every screen that reads it must say
 "provisional, drafted by AI on 20 Nov 2026, not yet confirmed by Matthew".
 
+**2026-11-21: seeded by the chase build** (seed `0014`, with migration `0061`).
+It differs from the first draft in three ways, each forced by the code: row
+103 is asked of all eight types; substrate, runners and hinges are free text;
+and 77 checklist questions were added so the rows have somewhere to be
+answered. The sentence above is in every row's `notes` and comes to the
+screens from `spec_matrix_categories.provisional_note`, never from a constant.
+`chase-decisions-2026-11-20.md`, "What was built", has the full list.
+
 The same file records six smaller calls made the same way (swivel on sofas,
 per-area questions, who each project-wide question goes to, in-house wording,
 "COM" for BW-supplied fabric, drawing labels that answer a question).

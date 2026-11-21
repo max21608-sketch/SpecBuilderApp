@@ -21,6 +21,43 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-11-21 — The chase build: seven decisions made buildable, built, reviewed and proven
+
+Max, 2026-11-20, on the seven chase decisions he had asked Claude to make
+(`chase-decisions-2026-11-20.md`): *"build these things into the app. Really
+high quality work, test, be rigorous"*, and *"keep going until its built"*.
+
+- **What it is.** An AI-drafted cabinetry gate model, labelled provisional
+  wherever it shows (A). An item's type suggested from its name, accepted by a
+  person, so a sofa is not asked about swivel (B). Questions answered once
+  for an area (C). An audience on every question, so only client questions
+  reach a designer (D). Client wording in the email, with no BWS field name
+  (E). FABRIC or COM on the quote by one tick on the finishes library (F).
+  Two label links (G).
+- **How it was run.** An architect's design against the code first (15
+  findings that changed the decisions, among them a seed that would have
+  failed and a dining table that could never clear TG0). Two coders one after
+  the other on `chase-a`, each change with a test that failed first. Three
+  independent reviewers on the result: 20 findings, all fixed. The worst:
+  existing cabinetry items could not answer the questions the seed adds.
+- **Measured** on the invented tender: a side table's blocking questions 30 →
+  5, a writing desk 31 → 5, a typed sofa 3 → 2; a designer's chase for 8 items
+  about 20 questions where the first draft had 54.
+- **Proof.** Typecheck, lint, build and the whole suite (5,862 tests, database
+  tier required) on the branch merged with the intake build; the same from
+  scratch on an empty database; a scripted browser walk on the production
+  build.
+- **Rollout order is migrate → deploy → seed → backfill** (`0061`, `0062` and
+  the intake build's `0065`; seeds `0014`–`0016`; `db:backfill-question-rows`).
+  The decisions file, "What was built", has why each step sits where it does.
+- **Not built:** shop drawings answering the checklist (it changes the drawing
+  read for packs already read, and waits for Max); defaulting lists to TGQ
+  only.
+- **State.** `committed locally` on local `staging`; nothing pushed, no
+  deployment, no migration or seed run anywhere but local databases. Human
+  acceptance is outstanding on every screen it touched, and Matthew has not
+  seen the cabinetry model.
+
 ## 2026-11-21 — Open intake, Stages 0–2: a mixed pack is surveyed into parts and read by part
 
 Max, 2026-11-20: *"we can be given stuff in whatever format. It could all be

@@ -753,6 +753,31 @@ parts; a row range of a sheet as a part. **Before this code runs on the
 sandbox or pilot, migration 0065 must be applied there** (Max's to run). Human
 acceptance is outstanding on the upload screen and everything it feeds.
 
+**The chase build (2026-11-21).** Max asked Claude to make seven decisions
+about the chase for Matthew, with an AI-drafted cabinetry gate model
+(`docs/plans/chase-decisions-2026-11-20.md`), and then to build them
+"rigorously". **Built** (that file's "What was built"; the dated entry in
+`docs/plans/README.md`): the cabinetry model as seed 0014, eight types and
+rows 101–121, labelled provisional from `provisional_note` on every screen
+that reads it; an item's TYPE suggested from its name and accepted by a
+person (`spec_records.matrix_type`), so gate rows apply by type; an AUDIENCE
+on every question, so only client questions reach a designer and the email
+shows the client wording, never a BWS field name; "Ask the client" for one
+CAM question on one project; a question answered once for an AREA by the
+project-wide mechanism; FABRIC or COM on the quote by
+`project_finishes.customer_supplied`; two label aliases. An architect's
+design, two coders, three independent reviewers (20 findings fixed), the
+whole suite on the branch merged with open intake (5,862 tests, database tier
+required), the same from scratch on an empty database, and a scripted browser
+walk. **Rollout order is migrate → deploy → seed → backfill**: `0061`, `0062`
+(and open intake's `0065`), then the code, then the seeds, then
+`db:backfill-question-rows`; a seed before the deploy shows the AI model
+unlabelled, and new code without the migrations fails every chase, fill-in
+and record read. `committed locally` on local `staging`; nothing pushed,
+deployed, migrated or seeded outside local databases. **Not built:** shop
+drawings answering the checklist. Human acceptance is outstanding on every
+screen it touched, and Matthew has not seen the cabinetry model.
+
 **Explicitly excluded, so it is not built speculatively:** a BWS *import*
 file carrying job numbers; images and scanned documents other than a bill; M6
 VE rounds; any write to BWS; automatic email sending; SharePoint writes
@@ -775,12 +800,15 @@ of PDF with text, spreadsheet and email.
 
 **Decisions awaiting somebody** (the person is named; the detail is in the
 diary and the README):
-- **Matthew:** Dia satisfying W and D at TGQ (shipped provisionally); whether
+- **Matthew:** the AI-drafted cabinetry gate model and the six other chase
+  decisions Claude made for him (`docs/plans/chase-decisions-2026-11-20.md`;
+  his sheet is linked at its head, and his answer replaces Claude's); Dia
+  satisfying W and D at TGQ (shipped provisionally); whether
   TG1's re-check rows need their own recorded act; the item-review screen
   design; the gate model's assumptions (`docs/plans/matrix-assumptions.md`,
   Max standing in for him since 2026-09-17); the level guess rules; the
   question-to-BWS-field mapping; Q4/Q6/Q7/Q8 from the Ronnie Scott's plan.
-- **Max:** applying migration 0065 to the sandbox and to pilot before the open-intake build deploys to either; checking the four real survey answer keys (`docs/docs for building/survey-key-check-2026-11-20.md`, seven decisions first); the production-readiness decisions D1–D12 (`docs/plans/production-readiness-2026-11-20.md` §5 — who sees which client, BWS import at launch, company accounts and a spend limit, backups, retention, the production branch and domain, residency, decimal quantities, pilot data, mail, CSP, which document describes a finish); reading CI and the staging deployment on `72a69fe` (the production-readiness build, pushed 2026-11-20) before pilot; reading the first CI run on the review build (pushed 2026-11-18);
+- **Max:** the chase build's rollout on the sandbox and pilot, in order (migrate `0061`/`0062`/`0065` → deploy → seed → `db:backfill-question-rows`); whether shop drawings should answer the checklist (`chase-decisions` §G); applying migration 0065 to the sandbox and to pilot before the open-intake build deploys to either; checking the four real survey answer keys (`docs/docs for building/survey-key-check-2026-11-20.md`, seven decisions first); the production-readiness decisions D1–D12 (`docs/plans/production-readiness-2026-11-20.md` §5 — who sees which client, BWS import at launch, company accounts and a spend limit, backups, retention, the production branch and domain, residency, decimal quantities, pilot data, mail, CSP, which document describes a finish); reading CI and the staging deployment on `72a69fe` (the production-readiness build, pushed 2026-11-20) before pilot; reading the first CI run on the review build (pushed 2026-11-18);
   whether a preamble note's retire belongs in the change trail; deleting the
   65 merged local branches; `origin/production` (delete or record); whether to enforce the full
   CSP after the browser walk; reclaiming pilot's audit-log space; a chased

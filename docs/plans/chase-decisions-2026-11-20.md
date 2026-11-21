@@ -13,8 +13,11 @@ Matthew can overrule any of them on the sheet, and his answer wins. This is
 the same standing as `matrix-assumptions.md` gave Max's answers of
 2026-09-19.
 
-**Nothing here is built or seeded.** This file is the record a build works
-from. The four checks, the pilot and the app are unchanged by it.
+**Built on 2026-11-21** (Max, 2026-11-20: *"build these things into the app.
+Really high quality work, test, be rigorous"*). What was built, where the
+build changed a decision below, and how it is rolled out are in the last
+section, "What was built". The decisions above it are kept as they were
+written, so the changes can be read against them.
 
 ---
 
@@ -248,14 +251,83 @@ before seeding them, near misses first, as CLAUDE.md asks.
 
 ---
 
-## What a build takes, in order
+## What was built (2026-11-21)
 
-1. **A + B (seed).** Eight matrix types, their map, rows 101–121, the type
-   suggestion; the "provisional, AI-drafted" label on every screen that reads
-   them. A re-seed, and tests that count his 35 rows learn the new range.
-2. **D + E (seed and the chase).** An audience per question; the chase takes
-   Client questions only; the client's copy drops the BWS field name.
-3. **C.** Per-area answering.
-4. **G**, then **F**.
+Branch `chase-a`, 2 migrations and 3 new seeds. The route: an architect's
+design read against the code (`~/dev/briefs/chase-build/design.md`, 15
+findings), two coders one after the other, three independent reviewers (20
+findings, all fixed), then the proof at the end of this section.
 
-Each is Max's to green-light. Running a seed on staging or pilot is Max's.
+### Where the build changed a decision
+
+| Decision | As recorded above | As built, and why |
+|---|---|---|
+| A | Rows 106–110 and 112/113 as separate rows beside his | The table's uniqueness rule refused them. The rule is now a trigger that refuses two rows for one field at one gate only where one cheat sheet could receive both (`spec_field_gates_identity_overlap`). His 35 rows are untouched: "All categories" reaches the new types through a generated column, not an edit |
+| A | 103 (lighting or power) not asked of dining tables | **Asked of all eight.** Row 120 depends on it, so a dining table could never have cleared TG0 |
+| A | Substrate, runners, hinges "palette + free text" | **Free text.** The app holds no palette for them, and none was invented |
+| A | — | **77 checklist questions added** to the cabinetry sheets, because the gate rows had no question to be answered through. The four yes/no questions are new rows beside the sheets' older wording |
+| A | — | **Existing items need a backfill** (`db:backfill-question-rows`): a seed that adds questions creates no answer rows on items already categorised. The first answer now creates the row too |
+| C | "Interliner required?" once per project | **Stays per item.** Six cabinetry sheets ask it; one press would have written an interliner onto tables and wardrobes |
+| C | Area answers as a third kind of count | They stay in the item's own count; the area card is the project-wide card one level down, and it names its phases and follows the phase filter |
+| C | — | A fanned-out answer (project or area) never overwrites silently where a document already states the field: those items are listed unticked with what the file ships |
+| D | Only client questions in a chase | Only for a designer or client recipient. A colleague can still be sent anything |
+| D | "Ask the client" on any question | **CAM questions only.** An in-house question is refused in words |
+| D | — | A designer's draft made earlier that holds a question now ours is flagged on its card with Remove beside each; it still opens and downloads |
+| E | "Project sold with metal finish…" in-house | **Stays a client question with a client wording** ("Metal finish 1, and where on the item"). It is the only question for that BWS field on all 17 sheets; in-house would have removed metal finish from every chase |
+| E | — | COM 1/2/3 and Timber finish 1 get client wordings too ("Fabric 1"…) |
+| F | COM by a tick on the library row | The tick exists (`customer_supplied`), takes a reason, and COM goes by the fabric's **code**, linked or not. A fabric with a BW standard in force is always FABRIC |
+| G | Five label links | **Two seeded** (Swivel, Studs / nailing). "Seat build" was seeded and then removed in review: "Seat & back build" landed on the seat alone. Back cushions and Stitching were not seeded: the first would catch a fabric callout, the second already lands |
+| G | Drawings answer the checklist | **Not built.** Aliases reach emails and schedules only. Making shop drawings answer changes the drawing read for packs already read, and waits for Max's yes |
+
+### Measured on the build's database (the invented tender T20120)
+
+| Item | Blocking questions before | After |
+|---|---|---|
+| Side table | 30 | 5 |
+| Writing desk | 31 | 5 |
+| Wall mirror | 15 | 7 |
+| Three-seat sofa | 3 | 2 once typed as a sofa (swivel gone); 3 untyped |
+
+A new chase to the designer preselects about 20 questions for its 8 items (19
+in the browser walk, after one type was accepted and one question answered),
+against 54 in the first draft. It shows no BWS field name, indoor/outdoor is
+asked once per area, and it is signed. The draft made before the build is
+byte-identical. The phase's own count fell from 93 to 33, and the project's
+from 283 to 139.
+
+**Proof (2026-11-21).** On the merged branch, with the intake build in it:
+- typecheck, lint and the production build pass;
+- the whole suite passes with the database tier required (5,862 tests);
+- from scratch on an empty database: 63 migrations applied, a second run
+  applied none, the seeds ran twice without error, and the whole suite
+  passed again;
+- the changed screens were walked on the production build with a pass/fail
+  script (`~/dev/localstack/pw/chase-02-flows.mjs`; screenshots in
+  `~/dev/localstack/shots/chase-walk/`), and no page was wider than its
+  window.
+
+**Seen on the walk and not fixed:** "also outstanding" grew from 771 to 1,153
+on this project, because the 77 new questions count there too. Defaulting
+every list to TGQ only (`after-intake` 2d) is still a suggestion, not built.
+
+### Rollout — the order matters
+
+1. **Migrate** (`0061`, `0062`, and the intake build's `0065`). Additive; the
+   old code keeps working against them.
+2. **Deploy** the code. Between this and step 3 the app behaves as it did:
+   audiences default from the old rule and no cabinetry model exists.
+3. **Seed** (`0014`–`0016`, with the rest; idempotent). The cabinetry model,
+   the audiences and the two aliases arrive, labelled provisional.
+4. **Backfill** `db:backfill-question-rows`: dry run first, then `--apply`.
+   Existing items get their new question rows.
+
+A seed before the deploy would show the AI model with no label. New code on a
+database without the migrations fails every chase, fill-in and record read.
+
+### Still open
+
+- **Matthew:** the cabinetry model itself and its weak points (§A); the words a
+  type is suggested from (§B); the audiences (§D); FABRIC or COM on the quote
+  (§F). His sheet is linked at the head of this file.
+- **Max:** whether shop drawings should answer the checklist (§G).
+- Human acceptance is outstanding on every screen the build touched.
