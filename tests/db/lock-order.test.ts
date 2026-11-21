@@ -44,6 +44,7 @@ import { setAttributeFinish } from "@/lib/finish-edit";
 import { setAttributeStandard } from "@/lib/attribute-standard";
 import { normaliseFinishCode } from "@/lib/finishes";
 import { setDesignerOnRecords, type DesignerBatchResult } from "@/lib/designer-batch";
+import { acceptSuggestedLevels, setLevelOnRecords } from "@/lib/record-category";
 import { deleteProjectRows } from "../../db/project-delete.mjs";
 
 vi.mock("@/lib/session", () => ({
@@ -486,6 +487,74 @@ describeIfDb("the record is locked before the row an edit touches", () => {
     expect(result.refused).toEqual([]);
     expect(result.set).toBe(1);
     expect(result.configurations).toBe(1);
+  }, 30_000);
+
+  // ---- "Accept levels" takes its records by id, as "Accept types" does -----
+  //
+  // `acceptSuggestedLevels` and `setLevelOnRecords` locked by RECORD_NO, and
+  // `setMatrixTypes` (and every confirm) by id. Where the two orders disagree,
+  // "Accept types" and "Accept levels" pressed on one phase each hold one of
+  // the two records and wait for the other (review 1, finding 7, 2026-11-21).
+  // Forced here: the record with the LOWER record_no has the HIGHER id.
+
+  /** Two records whose record_no order is the reverse of their id order. */
+  async function reversedPair(): Promise<[string, string]> {
+    const [low, high] = [await record(), await record()].sort();
+    recordNo += 2;
+    // `high` takes the smaller record_no, so a record_no order reaches it first.
+    await client.query(`update spec_records set record_no = $1 where id = $2`, [recordNo - 1, high]);
+    await client.query(`update spec_records set record_no = $1 where id = $2`, [recordNo, low]);
+    return [low!, high!];
+  }
+
+  /** A takes `low`, B runs `batch`; once B waits, A takes `high` and commits. */
+  async function byIdAgainst<T>(low: string, high: string, batch: (sql: TxnSql) => Promise<T>): Promise<T> {
+    const a = new pg.Client({ connectionString: databaseUrl });
+    const b = new pg.Client({ connectionString: databaseUrl });
+    await a.connect();
+    await b.connect();
+    try {
+      await a.query("begin");
+      await a.query("set local lock_timeout = '8s'");
+      await b.query("begin");
+      await b.query("set local lock_timeout = '8s'");
+      const pidB = (await b.query(`select pg_backend_pid() as pid`)).rows[0].pid;
+      await a.query(`select id from spec_records where id = $1 for update`, [low]);
+      const running = batch(asSql(b));
+      running.catch(() => undefined);
+      await waitUntilBlocked(pidB);
+      await a.query(`select id from spec_records where id = $1 for update`, [high]);
+      await a.query("commit");
+      const result = await running;
+      await b.query("commit");
+      return result;
+    } finally {
+      await a.query("rollback").catch(() => undefined);
+      await b.query("rollback").catch(() => undefined);
+      await a.end().catch(() => undefined);
+      await b.end().catch(() => undefined);
+    }
+  }
+
+  it("Accept levels takes its records by id, so it waits for Accept types rather than deadlocking (review 1, finding 7)", async () => {
+    const [low, high] = await reversedPair();
+    await client.query(
+      `update spec_records set level_suggested = 'simple', level_suggested_reason = '__QA guessed' where id = any($1::uuid[])`,
+      [[low, high]],
+    );
+    const result = await byIdAgainst(low, high, (sql) =>
+      acceptSuggestedLevels(sql, { projectId, runId, actor: "__qa@example.test" }),
+    );
+    expect(result.accepted).toBe(2);
+  }, 30_000);
+
+  it("a level set on a card's records takes them by id too (review 1, finding 7)", async () => {
+    const [low, high] = await reversedPair();
+    const records = await ticked([high, low]);
+    const result = await byIdAgainst(low, high, (sql) =>
+      setLevelOnRecords(sql, { projectId, records, level: "complex", actor: "__qa@example.test" }),
+    );
+    expect(result.set).toBe(2);
   }, 30_000);
 
   // ---- E8: one slot, two writers — refused in words, never a 500 -----------

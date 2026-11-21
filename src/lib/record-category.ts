@@ -321,7 +321,11 @@ export async function acceptSuggestedLevels(
        and not exists (select 1 from spec_records v where v.parent_id = r.id and v.status = 'active')
        and r.level is null
        and r.level_suggested is not null
-     order by r.record_no
+     -- BY ID, the order every batch and confirm locks records in
+     -- (db-transaction.ts). By record_no it deadlocked against "Accept
+     -- types" (setMatrixTypes) pressed on the same phase wherever the two
+     -- orders disagree (review 1, finding 7, 2026-11-21).
+     order by r.id
      for update of r
   `;
   const ids = pending.map((row) => String(row.id));
@@ -401,7 +405,8 @@ export async function setLevelOnRecords(
   const found = await txn`
     select id, version from spec_records
      where id = any(${ids}::uuid[]) and project_id = ${projectId} and status = 'active'
-     order by record_no
+     -- By id, as acceptSuggestedLevels above (review 1, finding 7).
+     order by id
      for update
   `;
   const moved = found.filter((row) => Number(row.version) !== shown.get(String(row.id)));
