@@ -35,6 +35,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
+import { answerRequest } from "@/lib/answer-request";
 import { buttonClass } from "@/components/ui/Button";
 import Note from "@/components/ui/Note";
 import PageBody from "@/components/ui/PageBody";
@@ -226,23 +227,11 @@ function InfillView() {
       question: InfillQuestion,
       input: { value: string | null; state: "confirmed" | "tbc" | "missing" | "na"; reason: string | null },
     ): Promise<SaveOutcome> => {
-      if (!question.answerId || question.answerVersion === null) {
-        return { ok: false, error: "There is no checklist row to write to yet.", code: "no_answer_row" };
-      }
+      // NO CHECKLIST ROW YET (review 1, finding 1): the record's POST creates
+      // it with this answer; `answerRequest` picks the route.
+      const request = answerRequest(question, { value: input.value, state: input.state, reason: input.reason });
       const res = await enqueue(() =>
-        apiFetch<{ answer: { version: number; value: string | null; state: string } }>(
-          `/api/answers/${encodeURIComponent(question.answerId!)}`,
-          {
-            method: "PATCH",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              value: input.value,
-              state: input.state,
-              version: question.answerVersion,
-              ...(input.reason ? { reason: input.reason } : {}),
-            }),
-          },
-        ),
+        apiFetch<{ answer: { id: string; version: number; value: string | null; state: string } }>(request.url, request.init),
       );
       if (!res.ok) {
         return { ok: false, error: res.error, code: typeof res.data?.code === "string" ? res.data.code : null };
@@ -262,6 +251,7 @@ function InfillView() {
               ...row,
               state: res.data.answer.state,
               currentValue: res.data.answer.value,
+              answerId: res.data.answer.id,
               answerVersion: res.data.answer.version,
             }
           : row;

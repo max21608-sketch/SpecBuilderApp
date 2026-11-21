@@ -12,6 +12,7 @@
 // the refusals have to outlive a tab change.
 import { useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
+import { answerRequest } from "@/lib/answer-request";
 import {
   DIMENSION_SLOT_LABELS,
   type AnswerState,
@@ -22,7 +23,7 @@ import {
 import type { PendingReason } from "@/components/history/ReasonPrompt";
 import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
 import CommonChecklist from "@/components/records/CommonChecklist";
-import RecordChecklist from "@/components/records/RecordChecklist";
+import RecordChecklist, { checklistSaveKey } from "@/components/records/RecordChecklist";
 import type { ConfigurationFamily } from "@/lib/configuration-family";
 import type { Answer, Attribute, Payload, SpecRecord } from "@/components/records/record-payload";
 
@@ -51,8 +52,9 @@ export function useChecklistSave({
    * to what the server holds.
    */
   const [refusals, setRefusals] = useState<Record<string, number>>({});
-  const refused = (answerId: string) =>
-    setRefusals((current) => ({ ...current, [answerId]: (current[answerId] ?? 0) + 1 }));
+  /** Keyed by `checklistSaveKey`: the answer row, or the question where it has none. */
+  const refused = (key: string) =>
+    setRefusals((current) => ({ ...current, [key]: (current[key] ?? 0) + 1 }));
   // Set when the server refuses an edit for want of a reason. Holds everything
   // needed to replay the same edit once the reviewer has said why.
   const [pendingReason, setPendingReason] = useState<PendingReason | null>(null);
@@ -66,26 +68,26 @@ export function useChecklistSave({
     /** Absent keeps the qualifier the answer holds; the route reads it that way. */
     qualifier?: string | null,
   ) {
-    // Reachable only if a requirement was added to the category after this
-    // record was given one. Choosing the category again creates the missing
-    // rows; re-importing is no longer the only way out.
-    if (!answer.answer_id) {
-      setError("This question has no answer row yet. Set the category again to add the newer questions.");
-      return;
-    }
-    setSavingId(answer.answer_id);
+    const key = checklistSaveKey(answer);
+    setSavingId(key);
     setError(null);
     try {
-      const res = await apiFetch(`/api/answers/${answer.answer_id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ value, state, version: answer.version, reason, evidence, qualifier }),
-      });
+      // A QUESTION WITH NO ANSWER ROW (review 1, finding 1): one a seed added
+      // to the category after this record was given it. The first answer
+      // creates the row, inside its own change; this used to stop at "Set the
+      // category again", which did nothing.
+      const request = answerRequest(
+        { recordId, requirementId: answer.requirement_id, answerId: answer.answer_id, answerVersion: answer.version },
+        { value, state, reason, evidence, qualifier },
+      );
+      const res = await apiFetch(request.url, request.init);
       if (!res.ok) {
         // The server asks for a reason only when the edit OVERRIDES a settled
         // answer. It is asked for here rather than on every keystroke, and it
         // carries the original edit so nothing has to be retyped.
-        if (res.data?.code === "reason_required") {
+        // A new row never overrides anything, so only an existing one is
+        // asked for a reason.
+        if (res.data?.code === "reason_required" && answer.answer_id) {
           // THE QUALIFIER TRAVELS WITH IT (audit G3). It was left out, so a
           // qualifier-only edit was replayed without the qualifier, the route
           // kept the old one, and the box closed as though it had saved.
@@ -101,7 +103,7 @@ export function useChecklistSave({
           return;
         }
         await reloadThen(res.error);
-        refused(answer.answer_id);
+        refused(key);
         return;
       }
       await reloadThen(null);

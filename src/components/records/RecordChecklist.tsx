@@ -66,6 +66,16 @@ import Button, { buttonClass } from "@/components/ui/Button";
 import Note from "@/components/ui/Note";
 import { TONE } from "@/components/ui/tone";
 
+/**
+ * What a save in flight, and a refused save, are keyed on: the answer row, or
+ * the QUESTION where it has no row yet (review 1, finding 1). Keyed on the row
+ * alone, a question with none compared null with an idle null and drew its
+ * box disabled while nothing was saving.
+ */
+export function checklistSaveKey(answer: { answer_id: string | null; requirement_id: string }): string {
+  return answer.answer_id ?? `q:${answer.requirement_id}`;
+}
+
 /** Only the parts of a checklist answer this screen reads. */
 export type ChecklistAnswer = {
   requirement_id: string;
@@ -807,8 +817,8 @@ export default function RecordChecklist({
                         <AnswerValue
                           palette={paletteFor(answer)}
                           value={answer.value}
-                          disabled={savingId === answer.answer_id}
-                          inputKey={`${answer.answer_id}:${answer.version}:${refusals[answer.answer_id ?? ""] ?? 0}`}
+                          disabled={savingId === checklistSaveKey(answer)}
+                          inputKey={`${checklistSaveKey(answer)}:${answer.version}:${refusals[checklistSaveKey(answer)] ?? 0}`}
                           onCommit={(next) => onSave(answer, next, next ? "confirmed" : "missing")}
                         />
                       </>
@@ -865,7 +875,7 @@ export default function RecordChecklist({
                     ) : (
                     <select
                       value={answer.state}
-                      disabled={savingId === answer.answer_id}
+                      disabled={savingId === checklistSaveKey(answer)}
                       onChange={(event) => onSave(answer, answer.value ?? "", event.target.value as AnswerState)}
                       aria-label={`State of ${answer.prompt}`}
                       className={`rounded border px-1.5 py-0.5 text-[11.5px] disabled:opacity-50 ${
@@ -916,7 +926,7 @@ export default function RecordChecklist({
                       <DimensionAnswer
                         subject={fieldDisplayName(answer.prompt)}
                         held={heldDimensions}
-                        busy={savingId === answer.answer_id}
+                        busy={savingId === checklistSaveKey(answer)}
                         note={dimensionNote}
                         required={neededSlots}
                         onRecord={onRecordDimension}

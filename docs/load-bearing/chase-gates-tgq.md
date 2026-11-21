@@ -687,6 +687,22 @@ silently.
   every existing cabinetry record. It now takes `askedLocalKeys`, as it always
   took `askedFieldIds`. A controller nobody answered still makes its
   dependents `unknown`, never satisfied.
+- **A question with no answer row can be answered, and gets its row then**
+  (review 1, finding 1). Every screen lists such a question — they drive off
+  `requirements` with a left join — and nothing could answer one: the PATCH
+  needs an id, "Set the category again" returned early, the fill-in screen
+  said "No checklist row for this question yet", and changing category away
+  and back is refused once anybody has answered or chased. Now
+  `answerQuestionWithoutRow` (`src/lib/answer-rows.ts`, `POST
+  /api/records/[id]/answers`) creates the row under the record lock and
+  inside the answer's own change, refusing a question the record's CURRENT
+  category does not ask; both screens build the request with
+  `answerRequest`. `setRecordCategory` with the unchanged category adds
+  every missing row and recomposes, one change and one version, and is a
+  no-op when nothing is missing. `db:backfill-question-rows` does the same
+  for every live record once after the seed, so a spec already captured
+  fills its new question. Any future seed that adds questions to a sheet with
+  records needs that pass run after it.
 - **A seed's closing check runs against later seeds too.** 0010 demanded a
   Simple and a with-Metalwork boilerplate for every type; on a fresh database
   it runs before 0014 creates the cabinetry types, so CI passed and every

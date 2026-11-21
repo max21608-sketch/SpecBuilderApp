@@ -176,6 +176,22 @@ describe("the record checklist", () => {
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 
+  // REVIEW 1, FINDING 1: a question added to the sheet after the record was
+  // categorised has no answer row (answer_id null). Its box compared the
+  // saving id with null and was disabled while nothing was saving.
+  it("offers a question with no answer row as answerable, like any other", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderChecklist({
+      readiness: { ...READINESS, toQuote: 0 },
+      answers: [answer({ requirement_id: "q9", prompt: "Stone top or stone parts?", answer_id: null, version: 0 })],
+    });
+    const box = screen.getByPlaceholderText("Value");
+    expect(box).not.toBeDisabled();
+    expect(screen.getByLabelText("State of Stone top or stone parts?")).not.toBeDisabled();
+    await user.type(box, "Yes{Enter}");
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ requirement_id: "q9", answer_id: null }), "Yes", "confirmed");
+  });
+
   it("says in words that an uncategorised record has no questions rather than none outstanding", () => {
     renderChecklist({ answers: [] });
     expect(screen.getByText(/No checklist yet/)).toBeInTheDocument();

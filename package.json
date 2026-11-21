@@ -27,6 +27,8 @@
     "create-user": "node tools/create-user.mjs",
     "db:backfill-answer-provenance": "tsx --env-file-if-exists=.env.local db/backfill-answer-provenance.ts",
     "db:backfill-answer-provenance:local": "tsx --env-file=.env.localstack.local db/backfill-answer-provenance.ts",
+    "db:backfill-question-rows": "tsx --env-file-if-exists=.env.local db/backfill-question-rows.ts",
+    "db:backfill-question-rows:local": "tsx --env-file=.env.localstack.local db/backfill-question-rows.ts",
     "db:backfill-snapshots": "tsx --env-file-if-exists=.env.local db/backfill-snapshots.ts",
     "db:qa-clean": "node --env-file-if-exists=.env.local tools/qa-clean.mjs",
     "db:backfill-finishes": "tsx --env-file-if-exists=.env.local db/backfill-finishes.ts",

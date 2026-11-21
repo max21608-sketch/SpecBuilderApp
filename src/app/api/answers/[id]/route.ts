@@ -12,20 +12,9 @@ import { json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { editAnswer } from "@/lib/answer-edit";
-import { z } from "zod";
-import { isAnswerState, type AnswerState } from "@/lib/spec-vocab";
+import { readAnswerBody } from "@/lib/answer-body";
 import { verifyEvidence } from "@/lib/change-sets";
 import { requireUuid, requireWriter } from "@/lib/route-guards";
-
-const Evidence = z
-  .object({
-    pathname: z.string().min(1).max(1024),
-    filename: z.string().max(300).nullable().optional(),
-    contentType: z.string().max(200).nullable().optional(),
-    size: z.number().int().nonnegative().max(32 * 1024 * 1024).nullable().optional(),
-  })
-  .strict()
-  .nullable();
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
@@ -36,60 +25,30 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const badId = requireUuid(id);
   if (badId) return badId;
 
-  let body: {
-    value?: unknown;
-    qualifier?: unknown;
-    state?: unknown;
-    version?: unknown;
-    reason?: unknown;
-    evidence?: unknown;
-  };
+  let body: Record<string, unknown>;
   try {
-    body = (await request.json()) as typeof body;
+    body = (await request.json()) as Record<string, unknown>;
   } catch {
     return json({ ok: false, error: "invalid JSON" }, 400);
   }
+  if (!body || typeof body !== "object") return json({ ok: false, error: "invalid JSON" }, 400);
 
-  if (!isAnswerState(body.state)) {
-    return json({ ok: false, error: "A state of confirmed, tbc, missing or na is required." }, 400);
-  }
-  const state: AnswerState = body.state;
+  // The value, state, qualifier, reason and attachment are read by the one
+  // reader the no-row route shares (`answer-body.ts`), including the two
+  // sentences the database would otherwise answer with a constraint name.
+  const read = readAnswerBody(body);
+  if (!read.ok) return json({ ok: false, error: read.error }, 400);
+  const { value, qualifier, state, reason } = read.answer;
   const version = typeof body.version === "number" ? body.version : null;
   if (version === null) return json({ ok: false, error: "version is required." }, 400);
-
-  const raw = typeof body.value === "string" ? body.value.trim() : "";
-  const value = raw === "" ? null : raw;
-  // Absent leaves the placement alone; an empty string clears it. A screen that
-  // sends only the value must not silently drop a qualifier somebody typed.
-  const qualifier =
-    body.qualifier === undefined
-      ? undefined
-      : typeof body.qualifier === "string" && body.qualifier.trim()
-        ? body.qualifier.trim()
-        : null;
-  const reason = typeof body.reason === "string" ? body.reason.trim() || null : null;
 
   // The email that asked for the change, already uploaded to this project's
   // own blob prefix by the browser. A PATHNAME, never a URL — the store
   // resolves it against its own host from the token, so there is no host to
   // influence and no redirect to follow. Re-checked against the project
-  // inside the transaction.
-  const parsedEvidence = Evidence.safeParse(body.evidence ?? null);
-  if (!parsedEvidence.success) {
-    return json({ ok: false, error: "That attachment is not valid." }, 400);
-  }
-  // The store is asked about it HERE, before the transaction (audit A15).
-  const evidence = await verifyEvidence(parsedEvidence.data);
-
-  // The database refuses `confirmed` without a value and an actor, and refuses
-  // a value on `na`. Saying so here gives the reviewer a sentence rather than a
-  // constraint violation.
-  if (state === "confirmed" && !value) {
-    return json({ ok: false, error: "Confirmed needs a value. Use TBC if it is not decided yet." }, 400);
-  }
-  if (state === "na" && value) {
-    return json({ ok: false, error: "N/A cannot carry a value." }, 400);
-  }
+  // inside the transaction. The store is asked about it HERE, before the
+  // transaction (audit A15).
+  const evidence = await verifyEvidence(read.answer.evidence);
 
   try {
     const result = await withTransaction((txn) =>

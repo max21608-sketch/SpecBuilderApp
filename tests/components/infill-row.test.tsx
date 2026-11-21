@@ -238,14 +238,21 @@ describe("InfillRow", () => {
     });
   });
 
-  it("refuses to post where there is no checklist row, and sends them to the record", () => {
-    renderRow({ answerId: null, answerVersion: null });
-    expect(screen.getByText(/No checklist row for this question yet/)).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("Value")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open the item" })).toHaveAttribute(
-      "href",
-      "/dashboard/records/rec-1",
-    );
+  // REVIEW 1, FINDING 1: a question a seed added after the item was
+  // categorised has no checklist row. This row said "No checklist row for this
+  // question yet. Open the item", and the item could not help either; the
+  // first answer now creates the row (POST /api/records/[id]/answers).
+  it("answers a question with no checklist row like any other: the first answer creates it", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn().mockResolvedValue(OK);
+    renderRow({ answerId: null, answerVersion: null }, { onSaveAnswer: save });
+    expect(screen.queryByText(/No checklist row/)).not.toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("Value"), "Meridian Drift Amber{Enter}");
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ answerId: null, requirementId: "req-1" }), {
+      value: "Meridian Drift Amber",
+      state: "confirmed",
+      reason: null,
+    });
   });
 
   it("shows a question awaiting a reply, still editable — a CAM may know it", () => {

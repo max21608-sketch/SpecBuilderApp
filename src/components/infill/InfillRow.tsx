@@ -319,19 +319,12 @@ export default function InfillRow({
 
         {/* ---- the control ------------------------------------------------- */}
         <Td colSpan={3} className="align-top">
-          {question.answerId === null ? (
-            /* NO CHECKLIST ROW TO WRITE TO. It is created when a category is
-               set, so the honest answer is to say so and send them there —
-               inventing one here would need the requirement's own spec field
-               and would be a second implementation of what the record screen
-               already does. */
-            <span className="text-xs text-amber-800">
-              No checklist row for this question yet.{" "}
-              <Link prefetch={false} href={`/dashboard/records/${question.recordId}`} className="underline" target="_blank" rel="noopener noreferrer">
-                Open the item
-              </Link>
-            </span>
-          ) : kind === "dimension" ? (
+          {/* A QUESTION WITH NO CHECKLIST ROW is answered like any other
+              (review 1, finding 1): the save posts to the record and the
+              first answer creates the row (answer-request.ts). It said "No
+              checklist row for this question yet. Open the item", and the
+              item could not help either. */}
+          {kind === "dimension" ? (
             <DimensionAnswer
               subject={question.recordLabel}
               /* THE ROW'S OWN, plus what it has just written. A saved row stays

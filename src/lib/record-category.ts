@@ -15,6 +15,7 @@ import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { changeSetForEdit } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { recomposeAnswers } from "@/lib/attribute-retire";
+import { insertMissingAnswerRows } from "@/lib/answer-rows";
 import { type ItemLevel } from "@/lib/spec-vocab";
 import { draftStateWords } from "@/lib/draft-status";
 
@@ -47,10 +48,14 @@ export async function setRecordCategory(
 
   const current = record.category_id ? String(record.category_id) : null;
   if (current === categoryId) {
-    // Nothing changed, so there is no version to take and no change to record.
-    // A history entry saying "set the category to what it already was" is
-    // noise in the one screen that has to stay readable.
-    return { recordId, categoryId, answersCreated: 0, version: Number(record.version) };
+    // THE SAME CATEGORY AGAIN ADDS THE QUESTIONS ADDED SINCE (review 1,
+    // finding 1). A seed that adds questions to a sheet leaves its existing
+    // records without rows for them; choosing the category again creates
+    // those rows and fills the ones the record's specs already answer, under
+    // one change and one version. With nothing to add it is a no-op: no
+    // change and no version, because "set the category to what it already
+    // was" is noise in the one screen that has to stay readable.
+    return addNewerQuestions(txn, { recordId, categoryId, projectId: String(record.project_id), version: Number(record.version), actor });
   }
 
   // The guards run BEFORE the change is opened: a refusal opens nothing.
@@ -111,6 +116,28 @@ export async function setRecordCategory(
     answersCreated: created.length,
     version: Number(updated[0].version),
   };
+}
+
+/** The unchanged-category half of `setRecordCategory`. The record is already locked. */
+async function addNewerQuestions(
+  txn: TxnSql,
+  { recordId, categoryId, projectId, version, actor }: { recordId: string; categoryId: string; projectId: string; version: number; actor: string },
+): Promise<SetCategoryResult> {
+  const lacking = await txn`
+    select count(*)::int as n from requirements q
+     where q.category_id = ${categoryId}
+       and not exists (
+         select 1 from spec_answers a where a.record_id = ${recordId} and a.requirement_id = q.id and a.revision_no = 0
+       )
+  `;
+  if (Number(lacking[0]?.n ?? 0) === 0) return { recordId, categoryId, answersCreated: 0, version };
+
+  const { changeSetId } = await changeSetForEdit(txn, { projectId, actor, kind: "category_set" });
+  const created = await insertMissingAnswerRows(txn, [recordId], actor);
+  // The questions a spec already answers, filled as at categorisation (E5).
+  await recomposeAnswers(txn, recordId, null, actor);
+  await snapshotRecords(txn, [recordId], changeSetId);
+  return { recordId, categoryId, answersCreated: created.length, version };
 }
 
 // ---------------------------------------------------------------------------
