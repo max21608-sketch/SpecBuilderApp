@@ -202,19 +202,52 @@ describe("restrictOutputToPart — the other kinds", () => {
     expect(byPage.output.data.proposals.map((proposal) => proposal.refRaw)).toEqual(["SX11A"]);
     expect(byPage.leftOut).toContain("1 reading reported from page 13 (SX12A)");
 
+    // Fix 6c (2026-11-21): only the part's sheets were ever sent, so a sheet
+    // name outside the part is the model's spelling of one it saw, and a real
+    // reading is never lost to it.
     const bySheet = restrictOutputToPart(
       observations([
         { refRaw: "SX11A", valueRaw: "900", sourceSheet: "Furniture", sourceRow: 4 },
-        { refRaw: "SX12A", valueRaw: "800", sourceSheet: "Finishes", sourceRow: 9 },
+        { refRaw: "SX12A", valueRaw: "800", sourceSheet: "Furniture ", sourceRow: 9 },
         { refRaw: "SX13A", valueRaw: "700", sourceSheet: null },
       ]),
       { kind: "sheets", sheets: ["Furniture"] },
     );
     if (bySheet.output.outputKind !== "observations") throw new Error("kind changed");
-    expect(bySheet.output.data.proposals.map((proposal) => proposal.refRaw)).toEqual(["SX11A", "SX13A"]);
-    expect(bySheet.leftOut).toBe(
-      "Left out: 1 reading reported from sheet “Finishes” (SX12A). None of that is part of this read (sheet “Furniture”).",
-    );
+    expect(bySheet.output.data.proposals.map((proposal) => proposal.refRaw)).toEqual(["SX11A", "SX12A", "SX13A"]);
+    expect(bySheet.leftOut).toBeNull();
+  });
+
+  it("drops an item naming no pages whose every cited row is outside, and keeps one with nothing to judge by", () => {
+    // Fix 6a (2026-11-21): kept, it staged as an empty card with another part's codes.
+    const output = v4([
+      { codes: ["S-600"], pages: [], notes: [{ text: "elsewhere", page: 20 }], statements: [{ label: "FR", value: "BS 5852", page: 21 }] },
+      { codes: ["S-601"], pages: [], notes: [{ text: "no page", page: null }] },
+      { codes: ["S-602"], pages: [], notes: [{ text: "inside", page: 3 }, { text: "outside", page: 20 }] },
+    ]);
+    const { output: kept, leftOut } = restrictOutputToPart(output, PART);
+    if (kept.outputKind !== "drawing_items_v4") throw new Error("kind changed");
+    expect(kept.data.items.map((item) => item.codes[0])).toEqual(["S-601", "S-602"]);
+    expect(leftOut).toContain("1 item reported from pages 20–21 (S-600)");
+  });
+
+  it("drops a configuration seen only outside the part, and keeps one that named no pages", () => {
+    // Fix 6b (2026-11-21): kept with pages: [], it staged as a variant nobody drew here.
+    const output = v4([
+      {
+        codes: ["S-200"],
+        pages: [2, 20],
+        configurations: [
+          { name: "Type 1", pages: [2] },
+          { name: "Type 2", pages: [20] },
+          { name: "Type 3", pages: [] },
+        ],
+      },
+    ]);
+    const { output: kept, leftOut } = restrictOutputToPart(output, PART);
+    if (kept.outputKind !== "drawing_items_v4") throw new Error("kind changed");
+    expect(kept.data.items[0]!.configurations.map((configuration) => configuration.name)).toEqual(["Type 1", "Type 3"]);
+    expect(leftOut).toContain("1 configuration reported from page 20 (S-200 Type 2)");
   });
 
   it("names at most ten things, and counts the rest", () => {

@@ -11,7 +11,7 @@
 // notice or not.
 //
 // So, on the RAW output and before any staging function sees it, everything
-// reported from a page (or sheet) outside the part is dropped, and the drop is
+// reported from a page outside the part is dropped, and the drop is
 // SAID: counted, named and put in one line of the document's notes. The
 // precedent is `mergeWindowProposals` (`spreadsheet-windows.ts`), which drops
 // a row window's proposals from outside its rows.
@@ -32,7 +32,7 @@
 // never a payload that slips through unfiltered.
 // ============================================================================
 import type { ExtractionPayload, RawDrawingItemV4, RawOverall, RawOverallFigure } from "@/lib/extraction-schema";
-import { normalisePart, pageInPart, partLabel, sheetInPart, type SourcePart } from "@/lib/source-part";
+import { normalisePart, pageInPart, partLabel, type SourcePart } from "@/lib/source-part";
 
 export type PartRestriction = {
   output: ExtractionPayload;
@@ -141,11 +141,44 @@ function itemName(item: { codes: string[]; name: string | null }): string {
   return item.codes[0] ?? item.name ?? "an item with no code";
 }
 
-/** One v4 item: dropped (null) when every page it names is outside, otherwise trimmed and said. */
+/** Every page an item's rows cite, from its figures, configurations, finishes, swatches and lists. */
+function citedPages(item: RawDrawingItemV4): number[] {
+  const pages: (number | null | undefined)[] = [];
+  const figures = (overall: RawOverall) => {
+    for (const figure of Object.values(overall)) {
+      if (!figure) continue;
+      pages.push(figure.page, ...figure.candidates.map((candidate) => candidate.page));
+    }
+  };
+  figures(item.overall);
+  for (const configuration of item.configurations) {
+    pages.push(...configuration.pages);
+    figures(configuration.overall);
+  }
+  for (const finish of item.finishes) pages.push(finish.page, finish.swatch?.page);
+  for (const rows of [item.statements, item.otherDimensions, item.notes, item.pictures]) pages.push(...rows.map((row) => row.page));
+  return pages.filter((page): page is number => page != null);
+}
+
+/**
+ * One v4 item: dropped (null) when every page it names is outside, otherwise
+ * trimmed and said. AN ITEM THAT NAMES NO PAGES OF ITS OWN is judged by the
+ * pages its rows cite: where every one of them is outside, it is another
+ * part's item, and kept it would stage as an empty card carrying that item's
+ * codes. Where none of its rows cites a page either, there is nothing to
+ * judge by, and it is kept, as a row with no page is.
+ */
 function restrictItemV4(part: SourcePart, item: RawDrawingItemV4, tally: Tally): RawDrawingItemV4 | null {
   if (item.pages.length > 0 && item.pages.every((page) => !pageInPart(part, page))) {
     tally.add("items", ["item", "items"], { pages: item.pages }, itemName(item));
     return null;
+  }
+  if (item.pages.length === 0) {
+    const cited = citedPages(item);
+    if (cited.length > 0 && cited.every((page) => !pageInPart(part, page))) {
+      tally.add("items", ["item", "items"], { pages: cited }, itemName(item));
+      return null;
+    }
   }
   const outside = new Set<number>();
   const pages = item.pages.filter((page) => {
@@ -158,15 +191,27 @@ function restrictItemV4(part: SourcePart, item: RawDrawingItemV4, tally: Tally):
     ...item,
     pages,
     overall: restrictOverall(part, item.overall, outside),
-    configurations: item.configurations.map((configuration) => ({
-      ...configuration,
-      pages: configuration.pages.filter((page) => {
-        if (pageInPart(part, page)) return true;
-        outside.add(page);
-        return false;
-      }),
-      overall: restrictOverall(part, configuration.overall, outside),
-    })),
+    // A CONFIGURATION SEEN ONLY OUTSIDE THE PART is another part's, and kept
+    // with no pages it would stage as a variant of this item nobody drew
+    // here. One that named no pages to begin with is kept: nothing to judge.
+    configurations: item.configurations.flatMap((configuration) => {
+      if (configuration.pages.length > 0 && configuration.pages.every((page) => !pageInPart(part, page))) {
+        for (const page of configuration.pages) outside.add(page);
+        tally.add("configurations", ["configuration", "configurations"], { pages: configuration.pages }, `${itemName(item)} ${configuration.name}`);
+        return [];
+      }
+      return [
+        {
+          ...configuration,
+          pages: configuration.pages.filter((page) => {
+            if (pageInPart(part, page)) return true;
+            outside.add(page);
+            return false;
+          }),
+          overall: restrictOverall(part, configuration.overall, outside),
+        },
+      ];
+    }),
     finishes: within(part, item.finishes, outside).map((finish) => {
       if (!finish.swatch || keeps(part, finish.swatch.page)) return finish;
       outside.add(finish.swatch.page!);
@@ -214,16 +259,14 @@ function countRows(item: RawDrawingItemV4): number {
 function restrict(output: ExtractionPayload, part: SourcePart, tally: Tally): ExtractionPayload {
   switch (output.outputKind) {
     case "observations": {
+      // BY PAGE ONLY. A part of a workbook is read from its own sheets and
+      // nothing else (`prepareDocumentSource` keeps only them), so a reading
+      // whose sheet is not a name in the part is the model SPELLING a sheet
+      // it was shown — "BOQ" for "BOQ " — not a reading from elsewhere, and
+      // dropping it would lose a real reading to a typo.
       const proposals = output.data.proposals.filter((proposal) => {
-        const pageOut = proposal.page != null && !pageInPart(part, proposal.page);
-        const sheetOut = proposal.sourceSheet != null && !sheetInPart(part, proposal.sourceSheet);
-        if (!pageOut && !sheetOut) return true;
-        tally.add(
-          "observations",
-          ["reading", "readings"],
-          { pages: pageOut ? [proposal.page] : [], sheet: sheetOut ? proposal.sourceSheet : null },
-          proposal.refRaw,
-        );
+        if (keeps(part, proposal.page)) return true;
+        tally.add("observations", ["reading", "readings"], { pages: [proposal.page] }, proposal.refRaw);
         return false;
       });
       return { outputKind: "observations", data: { ...output.data, proposals } };
