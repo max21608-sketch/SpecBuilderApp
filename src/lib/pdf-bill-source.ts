@@ -2,6 +2,7 @@
 // its page, and the one sentence a PDF bill is refused in. A LEAF, apart from `pdf-bill.ts`, because the bill review is
 // a client component and the reader pulls exceljs and pdfjs: one import of
 // the reader from a screen would put both in the browser bundle.
+import type { SourcePart } from "@/lib/source-part";
 
 /**
  * What the staged bill remembers of the PDF it was read from. On the DOCUMENT,
@@ -24,6 +25,14 @@ export type PdfBillSource = {
    * Present only where some line has one; absent on every PDF bill read before.
    */
   flags?: string[][];
+  /**
+   * The PAGES of the PDF this bill was read from, where the PDF holds other
+   * documents too (open intake, 2026-11-20). `pages` above are still pages of
+   * the WHOLE file — "open the PDF" serves the whole file, and a line's page
+   * link must land where it was printed. Absent for a bill that is the whole
+   * PDF, which is every bill before parts.
+   */
+  part?: SourcePart;
 };
 
 /** The PDF page a staged line was read from, or null for a line that was not. */

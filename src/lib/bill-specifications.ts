@@ -28,6 +28,7 @@ import { insertSpecDocumentRun, type SpecRunRegistration } from "@/lib/spec-regi
 import { billSpecsRequestId } from "@/lib/bill-rows";
 import { billReadsDescriptions } from "@/lib/bill-description";
 import { assertBoqDocument } from "@/lib/boq-import";
+import { readStoredPart, sheetInPart, unionParts, type SourcePart } from "@/lib/source-part";
 // The id lives in the leaf `bill-rows.ts`, so the registers loader can read one
 // without importing the registration protocol. Re-exported for every caller.
 export { billSpecsRequestId };
@@ -55,7 +56,7 @@ export async function registerBillSpecifications(
   { billRunId, actor }: { billRunId: string; actor: string },
 ): Promise<SpecRunRegistration> {
   const rows = await txn`
-    select id, project_id, batch_id, status, source_kind, attachment_id, parsed
+    select id, project_id, batch_id, status, source_kind, attachment_id, parsed, source_part
     from intake_runs where id = ${billRunId}
     for update
   `;
@@ -97,8 +98,34 @@ export async function registerBillSpecifications(
     documentKind: "ffe_schedule",
     registrationRequestId: billSpecsRequestId(billRunId),
     actor,
+    sourcePart: billSpecsPart(bill.source_part, bill.parsed),
     // THE SAME STORED FILE, not a copy: the reviewer checks a proposal against
     // the spreadsheet the records were read from.
     attach: async () => String(bill.attachment_id),
   });
+}
+
+/**
+ * THE PART THE BILL'S OWN SPECIFICATION READ IS FOR (open intake): the bill
+ * run's, so a workbook holding a finishes sheet beside the bill sheets does
+ * not have the finishes sheet read as the bill's specifications.
+ *
+ *   * Only a part of SHEETS is carried. A bill read from pages of a PDF has
+ *     a workbook built from those pages alone as its attachment — the read is
+ *     of that workbook, whole, and a part of pages on a workbook fails the read.
+ *   * A sheet outside the part that a person INCLUDED on the review is a sheet
+ *     they confirmed as the bill, so it is read too.
+ */
+export function billSpecsPart(stored: unknown, parsed: unknown): SourcePart | null {
+  const part = readStoredPart(stored);
+  if (!part || part.kind !== "sheets") return null;
+  let included: string[] = [];
+  try {
+    included = assertBoqDocument(parsed)
+      .sheets.filter((sheet) => !sheet.ignored && !sheetInPart(part, sheet.sheetName))
+      .map((sheet) => sheet.sheetName);
+  } catch {
+    // An older staged shape has no part to widen.
+  }
+  return included.length > 0 ? unionParts(part, { kind: "sheets", sheets: included }) : part;
 }

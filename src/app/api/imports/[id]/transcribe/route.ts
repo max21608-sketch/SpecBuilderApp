@@ -49,6 +49,7 @@ import { TRANSCRIPTION_CLAIM_MS, type PdfTranscription, type TranscriptionRecord
 import { documentClosedSentence } from "@/lib/intake-status";
 import { requireUuid, requireWriter } from "@/lib/route-guards";
 import { requestTimeBudget } from "@/lib/extraction-claim";
+import { partPageCount, partPathSuffix } from "@/lib/source-part";
 
 export const maxDuration = 800;
 
@@ -177,9 +178,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     await release(id, user.email, { outcome: { at: new Date().toISOString(), ok: false, text, charged: false } });
     return json({ ok: false, error: text, charged: false, retryable: true }, 503);
   }
+  // A bill that is PART of the PDF (open intake) is transcribed over its own
+  // pages only; the whole file is still sent, and every row keeps its page in
+  // the whole file. The run's stored part is the registration's.
+  const part = run.sourcePart?.kind === "pages" ? run.sourcePart : null;
   const result = await transcribePdfBill({
     base64: pdf.bytes.toString("base64"),
     pageCount: pageCount ?? 0,
+    part,
     deadlineMs: budget.modelDeadlineMs,
     signal: AbortSignal.timeout(budget.abortMs),
   });
@@ -209,7 +215,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const lineCount = stagedBill.sheets.reduce((total, sheet) => total + (sheet.ignored ? 0 : sheet.lines.length), 0);
 
     // THE WORKBOOK, BESIDE THE PDF. Stored before the run points at it.
-    const workbookPathname = `${pdf.pathname.replace(/\.pdf$/i, "")}${TRANSCRIBED_WORKBOOK_SUFFIX}`;
+    // A part names its pages in the pathname (the design's trap 5): two bills
+    // transcribed from one PDF must not be stored at one pathname.
+    const workbookPathname = part
+      ? `${pdf.pathname.replace(/\.pdf$/i, "")} (transcribed from PDF, ${partPathSuffix(part)}).xlsx`
+      : `${pdf.pathname.replace(/\.pdf$/i, "")}${TRANSCRIBED_WORKBOOK_SUFFIX}`;
     const workbookFilename = `${staged.pdfSource.filename.replace(/\.pdf$/i, "")}${TRANSCRIBED_WORKBOOK_SUFFIX}`;
     await blobPictureStore(workbookPathname, stagedBill.workbook, XLSX_CONTENT_TYPE);
 
@@ -235,7 +245,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     };
     const outcomeText = transcription.notABill && lineCount === 0
       ? `The model read this PDF as not a bill: ${transcription.notABill}`
-      : `Transcribed by the model: ${lineCount} line${lineCount === 1 ? "" : "s"} over ${pageCount ?? "?"} page${pageCount === 1 ? "" : "s"}. Check every line against its page.`;
+      : (() => {
+          const pages = part ? partPageCount(part) : pageCount;
+          return `Transcribed by the model: ${lineCount} line${lineCount === 1 ? "" : "s"} over ${pages ?? "?"} page${pages === 1 ? "" : "s"}. Check every line against its page.`;
+        })();
 
     const applied = await withTransaction(async (txn) => {
       const attachment = await txn`

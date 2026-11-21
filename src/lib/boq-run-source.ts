@@ -12,6 +12,7 @@ import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { blobPathname, readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { readSpreadsheetSheets } from "@/lib/intake-source";
 import type { BoqDocument } from "@/lib/boq-import";
+import { readStoredPart, type SourcePart } from "@/lib/source-part";
 
 /** The registration route's ceiling for a bill, for the same reason. */
 const MAX_BOQ_BYTES = 30 * 1024 * 1024;
@@ -26,11 +27,17 @@ export type BoqRunRow = {
   storagePath: string | null;
   filename: string | null;
   contentType: string | null;
+  /**
+   * The part of the file this bill is (open intake), null for the whole file.
+   * A whole-bill re-read stages the sheets outside a workbook part ignored
+   * again, as the registration did; the transcription reads a PDF part's pages.
+   */
+  sourcePart: SourcePart | null;
 };
 
 export async function loadBoqRun(id: string): Promise<BoqRunRow | null> {
   const rows = await sql`
-    select r.id, r.project_id, r.status, r.version, r.source_kind, r.parsed,
+    select r.id, r.project_id, r.status, r.version, r.source_kind, r.parsed, r.source_part,
            a.storage_path, a.filename, a.content_type
     from intake_runs r
     left join attachments a on a.id = r.attachment_id
@@ -48,6 +55,7 @@ export async function loadBoqRun(id: string): Promise<BoqRunRow | null> {
     storagePath: row.storage_path === null || row.storage_path === undefined ? null : String(row.storage_path),
     filename: row.filename === null || row.filename === undefined ? null : String(row.filename),
     contentType: row.content_type === null || row.content_type === undefined ? null : String(row.content_type),
+    sourcePart: readStoredPart(row.source_part),
   };
 }
 
