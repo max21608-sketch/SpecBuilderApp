@@ -83,9 +83,9 @@ describeIfDb("seed 0015 and the project-wide moves", () => {
     expect(rows[0].n).toBe(4);
   });
 
-  it("moves the fire standard, visible fixings and the exact-copy question into the project-wide section (0003)", async () => {
+  it("moves visible fixings and the exact-copy question into the project-wide section (0003), and leaves the interliner per item", async () => {
+    expect(await values("section", "field:74")).toEqual(["Build details"]);
     for (const key of [
-      "field:74",
       "q:visible-fixinings-standard-ral-9005-powder-coated",
       "q:the-client-is-expecting-exact-copy-from-their-drawing-or-there-is-possibility-of-sugestion-bw-standards-sabos-metal-bars-curved-back-leg-thickness-etc",
     ]) {

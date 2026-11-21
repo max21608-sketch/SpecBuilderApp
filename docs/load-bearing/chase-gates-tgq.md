@@ -877,10 +877,20 @@ count, the chase screen's filter rule.
 Decision C of 2026-11-20 is two different changes, and keeping them apart is
 the trap (design finding 12):
 
-- **Per PROJECT is the section, not a scope.** Interliner (the fire
-  standard), visible fixings and "exact copy or BW standards?" moved into
-  "Project / commercial" in seed 0003 — the literal and nothing else — and the
-  existing mechanism answers them with no code.
+- **Per PROJECT is the section, not a scope.** Visible fixings and "exact
+  copy or BW standards?" moved into "Project / commercial" in seed 0003 — the
+  literal and nothing else — and the existing mechanism answers them with no
+  code. **"Interliner required?" (`field:74`) moved too and was moved BACK
+  (review, 2026-11-21)**: six cabinetry sheets ask it (consoles, drinks
+  cabinets, shelves, side tables, sideboards, wardrobes), so one press on the
+  project card wrote an interliner onto every unanswered table and wardrobe —
+  the BWS "FR Interliner" cell and the quote's FR INTERLINER line. It is per
+  item, in "Build details", on all fifteen sheets
+  (`tests/lib/project-wide-section.test.ts`). A section literal is not guarded
+  by 0057, so the re-seed moves it back on a database that ran the moved
+  version, answered rows included (rehearsed both ways on a scratch database).
+  Before moving a question into the project section, list EVERY sheet that
+  asks it.
 - **Per AREA is `requirements.answer_scope = 'area'`** (Indoor / Outdoor,
   Floor type, Wall build, fully outdoor), and those questions STAY in the
   item's own TGQ count. A third, per-area count is how TGQ came to mean four

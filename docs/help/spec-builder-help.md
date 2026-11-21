@@ -655,9 +655,10 @@ Things that look wrong and are not:
   items with something outstanding. Hover the number for what it counts.
 - *"Product code — Nowhere to record it"* on the Gates tab → known: the
   matrix asks for it and the app has no field yet. Not a fault.
-- *Project-wide questions (site access, assembly guide, interliner / fire
-  standard, visible fixings, "exact copy or BW standards?")* → answered once
-  on the project ("Answer on the project"), not on every item.
+- *Project-wide questions (site access, assembly guide, visible fixings,
+  "exact copy or BW standards?")* → answered once on the project ("Answer on
+  the project"), not on every item. "Interliner required?" is NOT one of
+  them: it is answered on each item, because tables and wardrobes ask it too.
 
 ### 6.7 Anything, anywhere
 
