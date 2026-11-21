@@ -165,15 +165,19 @@ export default function RecordHeader({
               onAccept={() => void setMatrixType?.("accept", matrixType.suggestion!.code)}
             />
           ) : null}
-          <button
-            type="button"
-            aria-expanded={choosingType}
-            disabled={savingMatrixType}
-            onClick={() => setChoosingType((open) => !open)}
-            className="text-xs underline decoration-dotted hover:text-neutral-800"
-          >
-            {matrixType.accepted ? "Change type" : "Choose type"}
-          </button>
+          {/* No options: not a live item (retired, a retired phase, or a split
+              line's heading), where the route would refuse any choice. */}
+          {matrixType.options.length > 0 && (
+            <button
+              type="button"
+              aria-expanded={choosingType}
+              disabled={savingMatrixType}
+              onClick={() => setChoosingType((open) => !open)}
+              className="text-xs underline decoration-dotted hover:text-neutral-800"
+            >
+              {matrixType.accepted ? "Change type" : "Choose type"}
+            </button>
+          )}
           {choosingType && (
             <span className="flex flex-wrap items-center gap-1">
               {matrixType.options

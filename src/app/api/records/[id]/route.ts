@@ -62,7 +62,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            -- under it, P18181-012.3, so the line's record_no comes with it.
            (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
            p.bws_project_number, p.name as project_name, p.id as project_id,
-           run.id as run_id, run.name as run_name,
+           run.id as run_id, run.name as run_name, run.status as run_status,
+           -- A split bill line with live configurations is a heading: its
+           -- configurations are the items (the type offer reads it).
+           exists (select 1 from spec_records v where v.parent_id = r.id and v.status = 'active') as is_heading,
            -- 0043: is this record on the mock-up phase, and what was it added from.
            run.is_mockup as run_is_mockup, r.mockup_of,
            c.name as category_name, c.family as category_family, c.requirements_authored,
@@ -249,16 +252,26 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // decision, and only a type the sheet maps counts (`matrixTypeOf`); the
   // suggestion is computed here from the name, with its reason, and never
   // stored — accepting it is a press on the screen (POST matrix-types).
+  //
+  // OFFERED ONLY WHERE THE ACCEPT ROUTE WOULD WRITE IT (review 1, finding 5):
+  // a live item on a live phase, never a split line's heading (its
+  // configurations are the items) -- `setMatrixTypes`' own scope, and the
+  // list route's. Elsewhere a suggestion or "Choose type" is a press that is
+  // refused, again, after every reload. A type a person already accepted is
+  // still SHOWN there, with nothing to change it with.
   const sheetTypes = gateRef.categoryId ? (gateContext.typesByCategory.get(gateRef.categoryId) ?? []) : [];
   const acceptedType = matrixTypeOf(gateContext, gateRef);
+  const isHeading = Boolean(record.is_heading);
+  const typeWritable = String(record.status) === "active" && String(record.run_status) === "active" && !isHeading;
   const matrixType =
-    sheetTypes.length > 1
+    sheetTypes.length > 1 && (typeWritable || acceptedType)
       ? {
           accepted: acceptedType
             ? { code: acceptedType, name: sheetTypes.find((type) => type.code === acceptedType)?.name ?? acceptedType }
             : null,
-          suggestion: acceptedType ? null : suggestMatrixType(String(record.item_description ?? ""), sheetTypes),
-          options: sheetTypes.map((type) => ({ code: type.code, name: type.name })),
+          suggestion:
+            acceptedType || !typeWritable ? null : suggestMatrixType(String(record.item_description ?? ""), sheetTypes),
+          options: typeWritable ? sheetTypes.map((type) => ({ code: type.code, name: type.name })) : [],
         }
       : null;
   // The seed's sentence, where the gate view or TGQ below comes from a type

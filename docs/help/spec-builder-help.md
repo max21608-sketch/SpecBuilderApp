@@ -369,7 +369,8 @@ when nothing is left, it says so and offers "Back to the pack".
   questions. A phase tab offers "Accept N suggested types". A typed sofa's TGQ
   no longer counts "Swivel mechanism", and a chase or the Fill-in screen no
   longer marks it as needed to quote; an item nobody has typed counts every
-  kind's questions, as before.
+  kind's questions, as before. A retired item, and a split line's heading
+  (its configurations are the items), offer no type: the configurations do.
 - **Fabric 1, 2, 3.** The screens call BWS's "COM 1/2/3" fields "Fabric 1/2/3",
   with "BWS: COM 1" in small type beside them. The BWS file still says COM 1.
   On the quote a fabric reads "FABRIC:", unless its finish in the library is

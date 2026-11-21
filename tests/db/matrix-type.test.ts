@@ -182,6 +182,53 @@ describeIfDb("accepting a suggested matrix type", () => {
     expect((await state(child.recordId)).matrix_type).toBe("S");
   });
 
+  // THE RECORD PAGE OFFERS WHAT THE ROUTE WOULD WRITE, AND NOTHING ELSE
+  // (review 1, finding 5). `setMatrixTypes` refuses a retired item and a
+  // split line's heading ("no longer a live item… Reload"), so a suggestion
+  // or a "Choose type" there repeated that refusal after every reload. The
+  // list route already gated it; the record route now does the same.
+  async function recordPayload(id: string): Promise<Record<string, unknown>> {
+    const { GET } = await import("@/app/api/records/[id]/route");
+    return (await (await GET(new Request("http://localhost/test"), params(id))).json()) as Record<string, unknown>;
+  }
+
+  it("the record page offers a type on a live item (the control the next two cases depend on)", async () => {
+    const sofa = await record("__QA Reading room sofa");
+    const payload = await recordPayload(sofa.id);
+    expect(payload.matrixType).toMatchObject({ accepted: null, suggestion: { code: "S" } });
+    expect((payload.matrixType as { options: unknown[] }).options.length).toBeGreaterThan(1);
+  });
+
+  it("the record page offers no type suggestion and no choice on a retired item", async () => {
+    const sofa = await record("__QA Retired sofa");
+    await client.query(
+      `update spec_records set status = 'retired', retired_at = now(), retired_by = 'qa'
+        where id = $1`,
+      [sofa.id],
+    );
+    expect((await recordPayload(sofa.id)).matrixType).toBeNull();
+  });
+
+  it("the record page offers no type on a split line's heading, only on its configurations", async () => {
+    const sofa = await record("__QA Split sofa");
+    const child = await withTransaction((txn) =>
+      insertVariant(txn, { parentId: sofa.id, label: "A", splitReason: "fabric", dimensionNote: null, actor: "qa" }),
+    );
+    expect((await recordPayload(sofa.id)).matrixType).toBeNull();
+    expect((await recordPayload(child.recordId)).matrixType).toMatchObject({ suggestion: { code: "S" } });
+  });
+
+  it("a retired item keeps showing the type a person accepted, with nothing to change it with", async () => {
+    const sofa = await record("__QA Typed then retired sofa");
+    await press({ mode: "accept", records: [{ id: sofa.id, version: sofa.version, matrixType: "S" }] });
+    await client.query(
+      `update spec_records set status = 'retired', retired_at = now(), retired_by = 'qa'
+        where id = $1`,
+      [sofa.id],
+    );
+    expect((await recordPayload(sofa.id)).matrixType).toMatchObject({ accepted: { code: "S" }, suggestion: null, options: [] });
+  });
+
   it("the version records the type, and a diff names it", async () => {
     const chair = await record("__QA Club armchair");
     const before = (await loadRecordAtoms(sql, [chair.id])).get(chair.id)!;

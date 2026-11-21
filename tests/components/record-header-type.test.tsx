@@ -81,6 +81,12 @@ describe("the record header's type", () => {
     expect(set).toHaveBeenLastCalledWith("set", null);
   });
 
+  it("shows a retired item's accepted type with nothing to change it with (review 1, finding 5)", () => {
+    header({ accepted: { code: "S", name: "Sofas" }, suggestion: null, options: [] });
+    expect(screen.getByText("Sofas")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /type/i })).not.toBeInTheDocument();
+  });
+
   it("says nothing about a type on a one-type sheet", () => {
     header(null);
     expect(screen.queryByRole("button", { name: /type/i })).not.toBeInTheDocument();
