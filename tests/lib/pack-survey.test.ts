@@ -349,7 +349,12 @@ describe("code's exact decisions on a workbook and an email", () => {
     expect(file.note).toContain('"Nope" is not one of the workbook\'s sheets ("Bill")');
   });
 
-  it("keeps a row range that fits, drops one that does not, and notes rows claimed twice", async () => {
+  it("keeps every part of a sheet two parts name, ranges as given, and notes rows claimed twice", async () => {
+    // Fix 3a (2026-11-21): a row range never costs the part. Where two or more
+    // parts name one sheet, all are kept with what they said — the route holds
+    // each for a person — and none is dropped for a range past the end or
+    // running backwards, which used to leave the sheet's other kind to be read
+    // as the whole file.
     const book = workbook([{ sheet: "Tracker", rows: 60 }]);
     answers({
       parts: [
@@ -363,11 +368,69 @@ describe("code's exact decisions on a workbook and an email", () => {
     const file = await surveyed(book, { filename: "invented.xlsx" });
     expect(file.parts.map((p) => p.place)).toEqual([
       { kind: "sheet", sheet: "Tracker", fromRow: 1, toRow: 30 },
+      { kind: "sheet", sheet: "Tracker", fromRow: 20, toRow: 10 },
       { kind: "sheet", sheet: "Tracker", fromRow: 25, toRow: null },
+      { kind: "sheet", sheet: "Tracker", fromRow: 50, toRow: 70 },
     ]);
-    expect(file.note).toContain('Part 3 (preamble) was dropped: its rows 50–70 run past the 60 rows of "Tracker".');
-    expect(file.note).toContain('Part 4 (preamble) was dropped: its rows 20–10 of "Tracker" run backwards.');
+    expect(file.note).not.toContain("was dropped");
     expect(file.note).toContain('Rows of sheet "Tracker" are claimed by two parts.');
+    expect(file.gaps).toEqual({ dropped: 0, uncovered: [], doubled: true });
+  });
+
+  it("makes a sheet only one part names the whole sheet, whatever rows the survey wrote (the walk, 2026-11-21)", async () => {
+    const book = workbook([
+      { sheet: "BOQ", rows: 300 },
+      { sheet: "Finishes", rows: 40 },
+      { sheet: "Notes", rows: 4 },
+    ]);
+    answers({
+      parts: [
+        // Past the sheet's end: this part used to be DROPPED.
+        part({ sheet: "BOQ", firstRow: 1, lastRow: 900, genre: "bill_of_quantities" }),
+        part({ sheet: "Finishes", firstRow: 1, lastRow: null, genre: "finishes_schedule" }),
+        part({ sheet: "Notes", firstRow: 4, lastRow: 2, genre: "preamble" }),
+      ],
+      note: null,
+    });
+    const file = await surveyed(book, { filename: "invented.xlsx" });
+    expect(file.parts.map((p) => p.place)).toEqual([
+      { kind: "sheet", sheet: "BOQ" },
+      { kind: "sheet", sheet: "Finishes" },
+      { kind: "sheet", sheet: "Notes" },
+    ]);
+    expect(file.note).toBe("");
+    expect(file.gaps).toEqual({ dropped: 0, uncovered: [], doubled: false });
+  });
+
+  it("records what it dropped and what no part covers as facts beside the note", async () => {
+    answers({
+      parts: [
+        part({ firstPage: 1, lastPage: 4, genre: "shop_drawings" }),
+        part({ firstPage: 9, lastPage: 7, genre: "preamble" }),
+        part({ firstPage: 8, lastPage: 8, genre: "preamble" }),
+        part({ firstPage: 8, lastPage: 10, genre: "preamble" }),
+      ],
+      note: null,
+    });
+    const file = await surveyed(PDF, { pageCount: 12 });
+    expect(file.gaps).toEqual({
+      dropped: 1,
+      uncovered: [
+        { kind: "pages", from: 5, to: 7 },
+        { kind: "pages", from: 11, to: 12 },
+      ],
+      doubled: true,
+    });
+    const book = workbook([
+      { sheet: "Bill", rows: 4 },
+      { sheet: "Notes", rows: 4 },
+    ]);
+    answers({ parts: [part({ sheet: "Bill", genre: "bill_of_quantities" }), part({ sheet: "Pricing", genre: "preamble" })], note: null });
+    expect((await surveyed(book, { filename: "invented.xlsx" })).gaps).toEqual({
+      dropped: 1,
+      uncovered: [{ kind: "sheet", sheet: "Notes" }],
+      doubled: false,
+    });
   });
 
   it("places an email's part on its text, and notes two parts claiming it", async () => {

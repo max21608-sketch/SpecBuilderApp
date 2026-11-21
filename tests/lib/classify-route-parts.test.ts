@@ -239,20 +239,183 @@ describe("two or more parts are answered per part", () => {
     expect(parts[1]).toMatchObject({ pdfBill: null });
   });
 
-  it("holds a part placed on some rows of a sheet, and fills nothing in", async () => {
+  it("holds every part of a sheet two parts name, and fills nothing in", async () => {
     stored.contentType = XLSX;
-    stored.bytes = await workbook({ Mixed: BILL_ROWS, Finishes: [["Code", "Finish"], ["QA-TIM-01", "Oak"]] });
+    stored.bytes = await workbook({ Mixed: [...BILL_ROWS, ["Code", "Finish"], ["QA-TIM-01", "Oak"]], Finishes: [["Code", "Finish"], ["QA-TIM-02", "Ash"]] });
     create.mockImplementation(
       surveyAnswer([
-        { sheet: "Mixed", firstRow: 1, lastRow: 3, genre: "bill_of_quantities", evidence: "Code / Qty", certain: true },
+        { sheet: "Mixed", firstRow: 1, lastRow: 4, genre: "bill_of_quantities", evidence: "Code / Qty", certain: true },
+        { sheet: "Mixed", firstRow: 5, lastRow: 6, genre: "finishes_schedule", evidence: "Code / Finish", certain: true },
         { sheet: "Finishes", genre: "finishes_schedule", evidence: "Code / Finish", certain: true },
       ]),
     );
     const { body } = await classify("QA Mixed.xlsx");
     const parts = body.parts as Record<string, unknown>[];
-    expect(parts[0]).toMatchObject({ decision: null, suggestion: null });
-    expect(String(parts[0]!.held)).toMatch(/A sheet is read whole/);
-    expect(parts[1]).toMatchObject({ decision: { importType: "spec_document", documentKind: "finishes_schedule" }, held: null });
+    expect(parts).toHaveLength(3);
+    for (const held of parts.slice(0, 2)) {
+      expect(held).toMatchObject({ decision: null, suggestion: null });
+      expect(String(held.held)).toBe("This sheet seems to hold two kinds of document. A sheet is read whole: choose one kind for it, or don't read it.");
+    }
+    expect(parts[2]).toMatchObject({ decision: { importType: "spec_document", documentKind: "finishes_schedule" }, held: null });
+  });
+
+  it("answers a three-sheet workbook the survey gave whole-sheet row ranges as three sheets, none held (the walk, 2026-11-21)", async () => {
+    stored.contentType = XLSX;
+    stored.bytes = await workbook({
+      BOQ: BILL_ROWS,
+      Finishes: [["Code", "Finish"], ["QA-TIM-01", "Oak"]],
+      Notes: [["General"], ["All timber FSC certified."]],
+    });
+    create.mockImplementation(
+      surveyAnswer([
+        { sheet: "BOQ", firstRow: 1, lastRow: 4, genre: "bill_of_quantities", evidence: "Code / Qty", certain: true },
+        { sheet: "Finishes", firstRow: 1, lastRow: null, genre: "finishes_schedule", evidence: "Code / Finish", certain: true },
+        // Past the sheet's end: the part used to be dropped.
+        { sheet: "Notes", firstRow: 1, lastRow: 90, genre: "preamble", evidence: "General", certain: true },
+      ]),
+    );
+    const { body } = await classify("QA Bill and Finishes.xlsx");
+    const parts = body.parts as Record<string, unknown>[];
+    expect(parts.map((part) => part.place)).toEqual([
+      { kind: "sheet", sheet: "BOQ" },
+      { kind: "sheet", sheet: "Finishes" },
+      { kind: "sheet", sheet: "Notes" },
+    ]);
+    expect(parts.map((part) => part.held)).toEqual([null, null, null]);
+    expect(parts.map((part) => part.decision)).toEqual([
+      { importType: "boq", documentKind: null },
+      { importType: "spec_document", documentKind: "finishes_schedule" },
+      { importType: "spec_document", documentKind: "preamble" },
+    ]);
+  });
+
+  it("holds a part of a mixed PDF the survey called a schedule whose text is a bill's table, with the bill suggested (C1 per part)", async () => {
+    stored.bytes = buildPdf([prose("ELEVATION A"), schedulePage()]);
+    create.mockImplementation(
+      surveyAnswer([
+        { firstPage: 1, lastPage: 1, genre: "shop_drawings", evidence: "elevation", certain: true },
+        { firstPage: 2, lastPage: 2, genre: "ffe_schedule", evidence: "FF&E SPECIFICATION", certain: true },
+      ]),
+    );
+    const { body } = await classify("QA Pack.pdf");
+    const parts = body.parts as Record<string, unknown>[];
+    expect(parts[1]).toMatchObject({
+      decision: null,
+      suggestion: { importType: "boq", documentKind: null },
+      pdfBill: { lines: 2, pages: 1 },
+      held: "Read as an FF&E schedule, but its text is a table of 2 lines with a quantity on each: if it is the bill, choose Bill of quantities.",
+    });
+    // A drawing part is never read as a bill.
+    expect(parts[0]).toMatchObject({ held: null, suggestion: null, pdfBill: null });
+  });
+});
+
+describe("one reader for the whole file is one whole-file read", () => {
+  it("answers a drawing set with a cover and a blank divider as the single file it is", async () => {
+    stored.bytes = buildPdfOfPages(30);
+    create.mockImplementation(
+      surveyAnswer(
+        [
+          { firstPage: 1, lastPage: 1, genre: "unclear", evidence: "a cover", certain: false, nothingToRead: true },
+          { firstPage: 2, lastPage: 11, genre: "shop_drawings", evidence: "elevations", certain: true, itemCodes: ["QA-CH-01"] },
+          { firstPage: 12, lastPage: 12, genre: "unclear", evidence: "blank", certain: false, nothingToRead: true },
+          { firstPage: 13, lastPage: 30, genre: "specification_sheets", evidence: "spec sheets", certain: false, weighedAgainst: "shop_drawings" },
+        ],
+        "a drawing set",
+      ),
+    );
+    const { status, body } = await classify("QA S-200 Drawings.pdf");
+    expect(status).toBe(200);
+    expect(body).not.toHaveProperty("parts");
+    expect(body).toMatchObject({
+      ok: true,
+      // Pages 13–30 outweigh 2–11.
+      genre: "specification_sheets",
+      decision: { importType: "spec_document", documentKind: "shop_drawings" },
+      evidence: "elevations / spec sheets",
+      certain: true,
+    });
+    expect(String(body.note)).toContain("a drawing set");
+  });
+
+  it("still answers per part where the readers differ", async () => {
+    stored.bytes = buildPdfOfPages(4);
+    create.mockImplementation(
+      surveyAnswer([
+        { firstPage: 1, lastPage: 2, genre: "shop_drawings", evidence: "elevations", certain: true },
+        { firstPage: 3, lastPage: 4, genre: "preamble", evidence: "GENERAL CONDITIONS", certain: true },
+      ]),
+    );
+    const { body } = await classify("QA Pack.pdf");
+    expect(body.parts).toHaveLength(2);
+  });
+
+  it("does not collapse a file with a held part into one read", async () => {
+    stored.bytes = buildPdfOfPages(4);
+    create.mockImplementation(
+      surveyAnswer([
+        { firstPage: 1, lastPage: 2, genre: "shop_drawings", evidence: "elevations", certain: true },
+        { firstPage: 3, lastPage: 4, genre: "unclear", evidence: "?", certain: false },
+      ]),
+    );
+    const { body } = await classify("QA Pack.pdf");
+    expect(body.parts).toHaveLength(2);
+  });
+});
+
+describe("nothing the survey set aside is read silently", () => {
+  it("answers per part, with the uncovered pages held as a part of their own, when the survey's other part was dropped", async () => {
+    stored.bytes = buildPdfOfPages(8);
+    create.mockImplementation(
+      surveyAnswer([
+        { firstPage: 1, lastPage: 5, genre: "shop_drawings", evidence: "elevations", certain: true },
+        // Past the file's end: dropped by code.
+        { firstPage: 6, lastPage: 12, genre: "bill_of_quantities", evidence: "CODE / QTY", certain: true },
+      ]),
+    );
+    const { body } = await classify("QA Pack.pdf");
+    const parts = body.parts as Record<string, unknown>[];
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toMatchObject({ place: { kind: "pages", from: 1, to: 5 }, decision: { documentKind: "shop_drawings" } });
+    expect(parts[1]).toMatchObject({
+      place: { kind: "pages", from: 6, to: 8 },
+      genre: "unclear",
+      decision: null,
+      held: "No part of the file covers these pages — say what they are, or don't read them.",
+    });
+    expect(String(body.note)).toContain("was dropped");
+  });
+
+  it("never reads a workbook as its one placed sheet when the survey named another that is not there", async () => {
+    stored.contentType = XLSX;
+    stored.bytes = await workbook({ BOQ: BILL_ROWS, Finishes: [["Code", "Finish"], ["QA-TIM-01", "Oak"]] });
+    create.mockImplementation(
+      surveyAnswer([
+        { sheet: "Bill of Quantities", genre: "bill_of_quantities", evidence: "Code / Qty", certain: true },
+        { sheet: "Finishes", genre: "finishes_schedule", evidence: "Code / Finish", certain: true },
+      ]),
+    );
+    const { body } = await classify("QA Bill and Finishes.xlsx");
+    expect(body).not.toHaveProperty("decision");
+    const parts = body.parts as Record<string, unknown>[];
+    expect(parts.map((part) => part.place)).toEqual([
+      { kind: "sheet", sheet: "BOQ" },
+      { kind: "sheet", sheet: "Finishes" },
+    ]);
+    expect(parts[0]).toMatchObject({ decision: null, held: "No part of the file covers this sheet — say what it is, or don't read it." });
+  });
+
+  it("answers per part where two parts claim the same pages, even for one reader", async () => {
+    stored.bytes = buildPdfOfPages(6);
+    create.mockImplementation(
+      surveyAnswer([
+        { firstPage: 1, lastPage: 4, genre: "shop_drawings", evidence: "elevations", certain: true },
+        { firstPage: 3, lastPage: 6, genre: "shop_drawings", evidence: "more elevations", certain: true },
+      ]),
+    );
+    const { body } = await classify("QA Drawings.pdf");
+    expect(body.parts).toHaveLength(2);
+    expect(String(body.note)).toContain("claimed by two parts");
   });
 });
 

@@ -63,6 +63,23 @@ export type SurveyFile = {
   parts: SurveyPart[];
   /** Anything the survey wanted a person to know about the file as a whole. */
   note: string;
+  /**
+   * What code set aside or found missing, as facts rather than sentences:
+   * parts dropped, places no part covers, and whether two parts claim the
+   * same pages or rows. The note says the same in words. Optional so an
+   * answer key or a saved survey written before it still reads: absent is
+   * none of them.
+   */
+  gaps?: SurveyGaps;
+};
+
+export type SurveyGaps = {
+  /** Parts the model gave that are not in `parts` (unplaceable, malformed, over the cap). */
+  dropped: number;
+  /** Pages or sheets no part covers, each run of pages or each sheet one place. */
+  uncovered: PartPlace[];
+  /** Two parts claim the same pages, or overlapping rows of one sheet. */
+  doubled: boolean;
 };
 
 /** One part as an answer key states it: where, and what. Codes are the ones a person would expect found. */

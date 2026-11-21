@@ -403,19 +403,31 @@ function placePart(part: RawPart, file: SurveyFileShape, onlyPart: boolean): Pla
   }
   const { firstRow: fromRow, lastRow: toRow } = part;
   if (fromRow === null && toRow === null) return { ok: true, place: { kind: "sheet", sheet } };
-  // The contract allows one end of a ROW range (`fromRow` alone runs to the
-  // sheet's end): "the finishes start at row 40" is a whole statement in a way
-  // "from page 5" is not, because a sheet ends where its rows do.
-  const rows = file.sheetRows?.get(sheet) ?? null;
-  const shown = `${fromRow ?? 1}–${toRow ?? "end"}`;
-  if (fromRow !== null && toRow !== null && fromRow > toRow) return { ok: false, why: `its rows ${shown} of "${sheet}" run backwards` };
-  if ((fromRow !== null && fromRow < 1) || (toRow !== null && toRow < 1)) {
-    return { ok: false, why: `its rows ${shown} of "${sheet}" start before row 1` };
-  }
-  if (rows !== null && ((fromRow ?? 1) > rows || (toRow ?? 0) > rows)) {
-    return { ok: false, why: `its rows ${shown} run past the ${rows} rows of "${sheet}"` };
-  }
+  // A ROW RANGE NEVER COSTS THE PART. It is kept as given here and decided
+  // once every part is placed (`rangesOnlyWhereShared`): a sheet one part
+  // names is that part, whole, whatever rows the model wrote — the walk of
+  // 2026-11-21 had "rows 1–end" on every sheet of a three-sheet workbook, and
+  // a range past a sheet's end used to DROP the part, so a workbook's bill
+  // could vanish and its finishes be read as the whole file.
   return { ok: true, place: { kind: "sheet", sheet, fromRow, toRow } };
+}
+
+/**
+ * A row range is KEPT only where two or more parts name the same sheet: that
+ * is the one case where it says anything — this sheet holds two kinds — and
+ * the classify route holds every such part for a person, whatever its rows
+ * say, because a sheet is the smallest part of a workbook a read takes. On a
+ * sheet only one part names, the part is the whole sheet: a range there could
+ * only be wrong (past the end, one-ended, backwards) or redundant, and
+ * neither is a reason to show a slice nobody can register.
+ */
+function rangesOnlyWhereShared(parts: SurveyPart[]): void {
+  const named = new Map<string, number>();
+  for (const part of parts) if (part.place.kind === "sheet") named.set(part.place.sheet, (named.get(part.place.sheet) ?? 0) + 1);
+  for (const part of parts) {
+    if (part.place.kind !== "sheet" || (named.get(part.place.sheet) ?? 0) > 1) continue;
+    part.place = { kind: "sheet", sheet: part.place.sheet };
+  }
 }
 
 function describePlace(place: PartPlace): string {
@@ -433,10 +445,26 @@ function describePlace(place: PartPlace): string {
   }
 }
 
+/** What a file's coverage check found: the sentences, and the same facts for code. */
+type Coverage = { notes: string[]; uncovered: PartPlace[]; doubled: boolean };
+
+const NO_GAPS: Coverage = { notes: [], uncovered: [], doubled: false };
+
+/** Contiguous runs of page numbers as places, in order. */
+function pageRuns(pages: number[]): PartPlace[] {
+  const runs: PartPlace[] = [];
+  for (const page of [...new Set(pages)].sort((x, y) => x - y)) {
+    const last = runs.at(-1);
+    if (last?.kind === "pages" && last.to === page - 1) last.to = page;
+    else runs.push({ kind: "pages", from: page, to: page });
+  }
+  return runs;
+}
+
 /** Pages no part covers, and pages two parts claim. Noted, never mended. */
-function pageCoverageNotes(parts: SurveyPart[], pageCount: number | null): string[] {
+function pageCoverage(parts: SurveyPart[], pageCount: number | null): Coverage {
   const ranges = parts.flatMap((part) => (part.place.kind === "pages" ? [part.place] : []));
-  if (ranges.length === 0 || ranges.length !== parts.length) return [];
+  if (ranges.length === 0 || ranges.length !== parts.length) return NO_GAPS;
   // Where the file could not be counted, a gap is only knowable BETWEEN parts.
   const last = pageCount ?? Math.max(...ranges.map((range) => range.to));
   const claims = new Array<number>(last + 1).fill(0);
@@ -455,16 +483,19 @@ function pageCoverageNotes(parts: SurveyPart[], pageCount: number | null): strin
     notes.push(`${plural(doubled.length, "Page", "Pages")} ${formatRanges(doubled)} ${plural(doubled.length, "is", "are")} claimed by two parts.`);
   }
   if (pageCount === null) notes.push("The file's pages could not be counted, so pages after the last part cannot be checked.");
-  return notes;
+  return { notes, uncovered: pageRuns(uncovered), doubled: doubled.length > 0 };
 }
 
 /** Sheets no part covers, and rows of one sheet two parts claim. */
-function sheetCoverageNotes(parts: SurveyPart[], sheetNames: string[] | null): string[] {
+function sheetCoverage(parts: SurveyPart[], sheetNames: string[] | null): Coverage {
   const onSheets = parts.flatMap((part) => (part.place.kind === "sheet" ? [part.place] : []));
-  if (onSheets.length === 0 || onSheets.length !== parts.length) return [];
+  if (onSheets.length === 0 || onSheets.length !== parts.length) return NO_GAPS;
   const notes: string[] = [];
+  const uncovered: PartPlace[] = [];
   for (const sheet of sheetNames ?? []) {
-    if (!onSheets.some((place) => place.sheet === sheet)) notes.push(`Sheet "${sheet}" is in no part.`);
+    if (onSheets.some((place) => place.sheet === sheet)) continue;
+    notes.push(`Sheet "${sheet}" is in no part.`);
+    uncovered.push({ kind: "sheet", sheet });
   }
   const reported = new Set<string>();
   onSheets.forEach((a, i) => {
@@ -476,7 +507,7 @@ function sheetCoverageNotes(parts: SurveyPart[], sheetNames: string[] | null): s
       notes.push(`Rows of sheet "${a.sheet}" are claimed by two parts.`);
     });
   });
-  return notes;
+  return { notes, uncovered, doubled: reported.size > 0 };
 }
 
 // ---- one reader, one part --------------------------------------------------
@@ -597,6 +628,10 @@ export function surveyFromAnswer(
   }
   const considered = given.slice(0, MAX_PARTS);
   const onlyPart = considered.length === 1;
+  // Every part the model gave that is not in the answer, for code as well as
+  // for the note: the classify route never answers a file as one whole read
+  // when part of what the survey said was set aside (`SurveyFile.gaps`).
+  let dropped = given.length - considered.length;
 
   const parts: SurveyPart[] = [];
   considered.forEach((entry, index) => {
@@ -604,12 +639,14 @@ export function surveyFromAnswer(
     const parsed = RawPart.safeParse(entry);
     if (!parsed.success) {
       notes.push(`${label} was dropped: it was not a part at all.`);
+      dropped += 1;
       return;
     }
     const raw = parsed.data;
     const placed = placePart(raw, file, onlyPart);
     if (!placed.ok) {
       notes.push(`${label} (${raw.genre}) was dropped: ${placed.why}.`);
+      dropped += 1;
       return;
     }
     const items = cleanCodes(raw.itemCodes);
@@ -638,6 +675,8 @@ export function surveyFromAnswer(
     });
   });
 
+  rangesOnlyWhereShared(parts);
+
   // Reading order: a PDF by its pages, a workbook by its own sheet order.
   // Stable, and only an order — no part is changed by it.
   const sheetOrder = (sheet: string) => {
@@ -655,6 +694,7 @@ export function surveyFromAnswer(
   parts.splice(0, parts.length, ...merge.parts);
   notes.push(...merge.notes);
 
+  let coverage = NO_GAPS;
   if (parts.length === 0) {
     // NOBODY KNOWS YET, A PERSON DECIDES. Never a guessed kind, never a
     // guessed range: the whole file, unclear, not certain.
@@ -674,18 +714,20 @@ export function surveyFromAnswer(
       nothingToRead: false,
     });
   } else if (file.type === "pdf") {
-    notes.push(...pageCoverageNotes(parts, file.pageCount));
+    coverage = pageCoverage(parts, file.pageCount);
   } else if (file.type === "spreadsheet") {
-    notes.push(...sheetCoverageNotes(parts, file.sheetNames));
+    coverage = sheetCoverage(parts, file.sheetNames);
   } else if (parts.length > 1) {
     notes.push(`The email's text is claimed by ${parts.length} parts.`);
   }
+  notes.push(...coverage.notes);
 
   return {
     file: file.filename,
     pageCount: file.type === "pdf" ? file.pageCount : null,
     parts,
     note: [answer.note?.trim() ?? "", ...notes].filter(Boolean).join("\n"),
+    gaps: { dropped, uncovered: coverage.uncovered, doubled: coverage.doubled },
   };
 }
 

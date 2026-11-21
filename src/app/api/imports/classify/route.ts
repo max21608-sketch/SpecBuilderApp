@@ -40,7 +40,7 @@ import {
   type ClassifyResult,
 } from "@/lib/document-classify";
 import { partReader, surveyFile, SURVEY_MODEL } from "@/lib/pack-survey";
-import type { SurveyPart } from "@/lib/pack-survey-types";
+import type { PartPlace, SurveyPart } from "@/lib/pack-survey-types";
 import { parseBoqSheets } from "@/lib/boq-import";
 import { BILL_OR_SCHEDULE_HELD, billProbeEvidence, isBillOrScheduleDoubt, probeOfPdfBill, probeOfSheets, type BillProbe } from "@/lib/bill-probe";
 import { partOfPlace, type ClassifiedPart, type PdfBillNote } from "@/lib/upload-reads";
@@ -254,6 +254,10 @@ export async function POST(request: Request): Promise<Response> {
    */
   const classifyParts = async (parts: SurveyPart[]): Promise<ClassifiedPart[]> => {
     const answered: ClassifiedPart[] = [];
+    const namedSheets = new Map<string, number>();
+    for (const part of parts) {
+      if (part.place.kind === "sheet") namedSheets.set(part.place.sheet, (namedSheets.get(part.place.sheet) ?? 0) + 1);
+    }
     // One at a time: each read is in-process work on bytes already in hand,
     // and a mixed PDF of several bills would otherwise parse it N times at once.
     for (const part of parts) {
@@ -275,10 +279,13 @@ export async function POST(request: Request): Promise<Response> {
       };
       answered.push(answer);
       if (nothingToRead) continue;
-      if (part.place.kind === "sheet" && (part.place.fromRow != null || part.place.toRow != null)) {
+      if (part.place.kind === "sheet" && (namedSheets.get(part.place.sheet) ?? 0) > 1) {
         // A SHEET IS THE SMALLEST PART OF A WORKBOOK A READ TAKES. Two kinds
         // on one sheet are said, not split: a person chooses one for the
-        // sheet, or leaves this part out.
+        // sheet, or leaves this part out. Decided by two parts naming the
+        // sheet, never by a part carrying rows — the survey keeps a range
+        // only there (`pack-survey.ts`), and a range on a sheet nobody else
+        // names said nothing but "the whole sheet" (the walk, 2026-11-21).
         answer.decision = null;
         answer.held = SHEET_HOLDS_TWO_KINDS;
         continue;
@@ -291,6 +298,21 @@ export async function POST(request: Request): Promise<Response> {
           answer.suggestion = KIND_FROM_GENRE.bill_of_quantities;
           answer.pdfBill = tried.pdfBill;
           answer.evidence = [found, part.evidence].filter(Boolean).join(" ");
+        }
+        continue;
+      }
+      if (source.type === "pdf" && answer.decision?.importType !== "boq" && !NOT_A_BILL.has(part.genre)) {
+        // C1, PER PART: one rule for files and parts. A part the survey
+        // called some schedule (or could not place) whose text is a bill's
+        // table is HELD with the single file's own sentence — and, a part
+        // having a box of its own, the bill suggested in it, one click away.
+        const read = await readPdfBill(blob.bytes, { ...(await billReadingOptions()), part: partOfPlace(part.place) });
+        if (read.ok) {
+          answer.decision = null;
+          answer.held = tableHeld(part.genre, read.rows.length);
+          answer.suggestion = KIND_FROM_GENRE.bill_of_quantities;
+          const own = partOfPlace(part.place);
+          answer.pdfBill = { lines: read.rows.length, pages: (own && partPageCount(own)) ?? read.pageCount };
         }
         continue;
       }
@@ -350,12 +372,33 @@ export async function POST(request: Request): Promise<Response> {
   // drift. TWO OR MORE is a mixed file, answered per part, and the name rule
   // does not apply: a filename cannot describe a mix.
   // ============================================================================
-  const readable = surveyed.survey.parts.filter((part) => !part.nothingToRead);
-  if (readable.length >= 2) {
-    return json({ ok: true, parts: await classifyParts(surveyed.survey.parts), note: surveyed.survey.note, charged: true }, 200);
+  const { parts: surveyParts, note } = surveyed.survey;
+  const gaps = surveyed.survey.gaps ?? { dropped: 0, uncovered: [], doubled: false };
+  const readable = surveyParts.filter((part) => !part.nothingToRead);
+  // NEVER ONE WHOLE READ WHEN PART OF THE ANSWER WAS SET ASIDE. A part the
+  // survey gave and code dropped, pages or a sheet no part covers, pages two
+  // parts claim: each means the parts left are not the whole file, and
+  // collapsing them into one read would read the rest — a bill, say — as
+  // whatever the parts left happen to be, with no press. Answered per part,
+  // with what no part covers as parts of its own, held, so a person sees it.
+  const incomplete = gaps.dropped > 0 || gaps.uncovered.length > 0 || gaps.doubled;
+  const fallback = surveyParts.length === 1 && surveyParts[0]!.place.kind === "whole";
+  const whole = incomplete ? null : wholeFileRead(readable);
+  if (!fallback && !whole && (readable.length >= 2 || incomplete)) {
+    const answered = [...(await classifyParts(surveyParts)), ...gaps.uncovered.map(uncoveredPart)];
+    const sheetOrder = (sheet: string) => {
+      const at = source.type === "spreadsheet" ? (source.sheets?.findIndex((candidate) => candidate.sheet === sheet) ?? -1) : -1;
+      return at < 0 ? Number.MAX_SAFE_INTEGER : at;
+    };
+    answered.sort((a, b) => {
+      if (a.place.kind === "pages" && b.place.kind === "pages") return a.place.from - b.place.from;
+      if (a.place.kind === "sheet" && b.place.kind === "sheet") return sheetOrder(a.place.sheet) - sheetOrder(b.place.sheet);
+      return 0;
+    });
+    return json({ ok: true, parts: answered, note, charged: true }, 200);
   }
-  const sole = readable[0] ?? null;
-  const result = soleResult(sole, surveyed.survey.parts);
+  const sole = whole ?? readable[0] ?? null;
+  const result = soleResult(sole, surveyParts);
 
   // BILL OR SCHEDULE GOES TO CODE (`bill-probe.ts`). Held either way; where
   // the cells read as a bill's, the box says Bill and the evidence says why.
@@ -366,6 +409,8 @@ export async function POST(request: Request): Promise<Response> {
       return json(
         {
           ok: true,
+          // The survey's own note on the file, shown on its row.
+          note,
           genre: result.genre,
           decision: null,
           unsupported: null,
@@ -408,6 +453,7 @@ export async function POST(request: Request): Promise<Response> {
     return json(
       {
         ok: true,
+        note,
         genre: result.genre,
         decision: null,
         unsupported: null,
@@ -452,6 +498,7 @@ export async function POST(request: Request): Promise<Response> {
       return json(
         {
           ok: true,
+          note,
           genre: result.genre,
           decision: null,
           unsupported: pdfBillRefusal(read.code),
@@ -489,10 +536,11 @@ export async function POST(request: Request): Promise<Response> {
       return json(
         {
           ok: true,
+          note,
           genre: result.genre,
           decision: null,
           unsupported: null,
-          held: `${GENRE_WORDS[result.genre] ? `Read as ${GENRE_WORDS[result.genre]}, but its` : "Its"} text is a table of ${read.rows.length} line${read.rows.length === 1 ? "" : "s"} with a quantity on each: if it is the bill, choose Bill of quantities.`,
+          held: tableHeld(result.genre, read.rows.length),
           pdfBill: { lines: read.rows.length, pages: read.pageCount },
           titleText: result.titleText,
           evidence: result.evidence,
@@ -507,6 +555,7 @@ export async function POST(request: Request): Promise<Response> {
   return json(
     {
       ok: true,
+      note,
       genre: result.genre,
       decision: result.decision,
       // A bill in a PDF whose text reads as a table: how much of it, for the row.
@@ -527,9 +576,77 @@ export async function POST(request: Request): Promise<Response> {
   );
 }
 
-/** Said above a part the survey placed on some ROWS of a sheet. */
+/** Said above each part of a sheet two parts name. */
 const SHEET_HOLDS_TWO_KINDS =
-  "The survey says this sheet holds two kinds of document. A sheet is read whole: choose one kind for it, or don't read this part.";
+  "This sheet seems to hold two kinds of document. A sheet is read whole: choose one kind for it, or don't read it.";
+
+/** Said above pages or a sheet no part of the survey's answer covers. */
+const UNCOVERED_HELD = "No part of the file covers these pages — say what they are, or don't read them.";
+const UNCOVERED_SHEET_HELD = "No part of the file covers this sheet — say what it is, or don't read it.";
+
+/**
+ * C1's sentence: a PDF (or a part of one) the model did not call a bill whose
+ * text is a table with a quantity on every line. One sentence for a file and a
+ * part, so the rule cannot read differently in the two places.
+ */
+function tableHeld(genre: string, lines: number): string {
+  return `${GENRE_WORDS[genre] ? `Read as ${GENRE_WORDS[genre]}, but its` : "Its"} text is a table of ${lines} line${lines === 1 ? "" : "s"} with a quantity on each: if it is the bill, choose Bill of quantities.`;
+}
+
+/** A place no part covers, as a part a person must answer. */
+function uncoveredPart(place: PartPlace): ClassifiedPart {
+  return {
+    place,
+    genre: "unclear",
+    decision: null,
+    certain: false,
+    evidence: "",
+    held: place.kind === "sheet" ? UNCOVERED_SHEET_HELD : UNCOVERED_HELD,
+    suggestion: null,
+    unsupported: null,
+    unsupportedDetail: null,
+    itemCodes: [],
+    finishCodes: [],
+    pdfBill: null,
+    nothingToRead: false,
+  };
+}
+
+/**
+ * ONE READ FOR THE WHOLE FILE, or null where the parts are not that.
+ *
+ * Every readable part settled on the SAME reader, none held, and nothing the
+ * survey said set aside or missing: a drawing set with a cover and a blank
+ * divider is one drawing set, whatever count of parts the survey gave round
+ * the blank page. Answered as the single file it is — today's shape, the
+ * whole file, `source_part` null — so its read keeps the filename's drawing
+ * number and gets no part instruction and no filter. The part standing for
+ * the file takes the genre covering the most of it, as `mergeByReader` does,
+ * and is certain because every member was settled.
+ */
+function wholeFileRead(readable: SurveyPart[]): SurveyPart | null {
+  if (readable.length < 2) return null;
+  const readers = readable.map((part) => partReader(part));
+  const first = readers[0];
+  if (!first || readers.some((reader) => !reader || reader.importType !== first.importType || reader.documentKind !== first.documentKind)) {
+    return null;
+  }
+  const size = (part: SurveyPart) => (part.place.kind === "pages" ? part.place.to - part.place.from + 1 : 1);
+  const byGenre = new Map<SurveyPart["genre"], number>();
+  for (const part of readable) byGenre.set(part.genre, (byGenre.get(part.genre) ?? 0) + size(part));
+  let genre = readable[0]!.genre;
+  for (const [candidate, weight] of byGenre) if (weight > (byGenre.get(genre) ?? 0)) genre = candidate;
+  return {
+    place: { kind: "whole" },
+    genre,
+    certain: true,
+    weighedAgainst: null,
+    evidence: readable.map((part) => part.evidence).filter(Boolean).join(" / "),
+    itemCodes: [...new Set(readable.flatMap((part) => part.itemCodes))],
+    finishCodes: [...new Set(readable.flatMap((part) => part.finishCodes))],
+    nothingToRead: false,
+  };
+}
 
 /** A failed look, in the code, sentence and status the upload row reads. */
 function failureAnswer(result: Extract<ClassifyResult, { ok: false }>): Response {
