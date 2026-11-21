@@ -243,3 +243,130 @@ describe("a bill or a schedule, held with the bill suggested", () => {
     expect(registered()[0]).not.toHaveProperty("part");
   });
 });
+
+describe("a part in a read stays in that read (fix 1, 2026-11-21)", () => {
+  const refusedBill = {
+    ok: false,
+    status: 400,
+    error: "This PDF's text is not a bill's table.",
+    data: { ok: false, error: "This PDF's text is not a bill's table.", detail: "Page 12: no quantity column." },
+  };
+
+  it("re-answering a refused bill part as drawings registers ONLY that part, never the whole file again", async () => {
+    looks["QA Pack.pdf"] = { parts: [part(1, 11, DRAWINGS), part(12, 30, BILL, { genre: "bill_of_quantities" })], charged: true };
+    registrations = [{ ok: true, status: 200, data: { importId: "r1", autoRead: { dispatched: true } } }, refusedBill];
+    mount("QA Pack.pdf");
+    await press();
+    await waitFor(() => expect(registered()).toHaveLength(2));
+    const drawings = screen.getByRole("combobox", { name: "Kind of QA Pack.pdf, pages 1–11" });
+    expect(drawings).toBeDisabled();
+    const bill = screen.getByRole("combobox", { name: "Kind of QA Pack.pdf, pages 12–30" });
+    expect((bill as HTMLSelectElement).value).toBe("");
+    expect(screen.getByText(/One file is partly read/)).toBeTruthy();
+    expect(screen.queryByText(/could not be identified/)).toBeNull();
+
+    await userEvent.selectOptions(bill, "shop_drawings");
+    await press(/Read the 1 you have named/);
+    await waitFor(() => expect(registered()).toHaveLength(3));
+    expect(registered()[2]).toMatchObject({ documentKind: "shop_drawings", part: { kind: "pages", ranges: [{ from: 12, to: 30 }] } });
+    expect(registered()[2]!.registrationRequestId).not.toBe(registered()[0]!.registrationRequestId);
+  });
+
+  it("locks a part whose read is waiting for a slot while the file is still held", async () => {
+    looks["QA Pack.pdf"] = { parts: [part(1, 3, DRAWINGS), part(4, 9, BILL, { genre: "bill_of_quantities" })], charged: true };
+    registrations = [
+      { ok: true, status: 200, data: { importId: "r1", autoRead: { dispatched: false, waiting: true, note: "Waiting for a slot." } } },
+      refusedBill,
+    ];
+    mount("QA Pack.pdf");
+    await press();
+    await waitFor(() => expect(registered()).toHaveLength(2));
+    expect(screen.getByRole("combobox", { name: "Kind of QA Pack.pdf, pages 1–3" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Kind of QA Pack.pdf, pages 4–9" })).not.toBeDisabled();
+  });
+
+  it("re-sends a read whose answer was lost exactly as it was, and locks its parts meanwhile", async () => {
+    looks["QA Pack.pdf"] = { parts: [part(1, 3, DRAWINGS), part(4, 9, PREAMBLE, { genre: "preamble" })], charged: true };
+    registrations = [
+      { ok: false, status: 0, error: "Could not reach the server.", data: null },
+      { ok: true, status: 200, data: { importId: "r2", autoRead: { dispatched: true } } },
+    ];
+    mount("QA Pack.pdf");
+    await press();
+    await waitFor(() => expect(registered()).toHaveLength(2));
+    expect(screen.getByRole("combobox", { name: "Kind of QA Pack.pdf, pages 1–3" })).toBeDisabled();
+    await press(/Start intake/);
+    await waitFor(() => expect(registered()).toHaveLength(3));
+    expect(registered()[2]).toEqual(registered()[0]);
+  });
+});
+
+describe("what a parts file says when nothing of it is read", () => {
+  it("says Nothing read from this file. and does not count it as being read when every part is left out", async () => {
+    looks["QA Pack.pdf"] = { parts: [part(1, 3, DRAWINGS), part(4, 9, null, { genre: "unclear" })], charged: true };
+    mount("QA Pack.pdf");
+    await press();
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Kind of QA Pack.pdf, pages 1–3" }), "skip");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Kind of QA Pack.pdf, pages 4–9" }), "skip");
+    await press(/Read the 1 you have named/);
+    expect(await screen.findByText("Nothing read from this file.")).toBeTruthy();
+    expect(registered()).toEqual([]);
+    expect(screen.getByText(/0 being read/)).toBeTruthy();
+  });
+
+  it("shows the survey's note on the row, for parts and for a single file", async () => {
+    looks["QA Pack.pdf"] = { parts: [part(1, 3, DRAWINGS), part(4, 9, PREAMBLE, { genre: "preamble" })], note: "Part 3 (preamble) was dropped: it named no pages.", charged: true };
+    looks["QA Plain.pdf"] = { decision: DRAWINGS, evidence: "elevations", note: "Pages 1–2: one shop drawings part.", charged: true };
+    mount("QA Pack.pdf", "QA Plain.pdf");
+    await press();
+    expect(await screen.findByText("Part 3 (preamble) was dropped: it named no pages.")).toBeTruthy();
+    expect(screen.getByText("Pages 1–2: one shop drawings part.")).toBeTruthy();
+  });
+});
+
+describe("a held file's suggestion sits beside an empty box (fix 4, 2026-11-21)", () => {
+  const held = {
+    decision: null,
+    held: "Could be the bill or an FF&E schedule. If it is the bill, accept Bill of quantities; if not, choose what it is.",
+    suggestion: BILL,
+    evidence: "Reads as a bill: 26 lines; code and quantity columns found.",
+    charged: true,
+  };
+
+  it("keeps the box empty, so choosing Bill in the box itself records it", async () => {
+    looks["QA Procurement.pdf"] = held;
+    mount("QA Procurement.pdf");
+    await press();
+    await screen.findByText(/Could be the bill or an FF&E schedule/);
+    const box = screen.getByRole("combobox", { name: "Kind of QA Procurement.pdf" }) as HTMLSelectElement;
+    expect(box.value).toBe("");
+    expect((box.selectedOptions[0]?.textContent ?? "").trim()).toBe("— say which —");
+    await userEvent.selectOptions(box, "boq");
+    await press(/Read the 1 you have named/);
+    await waitFor(() => expect(registered()).toHaveLength(1));
+    expect(registered()[0]).toMatchObject({ importType: "boq", documentKind: null });
+  });
+
+  it("never files the suggestion on a retry of the file", async () => {
+    // The look fails first, so the row offers "Try identifying again"; the
+    // second look holds it with the bill suggested; nothing may register.
+    let first = true;
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/classify")) {
+        if (first) {
+          first = false;
+          return { ok: false, status: 504, error: "timeout", data: { ok: false, code: "timeout", error: "The look took too long.", charged: false } };
+        }
+        return { ok: true, status: 200, data: held };
+      }
+      if (url.includes("/batches")) return { ok: true, status: 200, data: { batch: { id: "b1" } } };
+      return { ok: true, status: 200, data: { importId: "r1", autoRead: { dispatched: true } } };
+    });
+    mount("QA Procurement.pdf");
+    await press();
+    await userEvent.click(await screen.findByRole("button", { name: "Try identifying again" }));
+    await screen.findByText(/Could be the bill or an FF&E schedule/);
+    expect(registered()).toEqual([]);
+    expect(screen.getByRole("button", { name: /Read the 0 you have named/ })).toBeDisabled();
+  });
+});

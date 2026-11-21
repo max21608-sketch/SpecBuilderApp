@@ -75,6 +75,46 @@ describe("readsOf", () => {
   });
 });
 
+describe("readsOf, once something of the file is sent (fix 1, 2026-11-21)", () => {
+  const added = { state: "done" as const, message: null, registered: true, inDoubt: null };
+
+  it("leaves a registered part out of every later read, and never takes the whole-file shortcut again", () => {
+    // Drawings 1–11 registered; the bill on 12–30 came back refused and is now answered as drawings.
+    const result = readsOf([
+      { place: pages(1, 11), kind: "shop_drawings", read: added },
+      { place: pages(12, 30), kind: "shop_drawings" },
+    ]);
+    expect(result.reads).toEqual([
+      { kind: "shop_drawings", part: { kind: "pages", ranges: [{ from: 12, to: 30 }] }, partIndexes: [1], key: "shop_drawings|pages:12-30" },
+    ]);
+  });
+
+  it("ignores a registered part's box: a changed kind is not a new read", () => {
+    const result = readsOf([
+      { place: pages(1, 11), kind: "preamble", read: added },
+      { place: pages(12, 30), kind: SKIP_PART },
+    ]);
+    expect(result).toEqual({ blocked: false, reads: [] });
+  });
+
+  it("re-sends a read in doubt exactly as it was sent, whatever its parts' neighbours now say", () => {
+    const sent = { key: "shop_drawings|pages:1-3", kind: "shop_drawings", part: { kind: "pages" as const, ranges: [{ from: 1, to: 3 }] } };
+    const doubt = { state: "failed" as const, message: "Could not reach the server.", registered: false, inDoubt: sent };
+    const result = readsOf([
+      { place: pages(1, 3), kind: "shop_drawings", read: doubt },
+      { place: pages(4, 9), kind: "shop_drawings" },
+    ]);
+    expect(result.reads).toEqual([
+      { kind: "shop_drawings", part: sent.part, partIndexes: [0], key: sent.key },
+      { kind: "shop_drawings", part: { kind: "pages", ranges: [{ from: 4, to: 9 }] }, partIndexes: [1], key: "shop_drawings|pages:4-9" },
+    ]);
+  });
+
+  it("does not hold a file for a registered part with an empty box", () => {
+    expect(readsOf([{ place: pages(1, 3), kind: "", read: added }]).blocked).toBe(false);
+  });
+});
+
 describe("partOfPlace", () => {
   it("is null for an email's text and the whole file", () => {
     expect(partOfPlace({ kind: "body" })).toBeNull();

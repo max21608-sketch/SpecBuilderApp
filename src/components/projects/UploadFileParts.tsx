@@ -17,25 +17,23 @@
 // a cover or an index starts there, and a person can put any part there. It
 // registers nothing and costs nothing.
 //
+// A PART IN A READ IS LOCKED: registered, or sent with no answer back. Its
+// box cannot change, because a changed kind is a different read and the
+// press would register the same pages again (`upload-reads.ts`).
+//
 // Rows only. Which parts become which READ, and the request ids, are
 // `upload-reads.ts`; the press is the parent's.
 // ============================================================================
 import SuggestButton from "@/components/ui/SuggestButton";
-import { placeLabel, SKIP_PART, type PartRow } from "@/lib/upload-reads";
+import { partLocked, placeLabel, SKIP_PART, type PartRow } from "@/lib/upload-reads";
 
-/** How the read a part went into stands, said on that part. */
-export type PartReadState = {
-  state: "registering" | "done" | "waiting" | "failed";
-  /** The server's sentence for a failure, or the queue's for a wait. */
-  message: string | null;
-};
+export type { PartReadState } from "@/lib/upload-reads";
 
 const SKIP_LABEL = "Don't read this part";
 
 export default function UploadFileParts({
   fileName,
   parts,
-  readStates,
   choices,
   shortLabel,
   busy,
@@ -44,8 +42,6 @@ export default function UploadFileParts({
 }: {
   fileName: string;
   parts: PartRow[];
-  /** Per part, by index: the read it went into, once the press has sent it. */
-  readStates: (PartReadState | null)[];
   choices: { value: string; label: string }[];
   shortLabel: (value: string) => string;
   busy: boolean;
@@ -61,7 +57,8 @@ export default function UploadFileParts({
         const shown = part.choice || part.suggested;
         // AMBER MEANS THE APP ANSWERED THIS AND NOBODY HAS CHECKED, as on a file row.
         const unchecked = Boolean(part.suggested) && !part.choice;
-        const read = readStates[index] ?? null;
+        const read = part.read;
+        const inRead = partLocked(read);
         const waitingForYou = !part.choice && (!part.settled || !part.suggested);
         return (
           <li key={`${where}-${index}`} className="flex flex-wrap items-center gap-2 py-1.5 min-w-0">
@@ -70,7 +67,7 @@ export default function UploadFileParts({
               aria-label={`Kind of ${fileName}, ${where}`}
               value={shown}
               onChange={(event) => onChoose(index, event.target.value)}
-              disabled={busy || locked || read?.state === "done"}
+              disabled={busy || locked || inRead}
               className={`border rounded px-2 py-1 text-sm text-neutral-900 ${
                 unchecked ? "border-amber-400 bg-amber-50" : "border-neutral-300"
               }`}
@@ -85,12 +82,11 @@ export default function UploadFileParts({
             </select>
             <span className="text-xs text-neutral-500 w-24 text-right">
               {read?.state === "registering" && "Registering…"}
-              {read?.state === "done" && "Added"}
-              {read?.state === "waiting" && "Added"}
-              {read?.state === "failed" && <span className="text-red-700">Failed</span>}
+              {read?.state !== "registering" && read?.registered && "Added"}
+              {read?.state === "failed" && !read.registered && <span className="text-red-700">Failed</span>}
               {!read && waitingForYou && <span className="text-amber-700">Say which</span>}
             </span>
-            {unchecked && read?.state !== "done" && read?.state !== "waiting" ? (
+            {unchecked && !inRead ? (
               <SuggestButton
                 className="w-full"
                 value={label(part.suggested)}
@@ -109,6 +105,7 @@ export default function UploadFileParts({
                 <p className="mt-1">{part.errorDetail}</p>
               </details>
             )}
+            {/* Failed, or registered and not queued: red either way, with the server's sentence. */}
             {read?.state === "failed" && read.message && <p className="w-full text-xs text-red-700">{read.message}</p>}
             {read?.state === "waiting" && read.message && <p className="w-full text-xs text-neutral-500">{read.message}</p>}
           </li>

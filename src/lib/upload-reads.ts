@@ -23,6 +23,18 @@
 // half registered — its bill read, its held drawings not — is the state no
 // screen can show and nobody can finish.
 //
+// A PART THAT IS IN A READ STAYS IN THAT READ (2026-11-21, the review). A
+// read's identity is its kind and the union of its parts, so it cannot be how
+// the screen remembers what is registered: change one part's kind after the
+// press — the bill part came back refused, its box cleared, and somebody set
+// it to Drawings — and every key changes, the registered drawings read no
+// longer matches, and the whole file is read a second time, charged, its
+// items staged twice. So registration is recorded PER PART (`PartRow.read`):
+// a registered part is locked and in no later read; a part whose request had
+// no answer is locked too and re-sent EXACTLY as it was, under its own key,
+// because it may have landed; and the whole-file shortcut is taken only while
+// nothing of the file has been sent.
+//
 // A LEAF: the upload screen and the classify route both import it, so it may
 // import no server module (`client-server-boundary.test.ts`).
 // ============================================================================
@@ -58,6 +70,25 @@ export type ClassifiedPart = {
   nothingToRead: boolean;
 };
 
+/** How the read a part went into stands, said on that part. */
+export type PartReadState = {
+  state: "registering" | "done" | "waiting" | "failed";
+  /** The server's sentence for a failure, or the queue's for a wait. */
+  message: string | null;
+  /** The read's run exists. The part is in no later read, and its box is locked. */
+  registered: boolean;
+  /**
+   * SENT, AND NO ANSWER CAME BACK: the run may exist. Locked like a registered
+   * part, and the next press re-sends this read exactly — same kind, same
+   * part, same key and so the same request id — so the server's replay guard
+   * can answer it with the run it may already have made.
+   */
+  inDoubt: { key: string; kind: string; part: SourcePart | null } | null;
+};
+
+/** Is this part beyond a person's changing — in a read that exists, or may? */
+export const partLocked = (read: PartReadState | null | undefined): boolean => Boolean(read && (read.registered || read.inDoubt));
+
 /**
  * One part as the upload screen holds it between presses. `choice` is a
  * person's and always wins; `suggested` is the app's, and counts without a
@@ -74,6 +105,8 @@ export type PartRow = {
   held: string | null;
   error: string | null;
   errorDetail: string | null;
+  /** The read this part went into, once a press has sent it; null before. */
+  read: PartReadState | null;
 };
 
 /** The kind the press reads a part as, or "" while a person has still to say. */
@@ -126,30 +159,48 @@ export type UploadRead = {
 
 export type ReadsOf = { blocked: true; reads: [] } | { blocked: false; reads: UploadRead[] };
 
+/** One part as `readsOf` takes it: where, the kind its box holds, and the read it is already in. */
+export type PartForReads = { place: PartPlace; kind: string; read?: PartReadState | null };
+
 /**
  * A file's parts, each with the kind its box holds ("" for unanswered,
- * `SKIP_PART` for left out), as the reads to register.
+ * `SKIP_PART` for left out), as the reads the NEXT press sends.
  *
- * Grouped by kind in the order each kind first appears. A read's part is the
- * union of its parts' places — and is NULL, the whole file, where every part
- * of the file is in that one read, so a file whose parts all go one way is
- * registered exactly as a single-kind file always was. A read containing a
- * part whose place is the whole file is the whole file.
+ * A REGISTERED part is in no read: it has its run. A part IN DOUBT is re-sent
+ * in the read it was sent in, exactly. The rest are grouped by kind in the
+ * order each kind first appears, a read's part the union of its parts'
+ * places — and NULL, the whole file, only where every part of the file is in
+ * that one read and nothing of the file has been sent before, so a file whose
+ * parts all go one way is registered exactly as a single-kind file always
+ * was. A read containing a part whose place is the whole file is the whole
+ * file.
  *
- * Blocked, with no reads at all, while any part is unanswered.
+ * Blocked, with no reads at all, while any part not yet sent is unanswered.
  */
-export function readsOf(parts: { place: PartPlace; kind: string }[]): ReadsOf {
-  if (parts.some((part) => !part.kind)) return { blocked: true, reads: [] };
+export function readsOf(parts: PartForReads[]): ReadsOf {
+  if (parts.some((part) => !partLocked(part.read) && !part.kind)) return { blocked: true, reads: [] };
+  const reads: UploadRead[] = [];
+  const doubted = new Map<string, UploadRead>();
+  parts.forEach((part, index) => {
+    const doubt = part.read?.registered ? null : (part.read?.inDoubt ?? null);
+    if (!doubt) return;
+    const read = doubted.get(doubt.key) ?? { kind: doubt.kind, part: doubt.part, partIndexes: [], key: doubt.key };
+    read.partIndexes.push(index);
+    if (!doubted.has(doubt.key)) {
+      doubted.set(doubt.key, read);
+      reads.push(read);
+    }
+  });
+  const sentBefore = parts.some((part) => partLocked(part.read));
   const groups = new Map<string, number[]>();
   parts.forEach((part, index) => {
-    if (part.kind === SKIP_PART) return;
+    if (partLocked(part.read) || part.kind === SKIP_PART) return;
     const members = groups.get(part.kind) ?? [];
     members.push(index);
     groups.set(part.kind, members);
   });
-  const reads: UploadRead[] = [];
   for (const [kind, partIndexes] of groups) {
-    const everything = partIndexes.length === parts.length;
+    const everything = !sentBefore && partIndexes.length === parts.length;
     let part: SourcePart | null = null;
     if (!everything) {
       const places = partIndexes.map((index) => partOfPlace(parts[index]!.place));
@@ -159,6 +210,14 @@ export function readsOf(parts: { place: PartPlace; kind: string }[]): ReadsOf {
   }
   return { blocked: false, reads };
 }
+
+/**
+ * Did the app answer this request? A refusal of its own, in its JSON, is an
+ * answer; no response, or a gateway's page that is not the app's JSON
+ * (`data: null`), is not — the request may have landed.
+ */
+export const serverAnswered = (last: { ok: boolean; status: number; data: unknown }): boolean =>
+  last.ok || (last.status !== 0 && last.data !== null && last.data !== undefined);
 
 /**
  * The request id to send NEXT time, given how the last registration with
@@ -174,6 +233,5 @@ export function nextRequestId(
   fresh: () => string = () => crypto.randomUUID(),
 ): string {
   if (last.ok) return current;
-  const answered = last.status !== 0 && last.data !== null && last.data !== undefined;
-  return answered ? fresh() : current;
+  return serverAnswered(last) ? fresh() : current;
 }
