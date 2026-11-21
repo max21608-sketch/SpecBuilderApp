@@ -7,7 +7,7 @@
 // control sends, so a move that dropped a branch, a prop or a reload fails
 // here rather than in a screenshot nobody compares.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import RecordPage from "@/app/dashboard/records/[id]/page";
 import type { Disagreement } from "@/lib/disagreements";
@@ -359,6 +359,12 @@ describe("the other tabs", () => {
     url.search = "tab=versions";
     render(<RecordPage />);
     await screen.findByRole("heading", { level: 1 });
-    expect(calls.some((call) => call.url.includes("/history") || call.url.includes("/snapshots"))).toBe(true);
+    // The versions tab asks for its history in its own effect, after the
+    // heading is up; under a full run's load that can land a tick later, so
+    // wait for it rather than asserting on the same tick (seen failing twice
+    // in the whole suite, 2026-11-21, passing alone).
+    await waitFor(() =>
+      expect(calls.some((call) => call.url.includes("/history") || call.url.includes("/snapshots"))).toBe(true),
+    );
   });
 });
