@@ -349,6 +349,28 @@ async function applyFanOut(
   const project = await txn`select id from projects where id = ${projectId} for update`;
   if (!project[0]) throw new DomainConflictError("not_found", "No such project.", { status: 404 });
 
+  // THE RECORDS, LOCKED BEFORE THE SET IS READ AGAIN (chase review C4,
+  // 2026-11-21). The project lock holds back what takes it (a bill confirm, a
+  // second press), but an AREA edit (`editRecordDetails`) and a category change
+  // lock only their record: an item moved to Terrace between a first read and
+  // the record locks received Restaurant's answer. So every record the screen
+  // showed or a first read finds is locked, project then records in id order
+  // (`record-lock.ts`), and only then is the set derived for real. An item
+  // moved IN after this is outside the write and the comparison below refuses
+  // the press; one moved OUT is held here and shows as moved.
+  // `seen` is the client's word, so only THIS project's records are locked —
+  // `lockRecords`' own statement (id order, `for update`) with the project in it.
+  const first = (await loadFanOut(txn, projectId, scope)).find((group) => group.key === key);
+  const candidates = [...new Set([...seen.map((row) => row.recordId), ...(first?.rows ?? []).map((row) => row.recordId)])].sort();
+  if (candidates.length > 0) {
+    await txn`
+      select id from spec_records
+       where id = any(${candidates}::uuid[]) and project_id = ${projectId}
+       order by id
+         for update
+    `;
+  }
+
   const question = (await loadFanOut(txn, projectId, scope)).find((group) => group.key === key);
   // What the card says the answer is FOR, in every sentence below.
   const forWhat = scope === "area" ? `for ${question?.area ?? "the area"}` : "for the project";

@@ -163,4 +163,43 @@ describeIfDb("a question answered once for an area", () => {
     expect(refused.body.code).toBe("reason_required");
     expect((await outdoor(restaurant1)).value).toBe("Indoor");
   });
+
+  // CHASE REVIEW C4, 2026-11-21: the area's set was re-derived under the
+  // PROJECT lock, but an area edit takes only the RECORD's lock — so an item
+  // moved to another area between the fan-out's read and its record locks got
+  // the old area's answer. The records are now locked (id order) BEFORE the
+  // set is read again. Forced, never raced: a second connection moves the
+  // item and holds its lock; the press is let go only once it is waiting.
+  it("never writes the old area's answer to an item moved out of it while the press waited", async () => {
+    const lounge1 = await record(21, "Lounge");
+    const lounge2 = await record(22, "Lounge");
+    const mover = new pg.Client({ connectionString: databaseUrl });
+    await mover.connect();
+    try {
+      const card = await cardFor("lounge");
+      expect(card.items).toBe(2);
+      const moverPid = Number((await mover.query(`select pg_backend_pid() as pid`)).rows[0].pid);
+      await mover.query("begin");
+      await mover.query(`update spec_records set area = 'Terrace', updated_by = 'qa' where id = $1`, [lounge1]);
+      const press = answer({ key: card.key, value: "Indoor", state: "confirmed", seen: seen(card) });
+      const deadline = Date.now() + 15_000;
+      for (;;) {
+        const waiting = await client.query(`select count(*)::int as n from pg_stat_activity where $1 = any(pg_blocking_pids(pid))`, [moverPid]);
+        if (waiting.rows[0].n > 0) break;
+        if (Date.now() > deadline) throw new Error("the press never waited on the moved item");
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await mover.query("commit");
+      const result = await press;
+      expect(result.status).toBe(409);
+      expect(result.body.code).toBe("project_wide_moved");
+      expect((await outdoor(lounge1)).state).toBe("missing");
+      expect((await outdoor(lounge2)).state).toBe("missing");
+    } finally {
+      await mover.query("rollback").catch(() => undefined);
+      await mover.end();
+      await client.query(`delete from spec_answers where record_id = any($1::uuid[])`, [[lounge1, lounge2]]);
+      await client.query(`delete from spec_records where id = any($1::uuid[])`, [[lounge1, lounge2]]);
+    }
+  }, SLOW);
 });

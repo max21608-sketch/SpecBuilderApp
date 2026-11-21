@@ -936,6 +936,15 @@ the trap (design finding 12):
   whole if it moved; a settled different answer never overwritten without a
   tick and a reason; one change set, one version per record, records locked
   in id order, `spec_records.version` untouched; a dimension refused.
+- **The records are locked BEFORE the set is read again** (review C4,
+  2026-11-21). The project lock holds back a bill confirm or a second press,
+  but an area edit (`editRecordDetails`) and a category change lock only the
+  record, so an item moved to Terrace between the fan-out's read and its
+  record locks received Restaurant's answer. `applyFanOut` now locks the
+  project, then every record the screen showed or a first read finds (this
+  project's only, id order), and only then derives the set it compares and
+  writes. `tests/db/area-wide.test.ts` forces it with a second connection
+  holding the moved item, never a sleep.
 - **The area folds by case and whitespace only (`foldArea`)**, the chase
   email's rule; an item with NO area is on no card and is answered on its own.
   `tests/db/area-wide.test.ts`.
