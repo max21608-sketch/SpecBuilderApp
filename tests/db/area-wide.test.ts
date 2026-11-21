@@ -211,6 +211,85 @@ describeIfDb("a question answered once for an area", () => {
     }
   }, SLOW);
 
+  // CHASE REVIEW C3, 2026-11-21: an area card spanned every active phase and
+  // did not say so — with the fill-in filtered to one phase, a press wrote the
+  // other phase's items in the same area too. Now the card takes the phase:
+  // filtered, its set is that phase's items, re-derived under the lock;
+  // unfiltered, it names each phase and how many items in it BEFORE the press.
+  it("takes the fill-in's phase: filtered, only that phase's items; unfiltered, both, with each phase named and counted", async () => {
+    const other = (
+      await client.query(`insert into spec_runs (project_id, name, sort_order, created_by, updated_by) values ($1, '__QA public areas', 2, 'qa', 'qa') returning id`, [
+        projectId,
+      ])
+    ).rows[0].id as string;
+    const guest1 = await record(41, "Atrium");
+    const guest2 = await record(42, "Atrium");
+    const publicId = (
+      await client.query(
+        `insert into spec_records (project_id, run_id, record_no, status, category_id, item_description, level, area, created_by, updated_by)
+         values ($1, $2, 43, 'active', $3, '__QA Chair', 'simple', 'atrium', 'qa', 'qa') returning id`,
+        [projectId, other, categoryId],
+      )
+    ).rows[0].id as string;
+    await client.query(
+      `insert into spec_answers (record_id, requirement_id, spec_field_id, state, source_kind, created_by, updated_by)
+       select $1, q.id, q.spec_field_id, 'missing', 'manual', 'qa', 'qa' from requirements q where q.category_id = $2`,
+      [publicId, categoryId],
+    );
+    type Phased = Question & { phases?: { runId: string; name: string; items: number }[] };
+    async function atrium(phase: string | null): Promise<Phased | undefined> {
+      const { GET } = await import("@/app/api/projects/[id]/area-wide/route");
+      const url = phase ? `http://localhost/test?runId=${phase}` : "http://localhost/test";
+      const body = (await (await GET(new Request(url), params(projectId))).json()) as { questions: Phased[] };
+      return body.questions.find((question) => question.key.endsWith("field:130") && question.area?.toLowerCase() === "atrium");
+    }
+    try {
+      // UNFILTERED: both phases, each named and counted before the press.
+      const whole = (await atrium(null))!;
+      expect(whole.items).toBe(3);
+      expect(whole.phases).toEqual([
+        { runId, name: "__QA run", items: 2 },
+        { runId: other, name: "__QA public areas", items: 1 },
+      ]);
+
+      // FILTERED: only the phase's own items, and only its own phase named.
+      const filtered = (await atrium(other))!;
+      expect(filtered.items).toBe(1);
+      expect(filtered.rows.map((row) => row.recordId)).toEqual([publicId]);
+      expect(filtered.phases).toEqual([{ runId: other, name: "__QA public areas", items: 1 }]);
+
+      // The screen's set is not the set under the lock: the filtered card's
+      // rows sent WITHOUT the phase are refused whole.
+      const mismatched = await answer({ key: filtered.key, value: null, state: "tbc", seen: seen(filtered) });
+      expect(mismatched.status).toBe(409);
+      expect(mismatched.body.code).toBe("project_wide_moved");
+      expect((await outdoor(publicId)).state).toBe("missing");
+
+      const one = await answer({ key: filtered.key, value: null, state: "tbc", seen: seen(filtered), runId: other });
+      expect(one.status).toBe(200);
+      expect(one.body).toMatchObject({ written: 1, records: 1 });
+      expect((await outdoor(publicId)).state).toBe("tbc");
+      expect((await outdoor(guest1)).state).toBe("missing");
+      expect((await outdoor(guest2)).state).toBe("missing");
+
+      // UNFILTERED: both phases' items.
+      const again = (await atrium(null))!;
+      const both = await answer({ key: again.key, value: "Indoor", state: "confirmed", seen: seen(again) });
+      expect(both.status).toBe(200);
+      expect(both.body).toMatchObject({ written: 3, records: 3 });
+      for (const id of [guest1, guest2, publicId]) expect(await outdoor(id)).toMatchObject({ state: "confirmed", value: "Indoor" });
+
+      // A RETIRED PHASE IS NEVER IN A SET, filtered to or not.
+      await client.query(`update spec_runs set status = 'retired', retired_at = now(), retired_by = 'qa', updated_by = 'qa' where id = $1`, [other]);
+      expect((await atrium(null))!.phases).toEqual([{ runId, name: "__QA run", items: 2 }]);
+      expect(await atrium(other)).toBeUndefined();
+    } finally {
+      await client.query(`delete from spec_answers where record_id = any($1::uuid[])`, [[guest1, guest2, publicId]]);
+      await client.query(`delete from spec_records where id = any($1::uuid[])`, [[guest1, guest2, publicId]]);
+      await client.query(`delete from spec_runs where id = $1`, [other]);
+    }
+  }, SLOW);
+
   // CHASE REVIEW C1, 2026-11-21: the BWS file ships a record's SPEC before its
   // checklist answer. A bill saying "Outdoor TBC" on an item made its answer a
   // TBC projection, and "Indoor" on the card was written over it (TBC is not

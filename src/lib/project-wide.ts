@@ -107,7 +107,15 @@ export type ProjectWideQuestion = {
   tier: QuestionTier;
   /** The settled answers it already holds, each with how many items say it. More than one is a difference. */
   values: { value: string | null; state: AnswerState; items: number }[];
+  /**
+   * THE PHASES ITS ITEMS ARE ON, each with how many (chase review C3): an
+   * area "Guest Room A" can sit in MUR and in MAIN RUN, and the card names
+   * both BEFORE the press. In the phases' own order; active phases only.
+   */
+  phases: QuestionPhase[];
 };
+
+export type QuestionPhase = { runId: string; name: string; items: number };
 
 const isSettledState = (state: string) => state === "confirmed" || state === "na";
 
@@ -117,18 +125,25 @@ const isSettledState = (state: string) => state === "confirmed" || state === "na
  * the write re-reads it inside its transaction.
  */
 export async function loadProjectWide(exec: Exec, projectId: string): Promise<ProjectWideQuestion[]> {
-  return loadFanOut(exec, projectId, "project");
+  return loadFanOut(exec, projectId, "project", null);
 }
 
-/** Every area question an item in scope asks, one card per (area, question). Items with no area are on none. */
-export async function loadAreaWide(exec: Exec, projectId: string): Promise<ProjectWideQuestion[]> {
-  return loadFanOut(exec, projectId, "area");
+/**
+ * Every area question an item in scope asks, one card per (area, question).
+ * Items with no area are on none.
+ *
+ * `runId` is the fill-in's PHASE FILTER (chase review C3): given, the card's
+ * items are that phase's alone, and so is what a press writes; null is every
+ * active phase. A retired phase is never in a set either way.
+ */
+export async function loadAreaWide(exec: Exec, projectId: string, runId: string | null = null): Promise<ProjectWideQuestion[]> {
+  return loadFanOut(exec, projectId, "area", runId);
 }
 
-async function loadFanOut(exec: Exec, projectId: string, scope: FanOutScope): Promise<ProjectWideQuestion[]> {
+async function loadFanOut(exec: Exec, projectId: string, scope: FanOutScope, runId: string | null): Promise<ProjectWideQuestion[]> {
   const projectScope = scope === "project";
   const rows = await exec`
-    select r.id as record_id, r.record_no, r.variant_ordinal, r.item_description, r.level, r.category_id, r.area, r.matrix_type,
+    select r.id as record_id, run.id as run_id, run.name as run_name, run.sort_order as run_sort, r.record_no, r.variant_ordinal, r.item_description, r.level, r.category_id, r.area, r.matrix_type,
            (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
            p.bws_project_number,
            q.id as requirement_id, q.prompt, q.tgq_levels, q.local_key, q.sort_order,
@@ -150,6 +165,8 @@ async function loadFanOut(exec: Exec, projectId: string, scope: FanOutScope): Pr
      where r.project_id = ${projectId}
        and r.status = 'active'
        and run.status = 'active'
+       -- THE PHASE FILTER (review C3), on the area card only; null is every phase.
+       and (${runId}::uuid is null or r.run_id = ${runId}::uuid)
        -- loadExportScope's split-line clause, word for word: a bill line with
        -- a live configuration is a heading, and its configurations are the
        -- items that ask. (No backticks in here: one closes the template.)
@@ -217,6 +234,7 @@ async function loadFanOut(exec: Exec, projectId: string, scope: FanOutScope): Pr
         toQuoteOutstanding: 0,
         tier: "later",
         values: [],
+        phases: [],
       };
       groups.set(key, group);
     }
@@ -236,8 +254,28 @@ async function loadFanOut(exec: Exec, projectId: string, scope: FanOutScope): Pr
     });
   }
 
+  // Which phase each record is on, and the phases' own order, for `phases`.
+  const phaseOf = new Map<string, { runId: string; name: string; sort: number }>();
+  for (const row of rows) {
+    phaseOf.set(String(row.record_id), {
+      runId: String(row.run_id),
+      name: String(row.run_name ?? ""),
+      sort: Number(row.run_sort ?? 0),
+    });
+  }
+
   for (const group of groups.values()) {
     group.items = new Set(group.rows.map((row) => row.recordId)).size;
+    const byPhase = new Map<string, { runId: string; name: string; sort: number; records: Set<string> }>();
+    for (const row of group.rows) {
+      const phase = phaseOf.get(row.recordId)!;
+      const entry = byPhase.get(phase.runId) ?? { ...phase, records: new Set<string>() };
+      entry.records.add(row.recordId);
+      byPhase.set(phase.runId, entry);
+    }
+    group.phases = [...byPhase.values()]
+      .sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name) || a.runId.localeCompare(b.runId))
+      .map((entry) => ({ runId: entry.runId, name: entry.name, items: entry.records.size }));
     const values = new Map<string, { value: string | null; state: AnswerState; items: number }>();
     for (const row of group.rows) {
       if (row.tier === "to_quote") group.tier = "to_quote";
@@ -299,6 +337,13 @@ export type FanOutInput = {
   overrides: string[];
   reason: string | null;
   actor: string;
+  /**
+   * The phase the card was filtered to (chase review C3), or null for every
+   * phase. The set is re-derived under the lock WITH it, so a card filtered to
+   * MUR writes MUR's items only, and its rows sent without the phase are a
+   * different set and refused whole.
+   */
+  runId?: string | null;
 };
 
 async function applyFanOut(
@@ -313,18 +358,11 @@ async function applyFanOut(
     overrides,
     reason,
     actor,
-  }: {
-    projectId: string;
-    key: string;
-    value: string | null;
-    state: "confirmed" | "tbc";
-    seen: SeenRow[];
-    /** Answer ids of settled, differing rows the person ticked to replace. */
-    overrides: string[];
-    reason: string | null;
-    actor: string;
-  },
+    runId = null,
+  }: FanOutInput,
 ): Promise<ApplyProjectWideResult> {
+  // The phase narrows an AREA card only; the project card is the project's.
+  const phase = scope === "area" ? (runId ?? null) : null;
   // THE PROJECT LOCK, first — for an area too, because what moves an area's
   // set (an item added, retired, moved to another area) is a write to the
   // project's records. Two people answering the same question, or a bill
@@ -343,7 +381,7 @@ async function applyFanOut(
   // the press; one moved OUT is held here and shows as moved.
   // `seen` is the client's word, so only THIS project's records are locked —
   // `lockRecords`' own statement (id order, `for update`) with the project in it.
-  const first = (await loadFanOut(txn, projectId, scope)).find((group) => group.key === key);
+  const first = (await loadFanOut(txn, projectId, scope, phase)).find((group) => group.key === key);
   const candidates = [...new Set([...seen.map((row) => row.recordId), ...(first?.rows ?? []).map((row) => row.recordId)])].sort();
   if (candidates.length > 0) {
     await txn`
@@ -354,7 +392,7 @@ async function applyFanOut(
     `;
   }
 
-  const question = (await loadFanOut(txn, projectId, scope)).find((group) => group.key === key);
+  const question = (await loadFanOut(txn, projectId, scope, phase)).find((group) => group.key === key);
   // What the card says the answer is FOR, in every sentence below.
   const forWhat = scope === "area" ? `for ${question?.area ?? "the area"}` : "for the project";
   if (!question) {

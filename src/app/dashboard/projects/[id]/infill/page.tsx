@@ -571,9 +571,18 @@ function InfillView() {
 
         {/* ONCE PER AREA (decision C): Indoor / Outdoor, floor and wall,
             answered for "Restaurant" and written to every item in it. Above the
-            list, because one answer here clears a row on every line below. */}
+            list, because one answer here clears a row on every line below.
+            It takes the PHASE FILTER (review C3): filtered to MUR, a press
+            writes MUR's items and no other phase's. */}
         <div className="mt-4">
-          <AreaWideCard projectId={project.id} onChanged={() => void load()} />
+          <AreaWideCard
+            projectId={project.id}
+            onChanged={() => void load()}
+            // The phase select is on the By item tab only; By question lists
+            // every phase, and so does the card there.
+            runId={tab === "by-item" ? filters.runId : ""}
+            phaseName={data.phases.find((phase) => phase.id === filters.runId)?.name ?? null}
+          />
         </div>
 
         {tab === "by-question" ? (

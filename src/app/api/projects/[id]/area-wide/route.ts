@@ -3,10 +3,14 @@
 //
 // GET   every area question an item in the export's scope asks, one card per
 //       (area, question), the area folded by case and space only. An item with
-//       no area is on no card: it is asked on its own.
+//       no area is on no card: it is asked on its own. `?runId=` is the
+//       fill-in's phase filter (chase review C3): that phase's items only.
+//       Every card names its phases and how many items in each.
 // POST  one answer, fanned out to every item in that area that asks it — one
 //       change set, one version per record, refused WHOLE if the set moved.
 //       The rules are the project-wide card's, in src/lib/project-wide.ts.
+//       `runId` in the body is the phase the card was filtered to, and the set
+//       is re-derived under the lock with it.
 import { json, sql } from "@/lib/db";
 import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
@@ -18,17 +22,24 @@ import { requireUuid, requireWriter } from "@/lib/route-guards";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id: projectId } = await context.params;
   const badId = requireUuid(projectId);
   if (badId) return badId;
 
+  // THE PHASE FILTER (chase review C3). Absent or empty is every phase.
+  const runId = new URL(request.url).searchParams.get("runId") || null;
+  if (runId) {
+    const badRun = requireUuid(runId);
+    if (badRun) return badRun;
+  }
+
   const exists = await sql`select id from projects where id = ${projectId}`;
   if (!exists[0]) return json({ ok: false, error: "No such project." }, 404);
 
-  const [questions, register] = await Promise.all([loadAreaWide(sql, projectId), loadPalettes(sql)]);
+  const [questions, register] = await Promise.all([loadAreaWide(sql, projectId, runId), loadPalettes(sql)]);
 
   // WHICH PALETTE A QUESTION OFFERS, resolved here the way the record screen
   // resolves it — by local key, then by BWS field — so the card's control
@@ -68,6 +79,8 @@ const Body = z
       .max(2000),
     overrides: z.array(z.string().uuid()).max(2000).optional(),
     reason: z.string().max(2000).nullable().optional(),
+    /** The phase the card was filtered to; absent or null is every phase. */
+    runId: z.string().uuid().nullable().optional(),
   })
   .strict();
 
@@ -106,6 +119,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         overrides: parsed.data.overrides ?? [],
         reason: parsed.data.reason?.trim() || null,
         actor: user.email,
+        runId: parsed.data.runId ?? null,
       }),
     );
     return json({ ok: true, ...result });

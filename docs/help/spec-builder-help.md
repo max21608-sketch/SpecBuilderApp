@@ -407,7 +407,11 @@ answers one question across many items.
   an area such as "Restaurant" and written to every item in it. An item that
   already holds a different answer — or has a spec that fills the field, shown
   as "the file ships the spec, …" — is left alone unless you tick it (and say
-  why). An item with no area is answered on its own.
+  why). An item with no area is answered on its own. Under each question the
+  card names the phases its items are on, with how many in each ("Guest
+  Rooms 6 · Public Areas 4"). With "By item" filtered to one phase the card
+  says "Filtered to the phase …: an answer here is written to its items
+  only", and a save writes that phase's items and no other's.
 - "Provisional cabinetry gate model, drafted by AI…" at the top means some of
   the TGQ marks on this screen come from that draft.
 

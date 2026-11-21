@@ -989,6 +989,17 @@ the trap (design finding 12):
 - **The area folds by case and whitespace only (`foldArea`)**, the chase
   email's rule; an item with NO area is on no card and is answered on its own.
   `tests/db/area-wide.test.ts`.
+- **An area card takes the fill-in's PHASE FILTER and names its phases**
+  (review C3, 2026-11-21). The card key has no phase, so "Guest Room A" in MUR
+  and in MAIN RUN was one card, and a press with the fill-in filtered to MUR
+  wrote MAIN RUN's items too. The area route takes `runId` (GET query, POST
+  body) and `applyFanOut` re-derives the set WITH it, in C4's order; the
+  filtered card's rows sent without the phase are a different set and are
+  refused whole. Every card carries `phases` (active phases only, each with
+  its item count) and prints them before the press. The filter is passed from
+  the By item tab only, where the phase select is; By question lists every
+  phase, and so does the card there. The project card is the project's and
+  ignores a phase. `tests/db/area-wide.test.ts`.
 
 ### Which drawing labels answer which question — and why most are not aliased
 

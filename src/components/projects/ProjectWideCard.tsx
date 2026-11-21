@@ -54,7 +54,14 @@ type Question = {
   tier: QuestionTier;
   values: { value: string | null; state: AnswerState; items: number }[];
   palette: Palette | null;
+  /** The phases its items are on, each counted (chase review C3). Absent on a payload from before it. */
+  phases?: { runId: string; name: string; items: number }[];
 };
+
+/** "Guest Rooms 6 · Public Areas 4": the phases a press will write, said before it. */
+function phaseLine(phases: Question["phases"]): string {
+  return (phases ?? []).map((phase) => `${phase.name} ${phase.items}`).join(" · ");
+}
 
 const COLUMNS = 5;
 
@@ -90,12 +97,21 @@ export default function ProjectWideCard({
   projectId,
   onChanged,
   scope = "project",
+  runId = "",
+  phaseName = null,
 }: {
   projectId: string;
   /** The overview's own numbers move when this writes; it reloads them. */
   onChanged?: () => void;
   /** `area` is the fill-in screen's card (0062). */
   scope?: "project" | "area";
+  /**
+   * The fill-in's PHASE FILTER, on the area card (chase review C3): the card
+   * reads and writes that phase's items alone. "" is every phase.
+   */
+  runId?: string;
+  /** The filtered phase's name, for the sentence that says the card is narrowed. */
+  phaseName?: string | null;
 }) {
   const words = SCOPE_WORDS[scope];
   const [questions, setQuestions] = useState<Question[] | null>(null);
@@ -104,15 +120,19 @@ export default function ProjectWideCard({
   const [open, setOpen] = useState<string | null>(null);
   const [showSettled, setShowSettled] = useState(false);
 
+  // The phase narrows the AREA card only; the project card is the project's.
+  const phase = scope === "area" ? runId : "";
   const load = useCallback(async () => {
-    const res = await apiFetch<{ questions: Question[] }>(`/api/projects/${projectId}/${words.route}`);
+    const res = await apiFetch<{ questions: Question[] }>(
+      `/api/projects/${projectId}/${words.route}${phase ? `?runId=${encodeURIComponent(phase)}` : ""}`,
+    );
     if (!res.ok) {
       setError(res.error);
       return;
     }
     setError(null);
     setQuestions(res.data.questions);
-  }, [projectId, words.route]);
+  }, [projectId, words.route, phase]);
 
   useEffect(() => {
     void load();
@@ -155,6 +175,11 @@ export default function ProjectWideCard({
         }
       >
         <p className="px-4 pt-3 text-[12.5px] text-neutral-600">{words.intro}</p>
+        {phase && (
+          <p className="px-4 pt-1 text-[12.5px] font-medium text-neutral-800">
+            Filtered to the phase {phaseName ?? "chosen above"}: an answer here is written to its items only.
+          </p>
+        )}
         {error && <Note tone="danger" className="mx-4">{error}</Note>}
         {notice && <Note tone="good" className="mx-4">{notice}</Note>}
         {questions === null && !error ? (
@@ -179,6 +204,8 @@ export default function ProjectWideCard({
                 <QuestionRows
                   key={question.key}
                   route={words.route}
+                  phase={phase}
+                  showPhases={scope === "area"}
                   projectId={projectId}
                   question={question}
                   open={open === question.key}
@@ -207,6 +234,8 @@ export default function ProjectWideCard({
 
 function QuestionRows({
   route,
+  phase,
+  showPhases,
   projectId,
   question,
   open,
@@ -215,6 +244,8 @@ function QuestionRows({
   onRefused,
 }: {
   route: string;
+  phase: string;
+  showPhases: boolean;
   projectId: string;
   question: Question;
   open: boolean;
@@ -232,6 +263,10 @@ function QuestionRows({
           <span className="text-neutral-900">{fieldDisplayName(question.heading)}</span>
           {question.fieldLabel && fieldDisplayName(question.fieldLabel) !== fieldDisplayName(question.heading) && (
             <span className="block pl-4 text-[11px] text-neutral-500">BWS: {fieldDisplayName(question.fieldLabel)}</span>
+          )}
+          {/* WHICH PHASES A PRESS WRITES (review C3), before it is pressed. */}
+          {showPhases && (question.phases ?? []).length > 0 && (
+            <span className="block pl-4 text-[11px] text-neutral-500">{phaseLine(question.phases)}</span>
           )}
         </Td>
         <Td>
@@ -272,7 +307,15 @@ function QuestionRows({
       {open && (
         <tr>
           <td colSpan={COLUMNS} className="border-b border-neutral-100 bg-[#fcfcfc] px-4 py-3">
-            <AnswerForm route={route} projectId={projectId} question={question} onSaved={onSaved} onRefused={onRefused} />
+            <AnswerForm
+              route={route}
+              phase={phase}
+              showPhases={showPhases}
+              projectId={projectId}
+              question={question}
+              onSaved={onSaved}
+              onRefused={onRefused}
+            />
           </td>
         </tr>
       )}
@@ -282,12 +325,16 @@ function QuestionRows({
 
 function AnswerForm({
   route,
+  phase,
+  showPhases,
   projectId,
   question,
   onSaved,
   onRefused,
 }: {
   route: string;
+  phase: string;
+  showPhases: boolean;
   projectId: string;
   question: Question;
   onSaved: (message: string) => Promise<void>;
@@ -346,6 +393,8 @@ function AnswerForm({
             })),
             overrides: ticked.map((row) => row.answerId!),
             reason: reason.trim() || null,
+            // The phase the card was read for; the route re-derives the set with it.
+            ...(phase ? { runId: phase } : {}),
           }),
         },
       );
@@ -397,6 +446,9 @@ function AnswerForm({
         Writes to the {plan.write.length} item{plan.write.length === 1 ? "" : "s"} not yet answered
         {ticked.length > 0 && <> and the {ticked.length} ticked below</>}
         {plan.same > 0 && <> · {plan.same} already say this</>}. One change, one version per item.
+        {showPhases && !phase && (question.phases ?? []).length > 1 && (
+          <> The items are across {question.phases!.length} phases: {phaseLine(question.phases)}.</>
+        )}
       </p>
 
       {plan.differ.length > 0 && (
