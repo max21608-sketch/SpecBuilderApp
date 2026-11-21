@@ -32,6 +32,7 @@ import type { PhaseSuggestion } from "@/lib/phase-revision-suggest";
 import type { BoqKeptCell } from "@/lib/boq-roles";
 import type { ColumnsPanelSheet } from "@/components/imports/BoqColumnsPanel";
 import type { NonFurnitureGuess } from "@/lib/non-furniture-guess";
+import type { SourcePart } from "@/lib/source-part";
 
 export type Line = {
   replaces?: { recordId: string; recordVersion: number } | null;
@@ -142,6 +143,8 @@ export type Import = {
   id: string; status: string; version: number; error: string | null; source_kind: string;
   document_kind: string | null; project_id: string;
   bws_project_number: string; project_name: string; filename: string | null;
+  /** Which part of the file this read is for (open intake); null or absent for the whole file. */
+  sourcePart?: SourcePart | null;
   /** Whether the original is stored, so a failed bill can be read again from it. */
   has_source?: boolean;
   /** What a model's structure read left on the run (`/suggest-columns`). */

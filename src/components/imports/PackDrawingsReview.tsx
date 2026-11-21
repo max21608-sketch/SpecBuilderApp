@@ -51,10 +51,13 @@ import type { SwatchOrigin } from "@/components/imports/ObservationRows";
 import ConfigurationCard from "@/components/imports/ConfigurationCard";
 import { cardHasPending, configurationCards } from "@/lib/configuration-cards";
 import { describePartialConfirm } from "@/lib/confirm-partial";
+import { documentLabel, type SourcePart } from "@/lib/source-part";
 
 type Run = {
   importId: string;
   filename: string | null;
+  /** Which part of the file this read is for (open intake); null or absent for the whole file. */
+  sourcePart?: SourcePart | null;
   status: string;
   /** `pending` because the pack is at its read cap, not because nobody asked. */
   waitingForSlot?: boolean | null;
@@ -864,8 +867,8 @@ export default function PackDrawingsReview({
                 tone={run.status === "failed" ? "danger" : run.status === "parsed" ? "warn" : "plain"}
               >
                 <Td>
-                  <span className="block truncate" title={run.filename ?? undefined}>
-                    {run.filename ?? "Unnamed file"}
+                  <span className="block truncate" title={run.filename ? documentLabel(run.filename, run.sourcePart) : undefined}>
+                    {documentLabel(run.filename ?? "Unnamed file", run.sourcePart)}
                   </span>
                   {run.error && <span className="mt-0.5 block text-xs text-neutral-500">{run.error}</span>}
                 </Td>
@@ -910,7 +913,10 @@ export default function PackDrawingsReview({
                 <span className="font-medium">{entry.recordLabel ?? entry.recordId}</span>
                 {" — "}
                 {entry.cards
-                  .map((card) => `${card.itemCodeRaw ?? "?"} in ${card.filename ?? "an unnamed file"}`)
+                  .map((card) => {
+                    const part = runs.find((run) => run.importId === card.importId)?.sourcePart;
+                    return `${card.itemCodeRaw ?? "?"} in ${card.filename ? documentLabel(card.filename, part) : "an unnamed file"}`;
+                  })
                   .join(", ")}
               </li>
             ))}
@@ -983,7 +989,7 @@ export default function PackDrawingsReview({
         <div key={`${run.importId}:${card.id}`}>
           {/* Above the card, because the grouping is about the ITEM and the file
               is only where this page of it came from. */}
-          <p className="mt-4 text-xs text-neutral-500">{run.filename ?? "Unnamed file"}</p>
+          <p className="mt-4 text-xs text-neutral-500">{documentLabel(run.filename ?? "Unnamed file", run.sourcePart)}</p>
           {card.kind === "single" ? (
             <ItemCard
               item={card.item}

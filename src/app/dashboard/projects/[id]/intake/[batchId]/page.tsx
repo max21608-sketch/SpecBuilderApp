@@ -39,6 +39,7 @@ import { formatDay } from "@/lib/format-day";
 import { billFromEarlierPack, finishesFromEarlierPack, type ProjectDocument } from "@/lib/earlier-packs";
 import PageBody from "@/components/ui/PageBody";
 import BillColumnsAction, { isStuckBill } from "@/components/imports/BillColumnsAction";
+import { documentLabel, readStoredPart } from "@/lib/source-part";
 
 type Run = {
   id: string;
@@ -47,6 +48,8 @@ type Run = {
   status: string;
   error: string | null;
   filename: string | null;
+  /** Which part of the file this read is for (open intake), as stored; null for the whole file. */
+  sourcePart?: unknown;
   createdAt: string;
   /**
    * How many proposals on this document are still pending — from the staged
@@ -130,6 +133,20 @@ function Step({
       {action}
     </div>
   );
+}
+
+/** The document a read is of: the filename, and its part where it is one part of the file. */
+function nameOf(run: Run): string {
+  return documentLabel(run.filename ?? "Unnamed file", readStoredPart(run.sourcePart));
+}
+
+/**
+ * A step's documents, each once. Two reads of one file are two names
+ * (`Pack.pdf — pages 1–12`, `Pack.pdf — pages 13–30`), never the filename
+ * printed twice as though the same document had arrived two times.
+ */
+function namesOf(runs: Run[]): string {
+  return [...new Set(runs.map(nameOf))].join(", ");
 }
 
 function kindLabel(run: Run): string {
@@ -483,7 +500,7 @@ export default function IntakeBatchPage({
               <span className="text-neutral-500">{billFromEarlierPack(projectDocuments, batchId) ?? "Not in this pack."}</span>
             ) : (
               <>
-                {packSteps.bill.map((run) => run.filename ?? "Unnamed file").join(", ")} ·{" "}
+                {namesOf(packSteps.bill)} ·{" "}
                 {stepDone.bill ? "confirmed" : "not confirmed yet"}
                 {/* TWO BILLS IN ONE PACK — variance matrix §6.10.a row 9.
                     Both stage, and NOTHING pairs them: which is a revision of
@@ -521,7 +538,7 @@ export default function IntakeBatchPage({
               </span>
             ) : (
               <>
-                {packSteps.finishes.map((run) => run.filename ?? "Unnamed file").join(", ")} ·{" "}
+                {namesOf(packSteps.finishes)} ·{" "}
                 {finishesState.reviewed} reviewed, {finishesState.toReview} waiting for you
                 {finishesState.reading > 0 && <>, {finishesState.reading} still reading</>}
               </>
@@ -610,7 +627,7 @@ export default function IntakeBatchPage({
                   >
                     <Td>
                       <Link href={`/dashboard/imports/${run.id}`} className="text-blue-700 no-underline hover:underline">
-                        {run.filename ?? "Unnamed file"}
+                        {nameOf(run)}
                       </Link>
                       <span className="mt-0.5 block text-xs text-neutral-500">
                         {new Date(run.createdAt).toLocaleString("en-GB")}

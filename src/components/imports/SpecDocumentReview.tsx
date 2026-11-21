@@ -71,6 +71,7 @@ import {
   type DocumentKind,
 } from "@/lib/spec-vocab";
 import { attemptRestartable } from "@/lib/extraction-claim";
+import { documentLabel, type SourcePart } from "@/lib/source-part";
 
 export type SpecImport = {
   id: string;
@@ -95,6 +96,8 @@ export type SpecImport = {
   bws_project_number: string;
   project_name: string;
   filename: string | null;
+  /** Which part of the file this read is for (open intake); null or absent for the whole file. */
+  sourcePart?: SourcePart | null;
   parsed: StagedSpecDocument | null;
 };
 
@@ -458,7 +461,7 @@ export default function SpecDocumentReview({
     <>
       <PageHeader
         crumbs={[crumb]}
-        title={message?.subject?.trim() || run.filename || (isEmail ? "(no subject)" : "Specification document")}
+        title={message?.subject?.trim() || (run.filename ? documentLabel(run.filename, run.sourcePart) : null) || (isEmail ? "(no subject)" : "Specification document")}
         subtitle={
           <>
             {sender && <>{sender} · </>}
@@ -521,7 +524,7 @@ export default function SpecDocumentReview({
       undefined,
       <Card title={deferred ? "This document is waiting for a slot" : "This document has not been read"}>
         <p className="text-neutral-600">
-          {run.filename ?? "This document"} · {DOCUMENT_KIND_LABELS[run.document_kind] ?? run.document_kind}
+          {run.filename ? documentLabel(run.filename, run.sourcePart) : "This document"} · {DOCUMENT_KIND_LABELS[run.document_kind] ?? run.document_kind}
         </p>
         <div className="mt-2">
           <DocumentState run={{ status: run.status, waitingForSlot: run.waitingForSlot }} />
@@ -632,7 +635,7 @@ export default function SpecDocumentReview({
       <>
         <Card title={isEmail ? "Nothing to record" : "No proposals found"}>
           <p className="text-neutral-600">
-            The model read {isEmail ? "this email" : (run.filename ?? "this document")} and found nothing it could
+            The model read {isEmail ? "this email" : run.filename ? documentLabel(run.filename, run.sourcePart) : "this document"} and found nothing it could
             record as a specification value.{" "}
             {run.parsed?.documentNotes ? `It noted: \u201C${run.parsed.documentNotes}\u201D` : ""}
           </p>

@@ -24,6 +24,7 @@ import { Table, Td, Tr } from "@/components/ui/Table";
 import { formatDay } from "@/lib/format-day";
 import BillColumnsAction, { isStuckBill, type StuckBill } from "@/components/imports/BillColumnsAction";
 import ReadBillSpecsAction from "@/components/imports/ReadBillSpecsAction";
+import { documentLabel, type SourcePart } from "@/lib/source-part";
 
 export type DocumentRun = {
   id: string;
@@ -34,6 +35,8 @@ export type DocumentRun = {
   created_at: string;
   created_by: string | null;
   filename: string | null;
+  /** Which part of the file this read is for (open intake); null or absent for the whole file. */
+  sourcePart?: SourcePart | null;
   source_preserved: boolean;
   /** A bill waiting for somebody to say which column is which. */
   needs_columns?: boolean | null;
@@ -409,7 +412,7 @@ export default function DocumentsTab({
                             href={`/dashboard/imports/${run.id}`}
                             className="text-blue-700 no-underline hover:underline"
                           >
-                            {run.filename ?? "Unnamed file"}
+                            {documentLabel(run.filename ?? "Unnamed file", run.sourcePart)}
                           </Link>
                           <p className="text-xs text-neutral-500">
                             {(run.document_kind && KIND_LABELS[run.document_kind]) ??
