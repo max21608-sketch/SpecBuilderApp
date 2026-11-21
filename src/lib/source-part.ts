@@ -23,6 +23,7 @@
 //     may import a server module (`client-server-boundary.test.ts`).
 // ============================================================================
 import { z } from "zod";
+import { MAX_MODEL_PDF_PAGES } from "@/lib/upload-limits";
 
 export type PageRange = { from: number; to: number };
 
@@ -32,7 +33,15 @@ export type SourcePart =
   // Workbook sheets, by exact name.
   | { kind: "sheets"; sheets: string[] };
 
-export const MAX_PART_RANGES = 50;
+/**
+ * THE MOST DISJOINT RANGES ONE READABLE PDF CAN HOLD: every other page of the
+ * longest PDF a read takes. It was 50, and the upload's union of a file's
+ * parts can exceed 50 — a survey of 60 alternating parts, a person's choice
+ * per part — and the refusal named a limit nobody choosing parts could see
+ * or act on. At this bound the upload can never produce a part the route
+ * refuses; past it, the request is not one the upload made.
+ */
+export const MAX_PART_RANGES = Math.ceil(MAX_MODEL_PDF_PAGES / 2);
 export const MAX_PART_SHEETS = 200;
 const MAX_SHEET_NAME = 200;
 const MAX_PAGE = 100_000;

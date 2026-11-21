@@ -169,9 +169,11 @@ describe("SourcePartSchema", () => {
     expect(first({ kind: "rows" })).toBe("A part is either some pages of a PDF or some sheets of a workbook.");
     expect(first({ kind: "pages", ranges: [{ from: 1.5, to: 2 }] })).toBe("A page range must give its first page as a whole number.");
     expect(first({ kind: "pages", ranges: [{ from: 1, to: "2" }] })).toBe("A page range must give its last page as a whole number.");
-    expect(first({ kind: "pages", ranges: Array.from({ length: 51 }, (_, index) => ({ from: index + 1, to: index + 1 })) })).toBe(
-      "A part of a PDF can name at most 50 page ranges.",
-    );
+    // Fix 8c (2026-11-21): every other page of a 600-page PDF is the most a
+    // union of parts can name, so the upload can never be refused for it.
+    const alternate = (count: number) => Array.from({ length: count }, (_, index) => ({ from: 2 * index + 1, to: 2 * index + 1 }));
+    expect(first({ kind: "pages", ranges: alternate(300) })).toBeNull();
+    expect(first({ kind: "pages", ranges: alternate(301) })).toBe("A part of a PDF can name at most 300 page ranges.");
     expect(first({ kind: "sheets", sheets: Array.from({ length: 201 }, (_, index) => `S${index}`) })).toBe(
       "A part of a workbook can name at most 200 sheets.",
     );
