@@ -347,6 +347,16 @@ when nothing is left, it says so and offers "Back to the pack".
 - "N of these M items use a provisional checklist — their category has no gate
   model yet" means their TGQ count is a placeholder that treats every open
   question as blocking. That is a question for Matthew, not a fault.
+- **Type.** A category covering several kinds of item (armchairs, benches,
+  stools and sofas) shows a suggested type with the words it read, e.g. "Sofas
+  ?" — "The name says “sofa”." Press it to accept, or "Choose type" / "Change
+  type" to pick another; "Any of them" goes back to asking every kind's
+  questions. A phase tab offers "Accept N suggested types". A typed sofa's TGQ
+  no longer counts "Swivel mechanism"; an item nobody has typed counts every
+  kind's questions, as before.
+- "Provisional cabinetry gate model, drafted by AI on 20 Nov 2026, not yet
+  confirmed by Matthew" beside a gate view or a TGQ figure means those gate
+  rules are a draft. Use them; Matthew may still change them.
 
 ### 5.8 Fill in what we know, then chase
 Project → **"Fill in ourselves"**. Internal; nothing is sent. Open an item (the
