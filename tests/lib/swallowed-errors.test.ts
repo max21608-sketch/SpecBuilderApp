@@ -124,10 +124,10 @@ describe("the lower-severity siblings", () => {
     // One logged load, used by every place that reads a bill (prod-ready
     // review F4 moved the two loads into `billReadingOptions`; open intake
     // added the per-part bill reads and the bill-or-schedule probe, which go
-    // through the same one load): none may load the registers on its own,
-    // unlogged.
+    // through the same one load, as does C1 applied per part since
+    // 2026-11-21): none may load the registers on its own, unlogged.
     expect(text.match(/\.catch\(registersUnread\)/g)).toHaveLength(1);
-    expect(text.match(/await billReadingOptions\(\)/g)).toHaveLength(4);
+    expect(text.match(/await billReadingOptions\(\)/g)).toHaveLength(5);
     expect(text.match(/loadBoqReadingRegisters\(/g)).toHaveLength(1);
   });
 });
