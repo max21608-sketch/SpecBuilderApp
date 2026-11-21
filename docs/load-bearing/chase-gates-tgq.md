@@ -849,7 +849,9 @@ GIVES it. `requirements.audience` is `in_house` | `cam` | `client`, seed data;
   chased_at trap) and never a write to `requirements` (one project's decision
   is not the cheat sheet's). It opens no change set — it writes no
   specification content — and is accounted for by its audit trigger (insert to
-  move, delete to move back) and by the row saying so on screen. It locks the
+  move, delete to move back; the row is stamped `updated_by` with the person
+  putting it back BEFORE the delete, because `write_audit()` takes a delete's
+  actor from the old row and B's "Put it back" was logged as A — review A4) and by the row saying so on screen. It locks the
   project, as the generate route does, so a chase reads one audience.
 - **An external recipient reads the client wording and NO BWS field name**
   (`recipient` on `buildChaseEmail`, decided off the contact row's role; absent

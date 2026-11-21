@@ -17,10 +17,13 @@ import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 
+// Mutable, so a test can press as a second person ("Put it back" is audited
+// under whoever pressed it).
+const session = vi.hoisted(() => ({ email: "__qa@example.test" }));
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
     id: "00000000-0000-0000-0000-000000000001",
-    email: "__qa@example.test",
+    email: session.email,
     name: "QA User",
     role: "admin",
   }),
@@ -318,6 +321,30 @@ describeIfDb("chase audiences (0062)", () => {
     expect(deleted.rows[0].n).toBe(1);
     const res = await generate(designerId, [comId, inHouseId]);
     expect(res.status).toBe(409);
+  });
+
+  // AUDIT A4 OF THE CHASE REVIEW: write_audit() takes a DELETE's actor from
+  // the old row's updated_by, so B putting back A's move was logged as A.
+  it("audits Put it back under the person who pressed it, not the one who moved it", async () => {
+    session.email = "__qa-mover@example.test";
+    try {
+      expect((await route({ questionKey: "prompt:__qa toe agreement", askClient: true })).status).toBe(200);
+      session.email = "__qa-restorer@example.test";
+      expect((await route({ questionKey: "prompt:__qa toe agreement", askClient: false })).status).toBe(200);
+      const rows = await client.query(
+        `select action, changed_by from audit_log
+          where table_name = 'project_question_routes' and coalesce(old_values, new_values)->>'project_id' = $1
+            and coalesce(old_values, new_values)->>'question_key' = 'prompt:__qa toe agreement'
+          order by id`,
+        [projectId],
+      );
+      const deleted = rows.rows.filter((row) => row.action === "delete");
+      expect(deleted).toHaveLength(1);
+      expect(deleted[0].changed_by).toBe("__qa-restorer@example.test");
+      expect(rows.rows.find((row) => row.action === "insert")?.changed_by).toBe("__qa-mover@example.test");
+    } finally {
+      session.email = "__qa@example.test";
+    }
   });
 
   it("refuses to move a question nobody on the project asks, one already the client's, or one never moved", async () => {

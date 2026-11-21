@@ -89,6 +89,16 @@ export async function setQuestionRoute(
     return { questionKey, audience: "client", seedAudience };
   }
 
+  // THE DELETE IS AUDITED UNDER WHOEVER PRESSED IT. `write_audit()` takes a
+  // delete's actor from the OLD row's `updated_by` (the actor is a column,
+  // never session state — Neon's HTTP driver kills SET LOCAL), so the row is
+  // stamped with this person first, in the same transaction. Without it, B
+  // putting back A's move was logged as A deleting it — and the audit trigger
+  // is this write's only accounting (chase review A4, 2026-11-21).
+  await txn`
+    update project_question_routes set updated_by = ${actor}
+     where project_id = ${projectId} and question_key = ${questionKey}
+  `;
   const removed = await txn`
     delete from project_question_routes where project_id = ${projectId} and question_key = ${questionKey} returning id
   `;
