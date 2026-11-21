@@ -35,16 +35,30 @@ describe("the project-wide checklist section", () => {
     expect([...sections]).toContain(PROJECT_WIDE_SECTION);
   });
 
-  it("holds the three questions decision C answers once per PROJECT (2026-11-20), on every sheet that asks them", () => {
+  it("holds the two questions decision C answers once per PROJECT (2026-11-20), on every sheet that asks them", () => {
     const requirements = readFileSync(join(SEED_DIR, "0003_requirements.sql"), "utf8").split("\n");
     for (const key of [
-      "field:74",
       "q:visible-fixinings-standard-ral-9005-powder-coated",
       "q:the-client-is-expecting-exact-copy-from-their-drawing-or-there-is-possibility-of-sugestion-bw-standards-sabos-metal-bars-curved-back-leg-thickness-etc",
     ]) {
       const rows = requirements.filter((line) => line.includes(`'${key}')`));
       expect(rows.length, key).toBeGreaterThan(0);
       for (const row of rows) expect(row, key).toContain(`'${PROJECT_WIDE_SECTION}', `);
+    }
+  });
+
+  // "Interliner required?" went back to a per-item question (review of the
+  // chase build, 2026-11-21): six CABINETRY sheets ask it too, and one press on
+  // the project card wrote an interliner onto every unanswered table and
+  // wardrobe, into the BWS "FR Interliner" cell and the quote's FR INTERLINER
+  // line. It is per item, in its original section, on every sheet.
+  it("keeps Interliner required? (field:74) per item, in Build details, on every sheet", () => {
+    const requirements = readFileSync(join(SEED_DIR, "0003_requirements.sql"), "utf8").split("\n");
+    const rows = requirements.filter((line) => line.includes(`'field:74')`));
+    expect(rows.length).toBe(15);
+    for (const row of rows) {
+      expect(row).toContain(`'Build details', `);
+      expect(row).not.toContain(`'${PROJECT_WIDE_SECTION}', `);
     }
   });
 });

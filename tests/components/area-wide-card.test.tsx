@@ -66,4 +66,23 @@ describe("AreaWideCard", () => {
     expect(body).toMatchObject({ key: question.key, value: "Indoor", state: "confirmed" });
     expect(body.seen).toHaveLength(2);
   });
+
+  // CHASE REVIEW C1: an item whose field a spec holds is listed with what the
+  // file ships, unticked, and is not counted in the press.
+  it("lists an item whose field a spec holds, with what the file ships, and leaves it out of the press", async () => {
+    const held = { ...row(3), state: "tbc", value: "Outdoor TBC", specShips: "Outdoor TBC", projection: true };
+    apiFetch.mockImplementation(async (_url: string, init?: { method?: string }) =>
+      init?.method === "POST"
+        ? { ok: true, data: { written: 2, overridden: 0, records: 2 } }
+        : { ok: true, data: { questions: [{ ...question, rows: [row(1), row(2), held], items: 3, outstanding: 3 }] } },
+    );
+    const user = userEvent.setup();
+    render(<AreaWideCard projectId="p1" />);
+    await user.click(await screen.findByText("Answer"));
+    await user.type(screen.getByPlaceholderText("Value"), "Indoor");
+    await user.tab();
+    expect(screen.getByRole("button", { name: /^Save on 2 items/ })).toBeInTheDocument();
+    expect(screen.getByText(/the file ships the spec, “Outdoor TBC”/)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Replace the answer on T1-003" })).not.toBeChecked();
+  });
 });

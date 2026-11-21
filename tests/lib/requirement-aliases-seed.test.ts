@@ -113,4 +113,32 @@ describe("seed 0016 — which drawing labels answer which question", () => {
       expect(landed === null || !aliased.has(landed), `${label} -> ${landed}`).toBe(true);
     }
   });
+
+  // A LABEL THAT NAMES TWO THINGS IS NOT ONE OF THEM (review of the chase
+  // build, 2026-11-21). The overlap score is over the SMALLER word set, so the
+  // alias "Seat build" scored 1.0 against "Seat & back build" and landed it,
+  // confidently, on Seat upholstery build alone — the back's build lost. The
+  // alias is gone: it added nothing the prompt does not already land ("SEAT
+  // BUILD" and "SEAT - BUILD" reach field 11 through "Seat upholstery build"
+  // with no alias at all), and its only other effect was this wrong landing.
+  it("does NOT land a seat-and-back build on the seat question alone", () => {
+    for (const label of ["Seat & back build", "Seat and back build", "Back & seat build"]) {
+      expect(landsOn(label, "Sprung"), label).not.toBe("field:11");
+      expect(landsOn(label, "Sprung"), label).not.toBe("field:25");
+    }
+    expect(aliases.some((a) => a.seedKey === "field:11")).toBe(false);
+  });
+
+  it("still lands SEAT BUILD on the seat question, by its prompt", () => {
+    expect(landsOn("SEAT BUILD", "Sprung")).toBe("field:11");
+    expect(landsOn("SEAT - BUILD", "Sprung")).toBe("field:11");
+    expect(landsOn("SEAT BUILD", "Sprung", false)).toBe("field:11");
+  });
+
+  // KNOWN MISS, left alone on purpose: normaliseName does not split "/", so
+  // "STUDS/NAILING" with no spaces is one word and reaches nothing. A miss is
+  // a row a person places; a wrong landing is one nobody questions.
+  it("leaves STUDS/NAILING with no spaces unplaced — a miss, never a wrong landing", () => {
+    expect(landsOn("STUDS/NAILING", "Antique brass")).toBeNull();
+  });
 });

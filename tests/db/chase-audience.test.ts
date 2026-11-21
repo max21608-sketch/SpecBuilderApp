@@ -17,10 +17,13 @@ import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 
+// Mutable, so a test can press as a second person ("Put it back" is audited
+// under whoever pressed it).
+const session = vi.hoisted(() => ({ email: "__qa@example.test" }));
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
     id: "00000000-0000-0000-0000-000000000001",
-    email: "__qa@example.test",
+    email: session.email,
     name: "QA User",
     role: "admin",
   }),
@@ -265,6 +268,11 @@ describeIfDb("chase audiences (0062)", () => {
     const opened = inventory.drafts.find((d: { id: string }) => d.id === draftId);
     expect(opened.body).toBe(body);
     expect(opened.items.every((item: { staleReasons: string[] }) => item.staleReasons.length === 0)).toBe(true);
+    // FLAGGED, NOT SILENT, AND NOT STALE (review A1): the in-house line is
+    // named as ours to answer, the client line is not, and nothing is refused.
+    expect(opened.nowOursCount).toBe(1);
+    const flags = Object.fromEntries(opened.items.map((item: { requirementId: string; nowOurs: boolean }) => [item.requirementId, item.nowOurs]));
+    expect(flags).toEqual({ [inHouseId]: true, [comId]: false });
 
     // DOWNLOAD: the message file carries the stored body, byte for byte.
     const { GET: eml } = await import("@/app/api/drafts/[id]/eml/route");
@@ -287,18 +295,20 @@ describeIfDb("chase audiences (0062)", () => {
     expect(Number(edited.template_version)).toBe(4);
   });
 
-  it("moves ONE question to the client for ONE project, audited, and back", async () => {
+  it("moves ONE CAM question to the client for ONE project, audited, and back", async () => {
     const { loadOutstanding } = await import("@/lib/chase-drafts");
     const audience = async (pid: string, rid: string) =>
-      (await loadOutstanding(pid)).find((q) => q.requirementId === inHouseId && q.recordId === rid)!;
+      (await loadOutstanding(pid)).find((q) => q.requirementId === camId && q.recordId === rid)!;
 
-    expect((await audience(projectId, recordId)).audience).toBe("in_house");
-    const moved = await route({ questionKey: "field:191", askClient: true });
+    expect((await audience(projectId, recordId)).audience).toBe("cam");
+    const moved = await route({ questionKey: "prompt:__qa toe agreement", askClient: true });
     expect(moved.status).toBe(200);
+    // WHERE IT WENT, truly (review A3): the designer whose chase now ticks it.
+    expect(await moved.json()).toMatchObject({ chasedTo: [{ contactName: "__QA Designer", items: 1 }], unassigned: 0 });
     const here = await audience(projectId, recordId);
-    expect(here).toMatchObject({ audience: "client", seedAudience: "in_house" });
+    expect(here).toMatchObject({ audience: "client", seedAudience: "cam" });
     // Another project asking the same question is untouched.
-    expect((await audience(otherProjectId, otherRecordId)).audience).toBe("in_house");
+    expect((await audience(otherProjectId, otherRecordId)).audience).toBe("cam");
     const audit = await client.query(
       `select action from audit_log where table_name = 'project_question_routes' and new_values->>'project_id' = $1`,
       [projectId],
@@ -306,18 +316,84 @@ describeIfDb("chase audiences (0062)", () => {
     expect(audit.rows.map((row) => row.action)).toEqual(["insert"]);
 
     // Now a designer may be asked it.
-    expect((await generate(designerId, [comId, inHouseId])).status).toBe(201);
+    expect((await generate(designerId, [comId, camId])).status).toBe(201);
 
     // And back: the route is deleted, the delete is audited, and it is refused again.
-    expect((await route({ questionKey: "field:191", askClient: false })).status).toBe(200);
-    expect((await audience(projectId, recordId)).audience).toBe("in_house");
+    expect((await route({ questionKey: "prompt:__qa toe agreement", askClient: false })).status).toBe(200);
+    expect((await audience(projectId, recordId)).audience).toBe("cam");
     const deleted = await client.query(
       `select count(*)::int as n from audit_log where table_name = 'project_question_routes' and action = 'delete' and old_values->>'project_id' = $1`,
       [projectId],
     );
     expect(deleted.rows[0].n).toBe(1);
-    const res = await generate(designerId, [comId, inHouseId]);
+    const res = await generate(designerId, [comId, camId]);
     expect(res.status).toBe(409);
+  });
+
+  // Decision E: a question worded for us is never sent. "Ask the client" is
+  // the CAM's way out (decision D), so an in-house question is refused in
+  // words and nothing is stored (chase review A2).
+  // REVIEW A1, the third route into the state: a colleague's draft holds
+  // in-house lines by right; re-role the colleague to a designer and those
+  // lines are flagged on the card, read off the LIVE contact row.
+  it("flags a colleague's in-house lines once the colleague is re-roled to a designer, and refuses nothing", async () => {
+    expect((await generate(colleagueId, [comId, inHouseId])).status).toBe(201);
+    const { GET } = await import("@/app/api/drafts/route");
+    const open = async () =>
+      ((await (await GET(new Request(`http://localhost/api/drafts?projectId=${projectId}`))).json()).drafts as {
+        contact_id: string;
+        status: string;
+        nowOursCount: number;
+        staleCount: number;
+        items: { requirementId: string; nowOurs: boolean }[];
+      }[]).find((d) => d.contact_id === colleagueId && d.status === "draft")!;
+    expect((await open()).nowOursCount).toBe(0);
+    await client.query(`update project_contacts set role = 'designer', updated_by = 'qa' where id = $1`, [colleagueId]);
+    try {
+      const flagged = await open();
+      expect(flagged.nowOursCount).toBe(1);
+      expect(flagged.staleCount).toBe(0);
+      expect(flagged.items.find((item) => item.requirementId === inHouseId)?.nowOurs).toBe(true);
+    } finally {
+      await client.query(`update project_contacts set role = 'internal', updated_by = 'qa' where id = $1`, [colleagueId]);
+    }
+  });
+
+  it("refuses to move an IN-HOUSE question to the client, in words, and stores nothing", async () => {
+    const res = await route({ questionKey: "field:191", askClient: true });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe("in_house");
+    expect(body.error).toMatch(/in-house/i);
+    expect(body.error).toMatch(/never sent/);
+    const rows = await client.query(`select count(*)::int as n from project_question_routes where project_id = $1`, [projectId]);
+    expect(rows.rows[0].n).toBe(0);
+  });
+
+  // AUDIT A4 OF THE CHASE REVIEW: write_audit() takes a DELETE's actor from
+  // the old row's updated_by, so B putting back A's move was logged as A.
+  it("audits Put it back under the person who pressed it, not the one who moved it", async () => {
+    const mark = Number((await client.query(`select coalesce(max(id), 0) as id from audit_log`)).rows[0].id);
+    session.email = "__qa-mover@example.test";
+    try {
+      expect((await route({ questionKey: "prompt:__qa toe agreement", askClient: true })).status).toBe(200);
+      session.email = "__qa-restorer@example.test";
+      expect((await route({ questionKey: "prompt:__qa toe agreement", askClient: false })).status).toBe(200);
+      const rows = await client.query(
+        `select action, changed_by from audit_log
+          where table_name = 'project_question_routes' and coalesce(old_values, new_values)->>'project_id' = $1
+            and coalesce(old_values, new_values)->>'question_key' = 'prompt:__qa toe agreement'
+            and id > $2
+          order by id`,
+        [projectId, mark],
+      );
+      const deleted = rows.rows.filter((row) => row.action === "delete");
+      expect(deleted).toHaveLength(1);
+      expect(deleted[0].changed_by).toBe("__qa-restorer@example.test");
+      expect(rows.rows.find((row) => row.action === "insert")?.changed_by).toBe("__qa-mover@example.test");
+    } finally {
+      session.email = "__qa@example.test";
+    }
   });
 
   it("refuses to move a question nobody on the project asks, one already the client's, or one never moved", async () => {

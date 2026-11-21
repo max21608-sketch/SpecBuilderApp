@@ -94,6 +94,8 @@ type Question = {
   requirementKind: "spec_field" | "readiness";
   /** Who it is for (0062). Only a client question may go to a designer. */
   audience: QuestionAudience;
+  /** Who the cheat sheet says answers it; a person's "Ask the client" makes the two differ. */
+  seedAudience: QuestionAudience;
   fieldLabel: string | null;
   state: AnswerState;
   tier: QuestionTier | null;

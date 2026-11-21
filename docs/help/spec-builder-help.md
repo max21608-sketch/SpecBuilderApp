@@ -376,9 +376,10 @@ when nothing is left, it says so and offers "Back to the pack".
   (its configurations are the items), offer no type: the configurations do.
 - **Fabric 1, 2, 3.** The screens call BWS's "COM 1/2/3" fields "Fabric 1/2/3",
   with "BWS: COM 1" in small type beside them. The BWS file still says COM 1.
-  On the quote a fabric reads "FABRIC:", unless its finish in the library is
-  ticked **"Customer’s own material"** (Finishes → Edit, with a reason like any
-  edit), when it reads "COM:".
+  On the quote a fabric reads "FABRIC:", unless its code in the library is
+  ticked **"Customer’s own material"** (Finishes → Edit; the tick always needs
+  a reason, even on a TBC finish), when it reads "COM:" — on every item carrying that code, linked or
+  not. A fabric where BW's own standard is in force always reads "FABRIC:".
 - "Provisional cabinetry gate model, drafted by AI on 20 Nov 2026, not yet
   confirmed by Matthew" beside a gate view or a TGQ figure means those gate
   rules are a draft. Use them; Matthew may still change them.
@@ -393,13 +394,19 @@ answers one question across many items.
 - **Who answers it.** Every question is the client's, the CAM's or ours
   ("In-house"). "Filter by who answers" → "CAM only" is the list to take to
   the CAM; it hides the rest and changes no count. A CAM or in-house question
-  carries its label; if nobody here knows it, press **"Ask the client"** and,
-  on this project only, it goes in the chase. It then says "Asked of the
-  client on this project", with **"Put it back"**.
+  carries its label. If nobody here knows a **CAM** question, press **"Ask
+  the client"** and, on this project only, it goes in the chase: the next
+  chase to the designer of each item that asks it lists it, already ticked,
+  and the message says whose chase that is (an item with no designer to ask
+  stays under "Nobody assigned"). The row then says "Asked of the client on
+  this project", with **"Put it back"**. An
+  **in-house** question has no such button: it is ours to answer and is never
+  sent to the client.
 - **"By area — answered once for each area".** Indoor or outdoor, floor type,
   wall build and "fully outdoor or partially protected" are answered once for
   an area such as "Restaurant" and written to every item in it. An item that
-  already holds a different answer is left alone unless you tick it (and say
+  already holds a different answer — or has a spec that fills the field, shown
+  as "the file ships the spec, …" — is left alone unless you tick it (and say
   why). An item with no area is answered on its own.
 - "Provisional cabinetry gate model, drafted by AI…" at the top means some of
   the TGQ marks on this screen come from that draft.
@@ -423,7 +430,11 @@ Project → **"Chase N"**.
    client questions." Untick it, or answer it on the Fill-in screen. A
    designer's email shows each question in the client's words ("Fabric 1"),
    never the BWS field name; an area question says "one answer for each
-   area". A draft made before this works as it did.
+   area". A draft made before this works as it did — but if it holds a
+   question that is now ours, the card says "N questions in this draft are
+   now ours to answer — remove them, or generate a new chase", with each one
+   named and **Remove** beside it. It still downloads and can still be
+   marked sent.
 3. **"Open in Outlook (.eml)"** downloads the draft. Open it, check it, and
    send it from your own Outlook. The app sends nothing.
 4. Back in the app press **"I've sent this"** → "Yes, I sent it". This is what
@@ -640,6 +651,7 @@ email to Max with the document name: the reading may need improving.
 | "…the category cannot change on this item. Keep it, and answer those questions where they are." | Its questions were already chased. By design. If the category is truly wrong, email Max |
 | "Nobody can be asked yet." | Add a contact whose "Designer code" matches the bill's (5.8) |
 | "I've sent this" is greyed out | Download the draft first with "Open in Outlook (.eml)" |
+| "N questions in this draft are now ours to answer — remove them, or generate a new chase" | Press Remove beside each, or draft the email again. Nothing is refused: the question changed hands (a re-seed, "Put it back", or the contact made a designer) after the draft was written |
 | "N of the M questions in this email changed after it was written. Regenerate the draft…" | Draft the email again, download that one, send that |
 | "This draft changed while you were looking at it. Reload, re-download the .eml, and confirm again." | Do exactly that |
 | "No project chosen. A chase is about one project." | Open the project and press "Chase" there |
@@ -659,9 +671,10 @@ Things that look wrong and are not:
   items with something outstanding. Hover the number for what it counts.
 - *"Product code — Nowhere to record it"* on the Gates tab → known: the
   matrix asks for it and the app has no field yet. Not a fault.
-- *Project-wide questions (site access, assembly guide, interliner / fire
-  standard, visible fixings, "exact copy or BW standards?")* → answered once
-  on the project ("Answer on the project"), not on every item.
+- *Project-wide questions (site access, assembly guide, visible fixings,
+  "exact copy or BW standards?")* → answered once on the project ("Answer on
+  the project"), not on every item. "Interliner required?" is NOT one of
+  them: it is answered on each item, because tables and wardrobes ask it too.
 
 ### 6.7 Anything, anywhere
 

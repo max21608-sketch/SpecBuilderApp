@@ -19,6 +19,7 @@ function question(over: Partial<SelectableQuestion> = {}): SelectableQuestion {
     waiting: null,
     contactId: "c-1",
     audience: over.audience ?? (over.requirementKind === "readiness" ? "in_house" : "client"),
+    seedAudience: over.seedAudience ?? over.audience ?? (over.requirementKind === "readiness" ? "in_house" : "client"),
     ...over,
   };
 }
@@ -46,6 +47,28 @@ describe("defaultSelection", () => {
     const access = question({ section: "Project / commercial" });
     expect(defaultSelection([access], "c-1").size).toBe(0);
     expect(selectionSummary([access], "c-1").preselected).toBe(0);
+  });
+
+  // CHASE REVIEW A3, 2026-11-21: a CAM question a person sent to the client
+  // ("Ask the client") is IN the next chase. All five CAM questions are
+  // project-wide, which is never preselected, so "Moved to the chase" put it
+  // in no chase. A person's explicit decision outranks that default, at any
+  // tier — and a reply already awaited still holds it back.
+  it("ticks a CAM question a person moved to the client, though it is project-wide and not TGQ", () => {
+    const moved = question({
+      requirementKind: "readiness",
+      audience: "client",
+      seedAudience: "cam",
+      section: "Project / commercial",
+      tier: "later",
+    });
+    expect(keys(defaultSelection([moved], "c-1"))).toEqual([selectionKey(moved.recordId, moved.requirementId)]);
+    expect(selectionSummary([moved], "c-1")).toMatchObject({ preselected: 1, alsoOutstanding: 0, awaitingReply: 0 });
+    // Not for somebody else's chase, and not when a reply is already awaited.
+    expect(defaultSelection([moved], "c-2").size).toBe(0);
+    const asked = { ...moved, waiting: { draftId: "d-1", sentAt: null, contactName: "Claire" } };
+    expect(defaultSelection([asked], "c-1").size).toBe(0);
+    expect(selectionSummary([asked], "c-1")).toMatchObject({ preselected: 0, awaitingReply: 1 });
   });
 
   it("never ticks a question somebody is already waiting on a reply for", () => {

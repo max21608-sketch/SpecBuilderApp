@@ -38,6 +38,7 @@ import { isQuestionTier } from "@/lib/tgq";
 import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { loadProjectSummary } from "@/lib/project-summary";
 import { packContactGroups } from "@/lib/chase-inventory";
+import { audienceRefusal } from "@/lib/chase-audience";
 
 export const dynamic = "force-dynamic";
 
@@ -162,7 +163,7 @@ export async function GET(request: Request): Promise<Response> {
            d.contact_id, d.contact_version, d.generated_at, d.version,
            d.manually_edited_at, d.manually_edited_by,
            d.sent_at, d.sent_by, d.voided_at, d.voided_by, d.void_reason,
-           c.name as contact_name, c.email as contact_email
+           c.name as contact_name, c.email as contact_email, c.role as contact_role
     from email_drafts d
     join project_contacts c on c.id = d.contact_id
     where d.project_id = ${projectId} and d.status <> 'superseded'
@@ -187,6 +188,11 @@ export async function GET(request: Request): Promise<Response> {
     projectId,
     itemRows.map((row) => ({ recordId: String(row.record_id), requirementId: String(row.requirement_id) })),
   );
+
+  // THE LIVE CONTACT ROW'S ROLE, per draft: what A1 reads to flag a line
+  // that is no longer the client's (a colleague re-roled to designer is the
+  // third way a draft comes to hold one).
+  const roleByDraft = new Map(draftRows.map((row) => [String(row.id), row.contact_role === null || row.contact_role === undefined ? null : String(row.contact_role)]));
 
   const itemsByDraft = new Map<string, unknown[]>();
   for (const row of itemRows) {
@@ -229,6 +235,13 @@ export async function GET(request: Request): Promise<Response> {
       tierChanged: isQuestionTier(row.tier) && live?.tier != null && live.tier !== row.tier,
       liveTier: live?.tier ?? null,
       staleReasons,
+      // NO LONGER THE CLIENT'S (chase review A1, 2026-11-21): the line asks an
+      // in-house or CAM question of a designer or a client — seed 0015 after
+      // the draft, "Put it back", or the contact re-roled. ADVISORY, never a
+      // stale reason, exactly like `tierChanged`: a draft written before the
+      // rule must still open, edit, download and be marked sent. The card
+      // names each one with its Remove beside it.
+      nowOurs: live !== null && audienceRefusal(live, roleByDraft.get(String(row.draft_id))) !== null,
     });
     itemsByDraft.set(String(row.draft_id), list);
   }
@@ -244,6 +257,8 @@ export async function GET(request: Request): Promise<Response> {
         String(row.status) === "draft"
           ? items.filter((item) => ((item as { staleReasons: string[] }).staleReasons ?? []).length > 0).length
           : 0,
+      // Same rule: only an editable draft's lines can be removed.
+      nowOursCount: String(row.status) === "draft" ? items.filter((item) => (item as { nowOurs: boolean }).nowOurs).length : 0,
     };
   });
 

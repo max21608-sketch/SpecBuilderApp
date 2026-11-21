@@ -38,6 +38,7 @@ import {
 import { requireUuid, requireWriter } from "@/lib/route-guards";
 import { exportAnswers, loadRecordAtoms, scopeForAtoms } from "@/lib/record-atoms";
 import { cellsByField, specShipsInstead } from "@/lib/bws-export";
+import { loadQuestionRoutes, routedAudience } from "@/lib/question-audience-routes";
 
 export const dynamic = "force-dynamic";
 
@@ -184,6 +185,20 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     where q.category_id = (select category_id from spec_records where id = ${id})
     order by q.sort_order
   `;
+
+  // WHO ANSWERS IT ON THIS PROJECT (chase review A5): the seed's audience, or
+  // a person's "Ask the client" over it, read by the same lookup the chase
+  // reads, so the gate rows' "Why" and "Chase the n" cannot disagree.
+  const questionRoutes = await loadQuestionRoutes(sql, [String(record.project_id)]);
+  for (const row of answers) {
+    row.audience = routedAudience(questionRoutes, String(record.project_id), {
+      requirementId: String(row.requirement_id),
+      prompt: String(row.prompt ?? ""),
+      jsonId: row.json_id === null || row.json_id === undefined ? null : Number(row.json_id),
+      localKey: row.local_key === null || row.local_key === undefined ? null : String(row.local_key),
+      audience: row.audience,
+    }).audience;
+  }
 
   const categories = await sql`
     select id, slug, family, name, requirements_authored from item_categories order by family, sort_order

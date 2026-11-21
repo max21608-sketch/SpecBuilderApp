@@ -50,6 +50,9 @@ import { snapshotRecords } from "@/lib/record-snapshot";
 import { lockRecords } from "@/lib/record-lock";
 import { DIMENSIONS_JSON_ID } from "@/lib/promote-answers";
 import { foldArea } from "@/lib/area-filter";
+import { planProjectWide, type ProjectWideRow } from "@/lib/project-wide-plan";
+import { loadRecordAtoms, scopeForAtoms, exportAnswers } from "@/lib/record-atoms";
+import { cellsByField } from "@/lib/bws-export";
 
 /**
  * WHERE ONE ANSWER FANS OUT (decision C of 2026-11-20).
@@ -77,20 +80,9 @@ export function areaQuestionKey(area: string, questionKey: string): string {
 
 type Exec = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Row[]>;
 
-/** One item asking one project-wide question. */
-export type ProjectWideRow = {
-  recordId: string;
-  recordLabel: string;
-  itemDescription: string;
-  requirementId: string;
-  /** Null where the checklist row was never created. The write creates it. */
-  answerId: string | null;
-  answerVersion: number | null;
-  state: AnswerState;
-  value: string | null;
-  /** Null where the record has no level under the fallback model. */
-  tier: QuestionTier | null;
-};
+// The row, the plan and its rule live in `project-wide-plan.ts`, which the
+// card imports too (chase review C1): one decision, never a copy of it.
+export { planProjectWide, heldBySpec, type ProjectWidePlan, type ProjectWideRow } from "@/lib/project-wide-plan";
 
 export type ProjectWideQuestion = {
   /** `questionGroupKey`: BWS field, then local key, then folded prompt. An area card prefixes its folded area. */
@@ -118,8 +110,6 @@ export type ProjectWideQuestion = {
 };
 
 const isSettledState = (state: string) => state === "confirmed" || state === "na";
-const sameAnswer = (row: { state: string; value: string | null }, value: string | null, state: AnswerState) =>
-  row.state === state && (row.value ?? "").trim() === (value ?? "").trim();
 
 /**
  * Every project-wide question asked by an item in the export's scope, grouped
@@ -144,7 +134,13 @@ async function loadFanOut(exec: Exec, projectId: string, scope: FanOutScope): Pr
            q.id as requirement_id, q.prompt, q.tgq_levels, q.local_key, q.sort_order,
            f.json_id, f.name as field_name,
            a.id as answer_id, a.version as answer_version,
-           coalesce(a.state, 'missing') as state, a.value
+           coalesce(a.state, 'missing') as state, a.value, a.source_kind,
+           -- A SPEC THAT MAY FILL THIS FIELD (review C1): the composer decides
+           -- below; this only spares it the records with none.
+           (q.spec_field_id is not null and exists (
+              select 1 from record_attributes ra
+               where ra.record_id = r.id and ra.spec_field_id = q.spec_field_id
+                 and ra.status = 'active' and ra.attr_group <> 'dimension')) as spec_candidate
       from spec_records r
       join projects p on p.id = r.project_id
       join spec_runs run on run.id = r.run_id
@@ -164,6 +160,20 @@ async function loadFanOut(exec: Exec, projectId: string, scope: FanOutScope): Pr
               r.variant_ordinal nulls first, r.id
   `;
   const matrices = await loadTgqMatrices(exec);
+
+  // WHAT THE FILE SHIPS WHERE A SPEC FILLS THE FIELD (review C1), by the
+  // export's own composer over the export's own atoms — the cell the record
+  // checklist's `specShipsInstead` reads — for the records that hold one.
+  const candidates = [...new Set(rows.filter((row) => row.spec_candidate === true).map((row) => String(row.record_id)))];
+  const atoms = candidates.length > 0 ? await loadRecordAtoms(exec, candidates) : new Map();
+  const cellsByRecord = new Map(
+    [...atoms.entries()].map(([id, atom]) => [id, cellsByField(scopeForAtoms(atom), atom.record, atom.attributes, exportAnswers(atom))]),
+  );
+  const shipsFor = (recordId: string, jsonId: number | null): string | null => {
+    if (jsonId === null) return null;
+    const cell = cellsByRecord.get(recordId)?.get(jsonId);
+    return cell && cell.source.kind === "attribute" ? cell.value : null;
+  };
 
   const groups = new Map<string, ProjectWideQuestion>();
   for (const row of rows) {
@@ -221,6 +231,8 @@ async function loadFanOut(exec: Exec, projectId: string, scope: FanOutScope): Pr
       state,
       value: row.value === null || row.value === undefined ? null : String(row.value),
       tier,
+      specShips: shipsFor(String(row.record_id), jsonId),
+      projection: row.source_kind === "attribute",
     });
   }
 
@@ -251,35 +263,6 @@ async function loadFanOut(exec: Exec, projectId: string, scope: FanOutScope): Pr
 
 /** What the screen saw of one row, sent back so the write can refuse a moved set. */
 export type SeenRow = { recordId: string; requirementId: string; answerId: string | null; version: number | null };
-
-export type ProjectWidePlan = {
-  /** Missing or TBC: written. */
-  write: ProjectWideRow[];
-  /** Settled with a DIFFERENT answer and ticked: written, with a reason. */
-  override: ProjectWideRow[];
-  /** Settled with a different answer and NOT ticked: left alone, and named. */
-  leftAlone: ProjectWideRow[];
-  /** Already says exactly this: nothing to do. */
-  same: ProjectWideRow[];
-};
-
-/**
- * Which rows an answer would touch. Pure, so the card's "what will happen"
- * sentence and the write are the same decision.
- */
-export function planProjectWide(
-  question: Pick<ProjectWideQuestion, "rows">,
-  { value, state, overrides }: { value: string | null; state: AnswerState; overrides: ReadonlySet<string> },
-): ProjectWidePlan {
-  const plan: ProjectWidePlan = { write: [], override: [], leftAlone: [], same: [] };
-  for (const row of question.rows) {
-    if (sameAnswer(row, value, state)) plan.same.push(row);
-    else if (!isSettledState(row.state)) plan.write.push(row);
-    else if (row.answerId && overrides.has(row.answerId)) plan.override.push(row);
-    else plan.leftAlone.push(row);
-  }
-  return plan;
-}
 
 const rowKey = (row: { recordId: string; requirementId: string }) => `${row.recordId}:${row.requirementId}`;
 
@@ -349,6 +332,28 @@ async function applyFanOut(
   const project = await txn`select id from projects where id = ${projectId} for update`;
   if (!project[0]) throw new DomainConflictError("not_found", "No such project.", { status: 404 });
 
+  // THE RECORDS, LOCKED BEFORE THE SET IS READ AGAIN (chase review C4,
+  // 2026-11-21). The project lock holds back what takes it (a bill confirm, a
+  // second press), but an AREA edit (`editRecordDetails`) and a category change
+  // lock only their record: an item moved to Terrace between a first read and
+  // the record locks received Restaurant's answer. So every record the screen
+  // showed or a first read finds is locked, project then records in id order
+  // (`record-lock.ts`), and only then is the set derived for real. An item
+  // moved IN after this is outside the write and the comparison below refuses
+  // the press; one moved OUT is held here and shows as moved.
+  // `seen` is the client's word, so only THIS project's records are locked —
+  // `lockRecords`' own statement (id order, `for update`) with the project in it.
+  const first = (await loadFanOut(txn, projectId, scope)).find((group) => group.key === key);
+  const candidates = [...new Set([...seen.map((row) => row.recordId), ...(first?.rows ?? []).map((row) => row.recordId)])].sort();
+  if (candidates.length > 0) {
+    await txn`
+      select id from spec_records
+       where id = any(${candidates}::uuid[]) and project_id = ${projectId}
+       order by id
+         for update
+    `;
+  }
+
   const question = (await loadFanOut(txn, projectId, scope)).find((group) => group.key === key);
   // What the card says the answer is FOR, in every sentence below.
   const forWhat = scope === "area" ? `for ${question?.area ?? "the area"}` : "for the project";
@@ -402,7 +407,7 @@ async function applyFanOut(
     throw new DomainConflictError(
       "nothing_to_apply",
       plan.leftAlone.length > 0
-        ? `Every item asking “${question.heading}” already holds an answer, and the different ones were not ticked to replace. Nothing was written.`
+        ? `Every item asking “${question.heading}” already holds an answer, or a spec that fills this BWS field, and none was ticked to replace. Nothing was written.`
         : `Every item asking “${question.heading}” already says that. Nothing was written.`,
     );
   }

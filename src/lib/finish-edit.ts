@@ -237,7 +237,9 @@ export async function editFinish(
   },
 ): Promise<FinishEditResult> {
   const rows = await txn`
-    select id, project_id, version, status, code, state from project_finishes where id = ${finishId} for update
+    select id, project_id, version, status, code, state, kind, description, supplier_raw, reference, colour, notes,
+           customer_supplied
+      from project_finishes where id = ${finishId} for update
   `;
   const finish = rows[0];
   if (!finish) throw new DomainConflictError("not_found", "No such finish.", { status: 404 });
@@ -254,6 +256,35 @@ export async function editFinish(
     );
   }
 
+  const code = fields.code === undefined ? String(finish.code) : fields.code.trim();
+
+  // WHAT THIS EDIT ACTUALLY CHANGES (chase review C6, 2026-11-21). The Edit
+  // panel sends the whole draft, so a press that only ticks "customer's own
+  // material" arrives looking like a full edit. The tick is not in any
+  // record's atoms (the BWS file does not move with it), so:
+  //   - its sentence says what happened ("Marked FAB-01 as the customer's own
+  //     material"), never the route's "Filled in";
+  //   - where NOTHING the items ship changed, no record is recomposed or
+  //     versioned. `tests/db/change-history.test.ts`'s coverage assertion asks
+  //     that every record whose SPEC CONTENT a change wrote has a version; a
+  //     finish-only change writes none, so it is allowed, and a version whose
+  //     atoms are identical to the last would be an empty diff in the trail.
+  const text = (value: unknown) => (value === null || value === undefined ? null : clean(String(value)));
+  const contentChanged =
+    normaliseFinishCode(code) !== normaliseFinishCode(String(finish.code)) ||
+    code !== String(finish.code) ||
+    (fields.kind === undefined ? null : fields.kind) !== text(finish.kind) ||
+    clean(fields.description) !== text(finish.description) ||
+    clean(fields.supplierRaw) !== text(finish.supplier_raw) ||
+    clean(fields.reference) !== text(finish.reference) ||
+    clean(fields.colour) !== text(finish.colour) ||
+    clean(fields.notes) !== text(finish.notes) ||
+    (fields.state ?? String(finish.state)) !== String(finish.state);
+  const tickChanged = fields.customerSupplied !== undefined && fields.customerSupplied !== (finish.customer_supplied === true);
+  const tickSentence = tickChanged
+    ? `Marked ${String(finish.code)} as ${fields.customerSupplied ? "the customer's own material" : "supplied by BW"}${contentChanged ? ", and edited it" : ""}.`
+    : null;
+
   const changeSetId =
     attachTo ??
     (
@@ -261,12 +292,11 @@ export async function editFinish(
         projectId,
         actor,
         kind: "finish_edit",
-        reason,
+        reason: tickSentence ? `${reason.trim()} — ${tickSentence}` : reason,
         evidence,
       })
     ).changeSetId;
 
-  const code = fields.code === undefined ? String(finish.code) : fields.code.trim();
   if (!code) throw new DomainConflictError("code_required", "A finish needs the client's own code.", { status: 400 });
   if (normaliseFinishCode(code) !== normaliseFinishCode(String(finish.code))) {
     await assertFinishCodeFree(txn, { projectId, code, exceptId: finishId, putting: "renamed" });
@@ -294,7 +324,11 @@ export async function editFinish(
     throw new DomainConflictError("finish_version_stale", "That finish changed as you saved. Nothing was written — reload.");
   }
 
-  const carried = await carryFinishToItems(txn, { finishId, changeSetId, actor });
+  // Nothing an item ships moved (the tick alone, or a save of what was
+  // there): no recomposition, no identical versions. See above.
+  const carried = contentChanged
+    ? await carryFinishToItems(txn, { finishId, changeSetId, actor })
+    : { recordsTouched: 0, answersFilled: 0, recordsWithManualAnswers: [] };
   return {
     finishId,
     recordsTouched: carried.recordsTouched,

@@ -68,12 +68,17 @@ export async function PATCH(
 
   // Was it settled before this edit? That, not what it is becoming, decides
   // whether a reason is required.
-  const rows = await sql`select state, status, code from project_finishes where id = ${finishId} and project_id = ${id}`;
+  const rows = await sql`select state, status, code, customer_supplied from project_finishes where id = ${finishId} and project_id = ${id}`;
   const current = rows[0];
   if (!current) return json({ ok: false, error: "No such finish on this project." }, 404);
   const wasConfirmed = String(current.state) === "confirmed";
+  // THE CUSTOMER'S-OWN-MATERIAL TICK ALWAYS TAKES A REASON (chase review C6):
+  // it decides COM or FABRIC on every quote line carrying the code, settled
+  // finish or not. `editFinish` writes the sentence that says what it did.
+  const tickChanging =
+    body.customerSupplied !== undefined && body.customerSupplied !== (current.customer_supplied === true);
 
-  if ((wasConfirmed || body.status === "retired") && !body.reason?.trim()) {
+  if ((wasConfirmed || body.status === "retired" || tickChanging) && !body.reason?.trim()) {
     return json(
       {
         ok: false,
@@ -81,7 +86,9 @@ export async function PATCH(
         error:
           body.status === "retired"
             ? `Say why “${String(current.code)}” is leaving the library.`
-            : `“${String(current.code)}” is confirmed and is used on this project's items. Say why it is changing.`,
+            : tickChanging
+              ? `Say why “${String(current.code)}” is ${body.customerSupplied ? "now" : "no longer"} the customer's own material.`
+              : `“${String(current.code)}” is confirmed and is used on this project's items. Say why it is changing.`,
         field: "reason",
       },
       400,

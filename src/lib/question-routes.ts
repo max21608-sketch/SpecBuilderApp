@@ -19,7 +19,7 @@
 // insert to move, a delete to move back), and by the screen saying "asked of
 // the client on this project" beside the question.
 //
-// ---- THE TWO RULES ------------------------------------------------------
+// ---- THE THREE RULES ----------------------------------------------------
 //
 //  - THE PROJECT ROW IS LOCKED FIRST. The generate route locks it too, so a
 //    route moving while a chase is generated queues rather than interleaves:
@@ -28,12 +28,24 @@
 //    covers it on every cheat sheet on the project that asks it, and the key
 //    must be one an item in scope asks — anything else is refused, never
 //    stored for a question that does not exist here.
+//  - ONLY A CAM QUESTION MOVES. An in-house one is refused in words
+//    (decision E: never sent); a client one is already the client's.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { questionGroupKey } from "@/lib/chase-grouping";
 import { normaliseQuestionAudience, type QuestionAudience } from "@/lib/spec-vocab";
+import { designerKey } from "@/lib/chase-drafts";
+import type { ChasedTo } from "@/lib/question-route-words";
 
-export type QuestionRouteResult = { questionKey: string; audience: QuestionAudience; seedAudience: QuestionAudience };
+export type QuestionRouteResult = {
+  questionKey: string;
+  audience: QuestionAudience;
+  seedAudience: QuestionAudience;
+  /** On a move to the client: whose next chase lists it, ticked (`movedToClient`), by item count. */
+  chasedTo?: ChasedTo[];
+  /** On a move to the client: items asking it whose designer resolves to no contact. */
+  unassigned?: number;
+};
 
 export async function setQuestionRoute(
   txn: TxnSql,
@@ -81,14 +93,35 @@ export async function setQuestionRoute(
     if (seedAudience === "client") {
       throw new DomainConflictError("already_client", "That is already a client question; a chase can ask it as it is.");
     }
+    // ONLY A CAM QUESTION MOVES (chase review A2, 2026-11-21). Decision D gives
+    // "ask the client" to the CAM who does not know an answer; decision E says
+    // a question worded for us is never sent. The button is not offered on an
+    // in-house question, and this is the write boundary saying so in words.
+    // Putting one back stays open, for a route stored before this rule.
+    if (seedAudience === "in_house") {
+      throw new DomainConflictError(
+        "in_house",
+        "That is an in-house question — ours to answer, and in-house questions are never sent to the client. Answer it here. Nothing was changed.",
+      );
+    }
     await txn`
       insert into project_question_routes (project_id, question_key, audience, created_by, updated_by)
       values (${projectId}, ${questionKey}, 'client', ${actor}, ${actor})
       on conflict (project_id, question_key) do update set audience = 'client', updated_by = ${actor}
     `;
-    return { questionKey, audience: "client", seedAudience };
+    return { questionKey, audience: "client", seedAudience, ...(await whereItGoes(txn, projectId, asked.map((row) => String(row.id)))) };
   }
 
+  // THE DELETE IS AUDITED UNDER WHOEVER PRESSED IT. `write_audit()` takes a
+  // delete's actor from the OLD row's `updated_by` (the actor is a column,
+  // never session state — Neon's HTTP driver kills SET LOCAL), so the row is
+  // stamped with this person first, in the same transaction. Without it, B
+  // putting back A's move was logged as A deleting it — and the audit trigger
+  // is this write's only accounting (chase review A4, 2026-11-21).
+  await txn`
+    update project_question_routes set updated_by = ${actor}
+     where project_id = ${projectId} and question_key = ${questionKey}
+  `;
   const removed = await txn`
     delete from project_question_routes where project_id = ${projectId} and question_key = ${questionKey} returning id
   `;
@@ -99,4 +132,46 @@ export async function setQuestionRoute(
     );
   }
   return { questionKey, audience: seedAudience, seedAudience };
+}
+
+/**
+ * WHERE A MOVED QUESTION GOES, so the screen can say it truly (chase review
+ * A3). The chase routes an item's question to the contact its designer code
+ * names (`groupByContact`, by `designerKey`), and ticks a moved question for
+ * that contact (`movedToClient`); an item whose designer resolves to nobody
+ * sits under "Nobody assigned". Same scope as the question lookup above.
+ */
+async function whereItGoes(
+  txn: TxnSql,
+  projectId: string,
+  requirementIds: string[],
+): Promise<{ chasedTo: ChasedTo[]; unassigned: number }> {
+  const records = await txn`
+    select distinct r.id, r.designer
+      from spec_records r
+      join spec_runs run on run.id = r.run_id
+      join requirements q on q.category_id = r.category_id
+     where r.project_id = ${projectId}
+       and r.status = 'active'
+       and run.status = 'active'
+       and not exists (select 1 from spec_records v where v.parent_id = r.id and v.status = 'active')
+       and q.id = any(${requirementIds}::uuid[])
+  `;
+  const contacts = await txn`
+    select name, designer_code, role from project_contacts
+     where project_id = ${projectId} and designer_code is not null and role <> 'internal'
+  `;
+  const byCode = new Map(contacts.map((row) => [String(row.designer_code), String(row.name)]));
+  const counts = new Map<string, number>();
+  let unassigned = 0;
+  for (const row of records) {
+    const code = designerKey(row.designer === null || row.designer === undefined ? null : String(row.designer));
+    const name = code ? byCode.get(code) : undefined;
+    if (!name) unassigned += 1;
+    else counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return {
+    chasedTo: [...counts.entries()].map(([contactName, items]) => ({ contactName, items })).sort((a, b) => a.contactName.localeCompare(b.contactName)),
+    unassigned,
+  };
 }

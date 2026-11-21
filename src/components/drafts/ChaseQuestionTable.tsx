@@ -74,9 +74,9 @@ import SuggestButton from "@/components/ui/SuggestButton";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { TONE } from "@/components/ui/tone";
 import { letterColour } from "@/components/records/letter-colours";
-import { ANSWER_STATE_LABELS, ITEM_LEVEL_LABELS, QUESTION_AUDIENCE_LABELS, type AnswerState, type ItemLevel } from "@/lib/spec-vocab";
+import { ANSWER_STATE_LABELS, ITEM_LEVEL_LABELS, QUESTION_AUDIENCE_LABELS, type AnswerState, type ItemLevel, type QuestionAudience } from "@/lib/spec-vocab";
 import { TIER_LABELS, type QuestionTier } from "@/lib/tgq";
-import { selectionSummary } from "@/lib/chase-selection";
+import { movedToClient, selectionSummary } from "@/lib/chase-selection";
 import { areaOptions, matchesArea } from "@/lib/area-filter";
 import AreaSelect from "@/components/ui/AreaSelect";
 import { useUrlTab } from "@/lib/use-url-tab";
@@ -97,6 +97,8 @@ import {
 
 export type TableQuestion = GroupableQuestion & {
   requirementId: string;
+  /** Who the cheat sheet says answers it; differs from `audience` where a person moved it (0062). */
+  seedAudience: QuestionAudience;
   recordLabel: string;
   prompt: string;
   fieldLabel: string | null;
@@ -278,7 +280,9 @@ export default function ChaseQuestionTable({
       // THE TGQ FILTER IS THE ITEM RULE (`inItemTgq`), the one the line's own
       // TGQ count is made from — a project-wide question is answered once on
       // the project and is listed under "all".
-      if (tierValue === "to_quote" && !inItemTgq(question)) return false;
+      // A question a PERSON sent to the client is listed under it too (review
+      // A3): it is what they asked to be chased, and it is ticked by default.
+      if (tierValue === "to_quote" && !inItemTgq(question) && !movedToClient(question)) return false;
       if (tierValue === "later" && question.tier !== "later") return false;
       // OURS, NOT THE CLIENT'S (0062): an in-house or CAM question is listed
       // only when asked for. A designer's tab never carries one at all.

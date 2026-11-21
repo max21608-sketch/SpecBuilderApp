@@ -527,6 +527,18 @@ the one item with NO category. Max's ruling is the rule:
   - **Missing and TBC rows are written.** A settled answer with a DIFFERENT
     value is listed unticked, and replacing it needs a tick and a reason (or
     an open change).
+  - **An item whose field a SPEC holds is a settled answer too** (review C1,
+    2026-11-21), on the project card and the area card alike. The BWS file
+    ships a record's spec before its checklist answer, so a bill's "Outdoor
+    TBC" (a TBC projection) was overwritten by "Indoor" on the card and the
+    checklist read Indoor while the file shipped Outdoor TBC. A row whose
+    answer is a projection (`source_kind = 'attribute'`) or for whose field
+    the export's own composed cell comes from a spec (`specShips`, the cell
+    `specShipsInstead` reads) is listed with what the file ships, unticked,
+    and left alone; a tick takes the same reason. `planProjectWide` lives in
+    `project-wide-plan.ts` and the card imports IT, not a copy
+    (`tests/db/area-wide.test.ts` holds the cell and the checklist equal
+    after a fan-out).
   - **One change set, one version per record.** `spec_records.version` is
     untouched. A dimension is refused: it is per item, always.
 - **They still block every quote.** `readyToQuote` = categorised AND the
@@ -834,8 +846,9 @@ accepts its guesses before confirming.
 
 `db/migrations/0062_question_audience.sql`, `db/seed/0015_question_audience.sql`,
 `src/lib/chase-grouping.ts` (`questionAudience`, `isClientQuestion`,
-`inChaseAsk`), `src/lib/chase-drafts.ts` (`loadQuestionRoutes`,
-`groupByContact`), `src/lib/chase-audience.ts`, `src/lib/question-routes.ts`,
+`inChaseAsk`), `src/lib/chase-drafts.ts` (`groupByContact`),
+`src/lib/question-audience-routes.ts` (`loadQuestionRoutes`, `routedAudience`),
+`src/lib/chase-audience.ts`, `src/lib/question-routes.ts`,
 `src/app/api/projects/[id]/question-routes/route.ts`,
 `src/lib/chase-template.ts` (`TEMPLATE_VERSION` 4), `src/components/infill/InfillRow.tsx`
 
@@ -852,6 +865,14 @@ GIVES it. `requirements.audience` is `in_house` | `cam` | `client`, seed data;
   overview, the preselection and the blocked panel identical; the designer
   tab's LIST dropped the readiness questions its default filter already hid.
   Order: migrate, deploy, seed.
+- **Every reader of the audience reads the ROUTED one** (review A5,
+  2026-11-21). `question-audience-routes.ts` holds the one loader and the one
+  lookup; the chase (`loadOutstanding`, `loadQuestionsByKey`), the record's
+  gate rows (`loadGateContext` → `questionsForRecord`, per record's project,
+  because a category's questions are shared across projects and a route is
+  not) and `/api/records/[id]`'s answers all apply it. Before this the record
+  read the seed's alone — latent while every non-client gate row was
+  project-wide, and a "button says N (differs)" the day one is not.
 - **The audience decides the chase, never the kind, with no fallback.**
   `AudienceReadable`, `GroupableQuestion`, `SelectableQuestion`,
   `GateQuestion` and the record payload REQUIRE it, so a payload that forgets
@@ -870,6 +891,16 @@ GIVES it. `requirements.audience` is `in_house` | `cam` | `client`, seed data;
   edit route refuses one only when it is added, so a draft written before the
   rule opens, edits and downloads with its body as stored
   (`tests/db/chase-audience.test.ts`, byte for byte).
+  **A line already in such a draft is FLAGGED, not left silent** (review A1,
+  2026-11-21). Three routes reach it: seed 0015 after the draft, "Put it
+  back", and a colleague re-roled to designer (`email_drafts.contact_version`
+  is written and read by nothing). `/api/drafts` marks each line `nowOurs`
+  by `audienceRefusal` off the live question (with the project's route) and
+  the LIVE contact row's role, and counts `nowOursCount` on an editable
+  draft; the card says "N questions in this draft are now ours to answer —
+  remove them, or generate a new chase" with each named and Remove beside
+  it. It is ADVISORY like `tierChanged`, never a stale reason: making it one
+  would refuse "Yes, I sent it" on every old draft (the chased_at trap).
 - **Neither the client wording nor "ask the client" touches the snapshot or
   `spec_answers`.** The wording is `requirements.client_prompt`, frozen per
   line in `email_draft_items.asked_as` beside `context_snapshot`, never in it
@@ -878,8 +909,23 @@ GIVES it. `requirements.audience` is `in_house` | `cam` | `client`, seed data;
   chased_at trap) and never a write to `requirements` (one project's decision
   is not the cheat sheet's). It opens no change set — it writes no
   specification content — and is accounted for by its audit trigger (insert to
-  move, delete to move back) and by the row saying so on screen. It locks the
-  project, as the generate route does, so a chase reads one audience.
+  move, delete to move back; the row is stamped `updated_by` with the person
+  putting it back BEFORE the delete, because `write_audit()` takes a delete's
+  actor from the old row and B's "Put it back" was logged as A — review A4)
+  and by the row saying so on screen. It locks the project, as the generate
+  route does, so a chase reads one audience. **Only a CAM question moves**
+  (review A2): the button is offered on a CAM question alone, and the route
+  refuses an in-house one in words (`in_house`) — decision E says those are
+  never sent. Putting one back stays open, for a route stored before.
+  **A moved question is IN the next chase** (review A3): every CAM question
+  is project-wide, which is never preselected, so "Moved to the chase" put it
+  in no chase. `movedToClient` (`chase-selection.ts`: the routed audience is
+  the client's, the seed's is not) ticks it by default for the item's contact
+  at either tier — a person's explicit decision outranks "project-wide is
+  never preselected" — lists it under the TGQ filter too, and still holds it
+  back while a reply is awaited. The route returns whose chase that is
+  (`chasedTo`, by `designerKey`, and `unassigned`), and the fill-in prints
+  `questionRouteSentence`, never a claim the chase does not make.
 - **An external recipient reads the client wording and NO BWS field name**
   (`recipient` on `buildChaseEmail`, decided off the contact row's role; absent
   is external, the direction that never shows a client a BWS name). A
@@ -906,10 +952,20 @@ count, the chase screen's filter rule.
 Decision C of 2026-11-20 is two different changes, and keeping them apart is
 the trap (design finding 12):
 
-- **Per PROJECT is the section, not a scope.** Interliner (the fire
-  standard), visible fixings and "exact copy or BW standards?" moved into
-  "Project / commercial" in seed 0003 — the literal and nothing else — and the
-  existing mechanism answers them with no code.
+- **Per PROJECT is the section, not a scope.** Visible fixings and "exact
+  copy or BW standards?" moved into "Project / commercial" in seed 0003 — the
+  literal and nothing else — and the existing mechanism answers them with no
+  code. **"Interliner required?" (`field:74`) moved too and was moved BACK
+  (review, 2026-11-21)**: six cabinetry sheets ask it (consoles, drinks
+  cabinets, shelves, side tables, sideboards, wardrobes), so one press on the
+  project card wrote an interliner onto every unanswered table and wardrobe —
+  the BWS "FR Interliner" cell and the quote's FR INTERLINER line. It is per
+  item, in "Build details", on all fifteen sheets
+  (`tests/lib/project-wide-section.test.ts`). A section literal is not guarded
+  by 0057, so the re-seed moves it back on a database that ran the moved
+  version, answered rows included (rehearsed both ways on a scratch database).
+  Before moving a question into the project section, list EVERY sheet that
+  asks it.
 - **Per AREA is `requirements.answer_scope = 'area'`** (Indoor / Outdoor,
   Floor type, Wall build, fully outdoor), and those questions STAY in the
   item's own TGQ count. A third, per-area count is how TGQ came to mean four
@@ -921,6 +977,15 @@ the trap (design finding 12):
   whole if it moved; a settled different answer never overwritten without a
   tick and a reason; one change set, one version per record, records locked
   in id order, `spec_records.version` untouched; a dimension refused.
+- **The records are locked BEFORE the set is read again** (review C4,
+  2026-11-21). The project lock holds back a bill confirm or a second press,
+  but an area edit (`editRecordDetails`) and a category change lock only the
+  record, so an item moved to Terrace between the fan-out's read and its
+  record locks received Restaurant's answer. `applyFanOut` now locks the
+  project, then every record the screen showed or a first read finds (this
+  project's only, id order), and only then derives the set it compares and
+  writes. `tests/db/area-wide.test.ts` forces it with a second connection
+  holding the moved item, never a sleep.
 - **The area folds by case and whitespace only (`foldArea`)**, the chase
   email's rule; an item with NO area is on no card and is answered on its own.
   `tests/db/area-wide.test.ts`.
@@ -938,7 +1003,19 @@ one-word label containing it, and any label whose words all appear in it. So
 an alias is chosen by running the corpus (`vocab:gap`, 613 labels on the
 local stack, 2026-11-21) through the resolver with and without it, and only
 the forms that moved nothing but what they were meant to were seeded:
-"Swivel", "Seat build", "Studs / nailing".
+"Swivel" and "Studs / nailing".
+
+- **"Seat build" was seeded and REMOVED (review, 2026-11-21).** A label that
+  names TWO things is not one of them: "Seat & back build" scored 1.0 against
+  the two-word alias and landed, confidently, on Seat upholstery build alone.
+  The alias added nothing else — "SEAT BUILD" lands on field 11 through the
+  prompt "Seat upholstery build" with no alias — so it went, and 0016 deletes
+  exactly that seeded row from a database that ran the first version. Run
+  every multi-word alias against "X & Y" forms of itself before seeding it.
+- **"STUDS/NAILING" with no spaces is a known MISS, left alone**:
+  `normaliseName` does not split "/", so it is one word and reaches nothing. A
+  miss is a row a person places; widening the normaliser to make it land
+  moves every label with a slash in it, and is not a seed change.
 
 - **"Back cushions" is NOT an alias**: any alias holding "cushions" lands the
   corpus's own fabric callout "cushions (seat, back, bolster)" and a bare
