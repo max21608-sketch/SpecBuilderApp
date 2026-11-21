@@ -479,9 +479,27 @@ describe("a three-part project code", () => {
     const tick = screen.getByLabelText(/customer.s own material/i);
     expect(tick).not.toBeChecked();
     await user.click(tick);
-    await user.type(screen.getByPlaceholderText(/Required — this finish is confirmed/), "the client supplies it");
+    await user.type(screen.getByPlaceholderText(/Required — the tick decides COM or FABRIC/), "the client supplies it");
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(patched()).toMatchObject({ customerSupplied: true, reason: "the client supplies it" });
+  });
+
+  // CHASE REVIEW C6: the tick always takes a reason, on a TBC finish too, and
+  // the box says so the moment it is ticked.
+  it("asks for a reason as soon as the tick changes, even on a TBC finish", async () => {
+    fetchMock.mockImplementation(async () =>
+      new Response(JSON.stringify({ ...PAYLOAD, finishes: [finish({ state: "tbc" })] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const user = userEvent.setup();
+    render(<FinishesLibrary projectId="proj-1" />);
+    await screen.findByText("MOR005");
+    await user.click(within(firstRow()).getByRole("button", { name: "Edit" }));
+    expect(screen.getByPlaceholderText(/Optional while the finish is still TBC/)).toBeInTheDocument();
+    await user.click(screen.getByLabelText(/customer.s own material/i));
+    expect(screen.getByPlaceholderText(/Required — the tick decides COM or FABRIC/)).toBeInTheDocument();
   });
 
   it("marks a customer-supplied finish COM on its row", async () => {

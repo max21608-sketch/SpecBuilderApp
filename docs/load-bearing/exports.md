@@ -286,8 +286,17 @@ fabric BW supplies. Four things are load-bearing.
   COM 1" small beside it (`FieldName`); the check sheet prints "Fabric 1 (BWS:
   COM 1)" because a reviewer reads it against the file.
 - **The tick is on the finishes library row** (`project_finishes.customer_supplied`,
-  0062), off by default, and it is an EDIT: on a confirmed finish it needs the
-  Edit panel's reason and opens a `finish_edit` change. `editFinish` REPLACES
+  0062), off by default, and it is an EDIT that opens a `finish_edit` change.
+  **It ALWAYS takes a reason** (review C6, 2026-11-21), on a TBC finish too,
+  because it decides COM or FABRIC on every quote line carrying the code; its
+  sentence says what happened ("Marked FAB-01 as the customer's own material"
+  / "… as supplied by BW"), never the route's "Filled in". **A tick-only edit
+  versions no record**: the tick is not in the atoms, and the coverage
+  assertion in `tests/db/change-history.test.ts` asks only that every record
+  whose SPEC CONTENT a change wrote has a version — a finish-only change
+  writes none — so `editFinish` skips `carryFinishToItems` wherever nothing
+  the items ship changed, rather than writing a version per linked record
+  whose diff is empty. `editFinish` REPLACES
   every column, so it treats an undefined `customerSupplied` as "leave it":
   the kinds route, the schedule confirm and an edit that does not mention it
   keep the tick (`tests/db/finish-customer-supplied.test.ts`).

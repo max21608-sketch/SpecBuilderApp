@@ -255,8 +255,13 @@ export default function FinishesLibrary({
         return;
       }
       const stuck = res.data.recordsWithManualAnswers ?? [];
+      // A TICK-ONLY SAVE changes nothing an item ships (review C6): say what
+      // it did, not "Updated on 0 items".
+      const ticked = draft.customerSupplied !== (finish.customer_supplied === true);
       await reloadThen(
-        `Updated on ${res.data.recordsTouched} item${res.data.recordsTouched === 1 ? "" : "s"}.` +
+        (ticked && res.data.recordsTouched === 0
+          ? `Marked ${finish.code} as ${draft.customerSupplied ? "the customer’s own material: the quote prints COM for it" : "supplied by BW: the quote prints FABRIC for it"}. Nothing in the BWS file changed.`
+          : `Updated on ${res.data.recordsTouched} item${res.data.recordsTouched === 1 ? "" : "s"}.`) +
           (stuck.length > 0
             ? ` ${stuck.length} of them (${stuck.map((row) => row.label).join(", ")}) has an answer a person set on its checklist, so it did not follow — change it there if it should.`
             : ""),
@@ -792,9 +797,13 @@ export default function FinishesLibrary({
                     value={draft.reason}
                     onChange={(event) => setDraft({ ...draft, reason: event.target.value })}
                     placeholder={
-                      finish.state === "confirmed"
-                        ? "Required — this finish is confirmed and is on live items"
-                        : "Optional while the finish is still TBC"
+                      // THE TICK ALWAYS TAKES A REASON (review C6): it decides
+                      // COM or FABRIC on every quote line carrying the code.
+                      draft.customerSupplied !== (finish.customer_supplied === true)
+                        ? "Required — the tick decides COM or FABRIC on the quote"
+                        : finish.state === "confirmed"
+                          ? "Required — this finish is confirmed and is on live items"
+                          : "Optional while the finish is still TBC"
                     }
                     className="mt-0.5 w-full rounded border border-neutral-300 bg-white px-2 py-1"
                   />
