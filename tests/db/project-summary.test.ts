@@ -254,12 +254,11 @@ describeIfDb("project summary", () => {
     // since seed 0014 every seeded sheet is on a gate model, so the seed holds
     // no fallback category to pick.
     const fallbackCategory = await qaPlaceholderCategory(client, "project-summary");
-    const fallback = { rows: [{ id: fallbackCategory.id }] };
     const extra = await client.query(
       `insert into spec_records (project_id, run_id, record_no, category_id, level, item_description, status,
                                  created_by, updated_by)
        values ($1, $2, 6, $3, 'simple', '__QA Drawers on the placeholder', 'active', 'qa', 'qa') returning id`,
-      [projectId, runId, fallback.rows[0].id],
+      [projectId, runId, fallbackCategory.id],
     );
     try {
       const result = await summary();

@@ -156,7 +156,7 @@ export async function qaPlaceholderCategory(
     [slug, name, copyFromSlug],
   );
   if (created.rows.length !== 1) throw new Error(`qaPlaceholderCategory: no seeded sheet "${copyFromSlug}" to copy`);
-  const id = String(created.rows[0].id);
+  const id = String(created.rows[0]!.id);
   await client.query(
     `insert into requirements (category_id, kind, spec_field_id, local_key, prompt, help_text, section, sort_order,
                                tgq_levels, created_by, updated_by)

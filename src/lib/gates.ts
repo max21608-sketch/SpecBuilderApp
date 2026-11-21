@@ -103,6 +103,13 @@ export type GateField = {
   conditionalOnKey: string | null;
   conditionalOnValue: string | null;
   notes: string | null;
+  /**
+   * Which of the record's sheet's types this row reaches (0061: his "All
+   * categories" rows reach every one). A record whose type a person accepted
+   * is judged on that type's rows alone; absent means every type, which is
+   * what a fixture building one row by hand means.
+   */
+  appliesTo?: readonly string[];
 };
 
 export type GateOutcome = "satisfied" | "blocking" | "not_applicable" | "unknown" | "unanswerable";
@@ -326,6 +333,14 @@ export function gateStatus(
     locals?: GateLocalInput;
     /** The BWS field ids this record's category actually asks a question for. */
     askedFieldIds: ReadonlySet<number>;
+    /**
+     * The local keys this record's category asks a readiness question for.
+     * A row whose key is here and has no answer is BLOCKING (nobody has
+     * answered), exactly as a BWS field with no answer row is; without it the
+     * row could only read as "nowhere to record it". Optional so a caller with
+     * no checklist (a fixture) keeps the old reading.
+     */
+    askedLocalKeys?: ReadonlySet<string>;
   },
 ): GateFieldsStatus {
   const byField = new Map(input.answers.map((a) => [a.specFieldJsonId, a]));
@@ -398,6 +413,14 @@ export function gateStatus(
 
     // ---- 4. one of the ten rows with no BWS id ----------------------------
     const local = field.localKey ? locals[field.localKey] : undefined;
+    // ASKED AND NOT YET ANSWERED is a question, not an app gap. A seed that
+    // adds a question to a sheet (0014 did, 2026-11-20) leaves every record
+    // already on it with no answer row for it; the checklist lists it as
+    // missing, and so must the gate — the BWS-field branch above has always
+    // read a missing answer row as blocking.
+    if (!local && field.localKey && input.askedLocalKeys?.has(field.localKey)) {
+      return { field, outcome: "blocking", reason: "Nobody has answered this yet.", value: null, state: "missing" };
+    }
     if (!local) {
       return {
         field,
@@ -476,4 +499,4 @@ export function chainGates(byGate: Record<Gate, GateFieldsStatus>): Record<Gate,
 /** What a screen says where a category has no mapping onto Matthew's nine. */
 export const NO_MATRIX_CATEGORY_LABEL = "No gate view";
 export const NO_MATRIX_CATEGORY_EXPLANATION =
-  "The gate model covers nine upholstered seating categories. This item's category is not one of them — the cabinetry categories are still to come — so there is nothing to check it against yet.";
+  "This item's category is not on a gate model yet, so there is nothing to check it against. Every seeded category has one; a category added since has not been given one.";

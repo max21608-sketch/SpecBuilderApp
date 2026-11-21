@@ -173,11 +173,14 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
     ),
     -- MATTHEW'S TGQ SET, per cheat-sheet category. The join is the union rule
     -- loadGateContext uses: our sheet receives a field if ANY of his categories
-    -- mapped to it carries that field.
+    -- mapped to it carries that field. "All categories" reaches every type
+    -- through the GENERATED applies_to_all (0061); the overlap alone gave the
+    -- provisional cabinetry types none of his rows.
     tgq_map as (
       select m.item_category_id, f.json_id, g.local_key
         from spec_matrix_category_map m
-        join spec_field_gates g on g.applies_to && array[m.matrix_code] and g.gate = 'TGQ'
+        join spec_field_gates g
+          on (g.applies_to_all or g.applies_to && array[m.matrix_code]) and g.gate = 'TGQ'
         left join spec_fields f on f.id = g.spec_field_id
     ),
     -- Which categories he has WRITTEN. Presence here is the discriminator, and

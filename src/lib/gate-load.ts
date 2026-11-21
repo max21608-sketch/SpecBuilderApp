@@ -11,18 +11,38 @@
 // file only fetches.
 //
 // The category filtering IS in SQL, because `applies_to && array[code]` has a
-// GIN index behind it and doing it in JavaScript would mean shipping all 35
-// rows per category to filter them again.
+// GIN index behind it and doing it in JavaScript would mean shipping every
+// row per category to filter them again.
+//
+// ---- "ALL CATEGORIES" WIDENS BY A GENERATED COLUMN (0061) -----------------
+//
+// Every join onto a type is `g.applies_to_all or g.applies_to && array[code]`.
+// His "All categories" rows hold his nine codes literally, so the overlap
+// alone gave the eight provisional cabinetry types (seed 0014) their drafted
+// rows and NONE of his dimensions, designer reference or production lock: a
+// side table read priceable once its four drafted questions were answered.
+// `applies_to_all` is generated from his own phrase, so no seed edits his rows.
+// The same predicate is in `loadTgqMatrices` below and in
+// `project-summary.ts`; a copy without it is the defect again.
 //
 // ---- A CATEGORY WITH NO MATRIX MAPPING GETS NULL, NOT AN EMPTY GATE ------
 //
-// Matthew's matrix covers nine upholstered seating categories. The eight
-// cabinetry sheets are not in it and the cabinetry matrix is still to come, so
-// those records have NO gate view — which the screens say in words. An empty
-// field list would compute as "nothing outstanding", and a record reported
-// TG0-ready because nobody has written its rules yet is the confidently-wrong
-// failure the whole model exists to avoid. `gateStatus` refuses an empty list
-// for the same reason; this returns null before it gets there.
+// Since seed 0014 every seeded cheat sheet is on a gate model: Matthew's nine
+// seating types and the eight AI-drafted cabinetry types. A category added
+// later, before anybody maps it, still has NO gate view — which the screens
+// say in words. An empty field list would compute as "nothing outstanding",
+// and a record reported TG0-ready because nobody has written its rules yet is
+// the confidently-wrong failure the whole model exists to avoid. `gateStatus`
+// refuses an empty list for the same reason; this returns null before it gets
+// there.
+//
+// ---- A PROVISIONAL TYPE SAYS SO, AND THE WORDS ARE DATA -------------------
+//
+// `spec_matrix_categories.provisional_note` (0061) is the sentence a screen
+// prints wherever a gate view or a TGQ count comes from a type nobody has
+// confirmed. It travels in the context (`typesByCategory`) and is read by
+// `provisionalNoteFor`; no screen holds the sentence as a constant or decides
+// it from a row number, so the day Matthew confirms the model is a re-seed.
 // ============================================================================
 import type { SqlLike } from "@/lib/record-atoms";
 import type { AnswerState } from "@/lib/spec-vocab";
@@ -41,11 +61,27 @@ import {
   type GateStatus,
 } from "@/lib/gates";
 
+/** One gate-model type a cheat sheet is mapped to (0026, 0061). */
+export type MatrixTypeInfo = {
+  code: string;
+  name: string;
+  /** Null for a type Matthew wrote; the sentence to print otherwise. */
+  provisionalNote: string | null;
+  /** Words in an item name that suggest this type (src/lib/matrix-type.ts). */
+  suggestWords: string[];
+  /** The type suggested on this sheet when a name names none. */
+  suggestDefault: boolean;
+};
+
 export type GateContext = {
   /** Gate rows that apply, per item_categories.id. Absent = no matrix mapping. */
   fieldsByCategory: Map<string, GateField[]>;
+  /** The types each category is mapped to, in the seed's order. */
+  typesByCategory: Map<string, MatrixTypeInfo[]>;
   /** BWS field ids each category's checklist can actually ask. */
   askedByCategory: Map<string, Set<number>>;
+  /** Local keys each category's checklist asks a readiness question for. */
+  askedLocalKeysByCategory: Map<string, Set<string>>;
   answersByRecord: Map<string, GateAnswerInput[]>;
   slotsByRecord: Map<string, GateSlotInput[]>;
   localsByRecord: Map<string, GateLocalInput>;
@@ -59,7 +95,9 @@ export type GateContext = {
 
 const EMPTY: GateContext = {
   fieldsByCategory: new Map(),
+  typesByCategory: new Map(),
   askedByCategory: new Map(),
+  askedLocalKeysByCategory: new Map(),
   answersByRecord: new Map(),
   slotsByRecord: new Map(),
   localsByRecord: new Map(),
@@ -72,12 +110,15 @@ export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promi
   // One row per (category, gate row) that applies. The overlap is the union
   // rule: our sheet receives a field if ANY of Matthew's categories mapped to
   // it carries that field. db/seed/0005 names the two places that widens.
+  // `codes` is WHICH of the sheet's types the row reaches, so a record whose
+  // type a person has accepted can be judged on that type's rows alone.
   const fieldRows = await exec`
     select m.item_category_id, g.matrix_row, g.gate, g.capture, g.field_name,
            f.json_id, g.local_key, g.dimension_slot, g.value_type,
-           g.palette_key, g.palette_raw, g.conditional_on_key, g.conditional_on_value, g.notes
+           g.palette_key, g.palette_raw, g.conditional_on_key, g.conditional_on_value, g.notes,
+           array_agg(distinct m.matrix_code order by m.matrix_code) as codes
       from spec_field_gates g
-      join spec_matrix_category_map m on g.applies_to && array[m.matrix_code]
+      join spec_matrix_category_map m on g.applies_to_all or g.applies_to && array[m.matrix_code]
       left join spec_fields f on f.id = g.spec_field_id
      group by m.item_category_id, g.matrix_row, g.gate, g.capture, g.field_name, f.json_id,
               g.local_key, g.dimension_slot, g.value_type, g.palette_key, g.palette_raw,
@@ -102,25 +143,61 @@ export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promi
       conditionalOnKey: (row.conditional_on_key ?? null) as string | null,
       conditionalOnValue: (row.conditional_on_value ?? null) as string | null,
       notes: (row.notes ?? null) as string | null,
+      appliesTo: ((row.codes ?? []) as unknown[]).map(String),
     });
     fieldsByCategory.set(key, list);
+  }
+
+  // The types each record's category is mapped to: the provisional note, and
+  // what the type suggestion is read from.
+  const typeRows = await exec`
+    select m.item_category_id, t.code, t.name, t.provisional_note, t.suggest_words, m.suggest_default
+      from spec_matrix_category_map m
+      join spec_matrix_categories t on t.code = m.matrix_code
+     where m.item_category_id = any(
+       select category_id from spec_records where id = any(${recordIds}::uuid[]) and category_id is not null)
+     order by m.item_category_id, t.sort_order, t.code
+  `;
+  const typesByCategory = new Map<string, MatrixTypeInfo[]>();
+  for (const row of typeRows) {
+    const key = String(row.item_category_id);
+    const list = typesByCategory.get(key) ?? [];
+    list.push({
+      code: String(row.code),
+      name: String(row.name),
+      provisionalNote: row.provisional_note === null || row.provisional_note === undefined ? null : String(row.provisional_note),
+      suggestWords: ((row.suggest_words ?? []) as unknown[]).map(String),
+      suggestDefault: row.suggest_default === true,
+    });
+    typesByCategory.set(key, list);
   }
 
   // Which BWS fields each category's checklist can ask. A gate over a field
   // with no question is `unanswerable`, not `blocking` — the fix is a seed,
   // not a person.
+  // And which local keys: a readiness question the checklist asks is a
+  // question whether or not anybody has answered it (`gateStatus`).
   const askedRows = await exec`
-    select r.category_id, f.json_id
-      from requirements r join spec_fields f on f.id = r.spec_field_id
+    select r.category_id, f.json_id, r.local_key
+      from requirements r left join spec_fields f on f.id = r.spec_field_id
      where r.category_id = any(
        select category_id from spec_records where id = any(${recordIds}::uuid[]) and category_id is not null)
+       and (r.spec_field_id is not null or r.local_key is not null)
   `;
   const askedByCategory = new Map<string, Set<number>>();
+  const askedLocalKeysByCategory = new Map<string, Set<string>>();
   for (const row of askedRows) {
     const key = String(row.category_id);
-    const set = askedByCategory.get(key) ?? new Set<number>();
-    set.add(Number(row.json_id));
-    askedByCategory.set(key, set);
+    if (row.json_id !== null && row.json_id !== undefined) {
+      const set = askedByCategory.get(key) ?? new Set<number>();
+      set.add(Number(row.json_id));
+      askedByCategory.set(key, set);
+    }
+    if (row.local_key !== null && row.local_key !== undefined) {
+      const set = askedLocalKeysByCategory.get(key) ?? new Set<string>();
+      set.add(String(row.local_key));
+      askedLocalKeysByCategory.set(key, set);
+    }
   }
 
   const answerRows = await exec`
@@ -234,7 +311,29 @@ export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promi
     questionsByCategory.set(key, list);
   }
 
-  return { fieldsByCategory, askedByCategory, answersByRecord, slotsByRecord, localsByRecord, questionsByCategory };
+  return {
+    fieldsByCategory,
+    typesByCategory,
+    askedByCategory,
+    askedLocalKeysByCategory,
+    answersByRecord,
+    slotsByRecord,
+    localsByRecord,
+    questionsByCategory,
+  };
+}
+
+/**
+ * The sentence to print beside this record's gate view or TGQ count, or null
+ * where every type deciding it is one Matthew wrote. The words are the seed's
+ * (`spec_matrix_categories.provisional_note`), never a constant.
+ */
+export function provisionalNoteFor(context: GateContext, record: { categoryId: string | null }): string | null {
+  if (!record.categoryId) return null;
+  const notes = (context.typesByCategory.get(record.categoryId) ?? [])
+    .map((type) => type.provisionalNote)
+    .filter((note): note is string => Boolean(note));
+  return notes[0] ?? null;
 }
 
 /**
@@ -277,6 +376,7 @@ export function gatesForRecord(
     slots: context.slotsByRecord.get(record.id) ?? [],
     locals: context.localsByRecord.get(record.id) ?? {},
     askedFieldIds: context.askedByCategory.get(record.categoryId) ?? new Set<number>(),
+    askedLocalKeys: context.askedLocalKeysByCategory.get(record.categoryId) ?? new Set<string>(),
   };
 
   // Each gate over its OWN fields, then CHAINED — a gate is met only when
@@ -352,7 +452,7 @@ export async function loadTgqMatrices(exec: SqlLike): Promise<Map<string, TgqMat
            g.gate
       from spec_matrix_category_map m
       left join spec_field_gates g
-        on g.applies_to && array[m.matrix_code] and g.gate = 'TGQ'
+        on (g.applies_to_all or g.applies_to && array[m.matrix_code]) and g.gate = 'TGQ'
       left join spec_fields f on f.id = g.spec_field_id
   `;
   const out = new Map<string, { fields: Set<number>; localKeys: Set<string> }>();

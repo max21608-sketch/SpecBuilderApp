@@ -427,3 +427,58 @@ describe("chainGates — a gate is met only if every gate before it is", () => {
     expect(g.TG1.blockedBy).toEqual(["TGQ", "TG0"]);
   });
 });
+
+describe("gateStatus — a local-key question the checklist asks is a question, answered or not", () => {
+  // The provisional cabinetry model (seed 0014) adds questions to sheets that
+  // already have records. Those records have no answer row for a new question
+  // until somebody answers it, and the checklist lists it as missing — a left
+  // join from requirements. The gate read a local-key row with no answer row as
+  // "nowhere to record it", so a side table categorised before the seed showed
+  // its stone / glass / lighting questions as an app gap and left them out of
+  // its TGQ. A BWS field with no answer row has always read as blocking.
+  const controller = field({
+    matrixRow: 103,
+    gate: "TGQ",
+    capture: "question",
+    fieldName: "Integrated lighting or power?",
+    specFieldJsonId: null,
+    localKey: "has_lighting_power",
+    valueType: "boolean",
+  });
+  const socket = field({
+    matrixRow: 120,
+    gate: "TG0",
+    fieldName: "Socket / wire access + positions",
+    specFieldJsonId: null,
+    localKey: "socket_wire_access",
+    conditionalOnKey: "has_lighting_power",
+    conditionalOnValue: "Yes",
+  });
+  const asks = new Set(["has_lighting_power", "socket_wire_access"]);
+
+  it("asked and never answered is blocking, not unanswerable", () => {
+    const s = gateStatus("TGQ", [controller], { answers: [], slots: [], askedFieldIds: asked(), askedLocalKeys: asks });
+    expect(only(s).outcome).toBe("blocking");
+    expect(only(s).state).toBe("missing");
+  });
+
+  it("not asked by this category is still unanswerable", () => {
+    const s = gateStatus("TGQ", [controller], { answers: [], slots: [], askedFieldIds: asked(), askedLocalKeys: new Set() });
+    expect(only(s).outcome).toBe("unanswerable");
+  });
+
+  it("a dining table's socket row is unknown until 103 is answered, then judged", () => {
+    const input = (value: string | null) => ({
+      answers: [],
+      slots: [],
+      askedFieldIds: asked(),
+      askedLocalKeys: asks,
+      locals: value === null ? {} : { has_lighting_power: { state: "confirmed" as const, value } },
+    });
+    expect(only(gateStatus("TG0", [socket], input(null))).outcome).toBe("unknown");
+    expect(only(gateStatus("TG0", [socket], input("No"))).outcome).toBe("not_applicable");
+    const yes = only(gateStatus("TG0", [socket], input("Yes")));
+    expect(yes.outcome).toBe("blocking");
+    expect(yes.state).toBe("missing");
+  });
+});
