@@ -41,7 +41,7 @@ import type { Row } from "@/lib/db";
 import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
 import { questionGroupKey } from "@/lib/chase-grouping";
 import { loadTgqMatrices } from "@/lib/gate-load";
-import { questionTierOrNull, type QuestionTier } from "@/lib/tgq";
+import { questionTierOrNull, tgqMatrixFor, type QuestionTier } from "@/lib/tgq";
 import { normaliseItemLevel, type AnswerState } from "@/lib/spec-vocab";
 import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { changeSetForEdit, findOpenChangeSet } from "@/lib/change-sets";
@@ -138,7 +138,7 @@ export async function loadAreaWide(exec: Exec, projectId: string): Promise<Proje
 async function loadFanOut(exec: Exec, projectId: string, scope: FanOutScope): Promise<ProjectWideQuestion[]> {
   const projectScope = scope === "project";
   const rows = await exec`
-    select r.id as record_id, r.record_no, r.variant_ordinal, r.item_description, r.level, r.category_id, r.area,
+    select r.id as record_id, r.record_no, r.variant_ordinal, r.item_description, r.level, r.category_id, r.area, r.matrix_type,
            (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
            p.bws_project_number,
            q.id as requirement_id, q.prompt, q.tgq_levels, q.local_key, q.sort_order,
@@ -180,7 +180,12 @@ async function loadFanOut(exec: Exec, projectId: string, scope: FanOutScope): Pr
     const tier = questionTierOrNull(
       { tgqLevels: Array.isArray(row.tgq_levels) ? row.tgq_levels.map(String) : [], jsonId, localKey },
       normaliseItemLevel(row.level),
-      row.category_id ? (matrices.get(String(row.category_id)) ?? null) : null,
+      // The record's accepted type (decision B), the union where it has none.
+      tgqMatrixFor(
+        matrices,
+        row.category_id ? String(row.category_id) : null,
+        row.matrix_type === null || row.matrix_type === undefined ? null : String(row.matrix_type),
+      ),
     );
     let group = groups.get(key);
     if (!group) {

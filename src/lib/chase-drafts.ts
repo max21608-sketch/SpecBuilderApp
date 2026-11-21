@@ -30,7 +30,7 @@ import {
   normaliseItemLevel,
   normaliseQuestionAudience,
 } from "@/lib/spec-vocab";
-import { questionTierOrNull, type QuestionTier, type TgqMatrix } from "@/lib/tgq";
+import { questionTierOrNull, tgqMatrixFor, type QuestionTier, type SheetTgqMatrix } from "@/lib/tgq";
 import { loadTgqMatrices } from "@/lib/gate-load";
 import { numberingFromRow, recordLabel, recordNoLabel, recordShortLabel } from "@/lib/record-label";
 import type { ChaseGroup } from "@/lib/chase-template";
@@ -945,7 +945,7 @@ export async function loadQuestionRoutes(exec: SqlExecutor, projectIds: string[]
   return routes;
 }
 
-function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>, routes: QuestionRoutes): OutstandingQuestion {
+function toOutstandingQuestion(row: Row, matrices: Map<string, SheetTgqMatrix>, routes: QuestionRoutes): OutstandingQuestion {
   const recordNo = Number(row.record_no);
   const level = normaliseItemLevel(row.level);
   const tgqLevels = Array.isArray(row.tgq_levels) ? row.tgq_levels.map(String) : [];
@@ -969,6 +969,10 @@ function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>, route
     // His matrix where he wrote one for this category, the 0019 placeholder
     // where he did not. Absent from the map is the discriminator, so a
     // category he has never covered is NOT read as "nothing blocks a quote".
+    //
+    // BY THE RECORD'S ACCEPTED TYPE (`tgqMatrixFor`, decision B): a sofa typed
+    // S is not chased for Swivel, as its gate panel and TGQ already were not.
+    // Untyped, or a type the sheet does not map, is the union, as before.
     tier: questionTierOrNull(
       {
         tgqLevels,
@@ -976,7 +980,11 @@ function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>, route
         localKey: row.local_key === null || row.local_key === undefined ? null : String(row.local_key),
       },
       level,
-      row.category_id ? (matrices.get(String(row.category_id)) ?? null) : null,
+      tgqMatrixFor(
+        matrices,
+        row.category_id ? String(row.category_id) : null,
+        row.matrix_type === null || row.matrix_type === undefined ? null : String(row.matrix_type),
+      ),
     ),
     requirementId: String(row.requirement_id),
     requirementKind: String(row.requirement_kind) === "readiness" ? "readiness" : "spec_field",
