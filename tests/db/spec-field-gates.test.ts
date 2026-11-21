@@ -222,6 +222,21 @@ describeIfDb("the seeded gate overlay", () => {
     expect(orphans).toEqual([]);
   });
 
+  it("seed 0010 re-runs cleanly once the cabinetry types exist", async () => {
+    // 0010's closing check demanded a Simple and a with-Metalwork boilerplate
+    // for EVERY matrix type. On a fresh database 0010 runs before 0014 creates
+    // the eight cabinetry types, so CI never saw it; every re-seed after
+    // raised "no boilerplate for DS/metalwork, ...". The pair is his
+    // upholstery rule, so the check is upholstery only.
+    const seed = readFileSync(path.join(process.cwd(), "db/seed/0010_bws_boilerplates.sql"), "utf8");
+    await client.query("begin");
+    try {
+      await expect(client.query(seed)).resolves.toBeDefined();
+    } finally {
+      await client.query("rollback");
+    }
+  });
+
   it("the two deliberate widenings are real, so changing the mapping fails here first", async () => {
     // Our `armchairs-benches-stools-sofas` is one sheet receiving his S, A and
     // B. He asks swivel of A and not of S or B, so mapping them together asks

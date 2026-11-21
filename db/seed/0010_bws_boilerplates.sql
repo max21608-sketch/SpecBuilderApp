@@ -79,13 +79,20 @@ on conflict (bws_id) do update set
 
 -- Every one of Matthew's nine needs BOTH variants, or his rule has no answer
 -- for half its cases and a quote line would silently carry no product code.
+--
+-- UPHOLSTERY ONLY (2026-11-21, the chase build). The Simple / with-Metalwork
+-- rule is his seating rule. The eight cabinetry types seed 0014 adds have no
+-- such pair in BWS (their boilerplates are 'other' and 'hero', with no matrix
+-- code), so a check over every type passed on a fresh database -- where 0010
+-- runs before 0014 creates them -- and failed on EVERY re-seed after.
 do $$
 declare missing text;
 begin
   select string_agg(c.code || '/' || v.variant, ', ') into missing
     from spec_matrix_categories c
     cross join (values ('simple'), ('metalwork')) as v(variant)
-   where not exists (
+   where c.family = 'upholstery'
+     and not exists (
      select 1 from bws_boilerplates b
       where b.matrix_code = c.code and b.variant = v.variant and b.active);
   if missing is not null then
