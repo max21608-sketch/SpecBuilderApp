@@ -519,9 +519,14 @@ export default function GatePanel({
           neither can do nothing with; what they need is that the rules may
           still change and where they stop. `docs/plans/matrix-assumptions.md`
           is still where the assumptions themselves are listed. */}
+      {/* TRUE ON EITHER MODEL (review 1, finding 6). "Set on 17 Sept" is
+          the date of Max's assumptions over Matthew's matrix; a provisional
+          model prints its own sentence and date at the top of the panel. */}
       <Note tone="warn" title="These gate rules are provisional.">
-        Which categories use which gate model, and which questions block a quote, were set on 17 Sept so the work could
-        start, and are still being confirmed. TG2 is not modelled yet.
+        {provisionalNote
+          ? "This item's gate model is the draft named at the top of this panel, and is still to be confirmed."
+          : "Which categories use which gate model, and which questions block a quote, were set on 17 Sept so the work could start, and are still being confirmed."}{" "}
+        TG2 is not modelled yet.
       </Note>
     </>
   );

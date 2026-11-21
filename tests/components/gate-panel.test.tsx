@@ -252,6 +252,23 @@ describe("the gate panel", () => {
     expect(screen.queryByText("TG1")).not.toBeInTheDocument();
   });
 
+  // TRUE BEFORE THE SEED AND AFTER IT (review 1, finding 6). Between the
+  // deploy and seed 0014 every cabinetry record is unmapped, and the sentence
+  // said "Every seeded category has one" on each of them, for hours.
+  it("explains an unmapped category without claiming anything about the others", () => {
+    renderPanel({ gates: null });
+    expect(screen.queryByText(/every seeded category/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/not on a gate model yet/)).toBeInTheDocument();
+    expect(screen.getByText(/placeholder/)).toBeInTheDocument();
+  });
+
+  it("does not date a provisional model's rules 17 Sept: the model says its own date", () => {
+    renderPanel({ provisionalNote: "Provisional cabinetry gate model, drafted by AI on 20 Nov 2026, not yet confirmed by Matthew" });
+    expect(screen.getByText(/These gate rules are provisional/)).toBeInTheDocument();
+    expect(screen.queryByText(/17 Sept/)).not.toBeInTheDocument();
+    expect(screen.getByText(/TG2 is not modelled yet/)).toBeInTheDocument();
+  });
+
   it("keeps the matrix collapsed, and says the gate rules are provisional", async () => {
     renderPanel();
     expect(screen.getByText(/These gate rules are provisional/)).toBeInTheDocument();

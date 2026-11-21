@@ -496,7 +496,15 @@ export function chainGates(byGate: Record<Gate, GateFieldsStatus>): Record<Gate,
   return out;
 }
 
-/** What a screen says where a category has no mapping onto Matthew's nine. */
+/**
+ * What a screen says where a category has no mapping onto a gate model.
+ *
+ * TRUE IN EVERY STATE OF THE DATABASE (review 1, finding 6). It said "Every
+ * seeded category has one", which was false on every cabinetry record between
+ * the deploy and seed 0014 -- hours, on a real promotion. It says only what
+ * holds for THIS item, whatever has been seeded: no gates to check, and the
+ * placeholder deciding its TGQ.
+ */
 export const NO_MATRIX_CATEGORY_LABEL = "No gate view";
 export const NO_MATRIX_CATEGORY_EXPLANATION =
-  "This item's category is not on a gate model yet, so there is nothing to check it against. Every seeded category has one; a category added since has not been given one.";
+  "This item's category is not on a gate model yet, so there is nothing to check it against, and its TGQ count is the placeholder that treats every open question as blocking.";
