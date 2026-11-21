@@ -528,4 +528,14 @@ describeIfDb("0055 a project is deletable", () => {
       .sort();
     expect([...OWNED_TABLES, ...POLYMORPHIC_TABLES].sort()).toEqual(copied);
   });
+
+  it("classifies every table in the LIVE schema, so a new one is a failing test before it is a row left behind", async () => {
+    // The equality above compares two lists in this repo with each other, and
+    // both missed 0062's project_question_routes until this read the catalog.
+    const { rows } = await client.query<{ table_name: string }>(
+      `select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE'`,
+    );
+    const unclassified = rows.map((row) => row.table_name).filter((table) => !(table in TABLE_HANDLING));
+    expect(unclassified).toEqual([]);
+  });
 });

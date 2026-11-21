@@ -42,6 +42,8 @@ import {
   PROJECT_STATUSES,
   RECORD_STATUSES,
   REF_SYSTEMS,
+  ANSWER_SCOPES,
+  QUESTION_AUDIENCES,
   REQUIREMENT_KINDS,
   RUN_STATUSES,
   SPLIT_REASONS,
@@ -94,6 +96,16 @@ const VOCABULARIES: {
   },
   { name: "SPLIT_REASONS", constraint: "spec_records_split_reason_check", values: SPLIT_REASONS },
   { name: "REQUIREMENT_KINDS", constraint: "requirements_kind_check", values: REQUIREMENT_KINDS },
+  // Who a question is for, and one project's move of one question (0062).
+  { name: "QUESTION_AUDIENCES", constraint: "requirements_audience_check", values: QUESTION_AUDIENCES },
+  {
+    name: "QUESTION_AUDIENCES (routes)",
+    constraint: "project_question_routes_audience_check",
+    values: QUESTION_AUDIENCES,
+  },
+  // Item or area (0062); project-wide is the section, not a scope.
+  { name: "ANSWER_SCOPES", constraint: "requirements_answer_scope_check", values: ANSWER_SCOPES },
+  { name: "ANSWER_SCOPES (draft lines)", constraint: "email_draft_items_answer_scope_check", values: ANSWER_SCOPES },
   { name: "FINISH_KINDS", constraint: "project_finishes_kind_check", values: FINISH_KINDS },
   {
     name: "FINISH_CODE_ORIGINS",

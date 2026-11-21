@@ -78,6 +78,9 @@ const OWNED = [
   },
   { table: "attribute_disagreements", id: "t.id", from: "attribute_disagreements t where t.project_id = $1" },
   { table: "spec_record_twins", id: "t.id", from: "spec_record_twins t where t.project_id = $1" },
+  // 0062. Hangs off the project alone, on delete cascade, so it needs no place
+  // in ORDERED_DELETES: no NO ACTION key points at it or from it.
+  { table: "project_question_routes", id: "t.id", from: "project_question_routes t where t.project_id = $1" },
   { table: "intake_batches", id: "t.id", from: "intake_batches t where t.project_id = $1" },
   { table: "intake_runs", id: "t.id", from: "intake_runs t where t.project_id = $1" },
   { table: "project_notes", id: "t.id", from: "project_notes t where t.project_id = $1" },

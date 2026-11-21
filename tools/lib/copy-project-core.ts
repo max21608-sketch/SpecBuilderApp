@@ -121,6 +121,9 @@ export const TABLE_HANDLING: Record<string, Handling> = {
   },
   attribute_disagreements: { kind: "owned" },
   spec_record_twins: { kind: "owned" },
+  // One project's "ask the client" for one question (0062). Keyed by the
+  // question's text key, never by a requirement id, so it carries as it is.
+  project_question_routes: { kind: "owned" },
 
   // ---- polymorphic: entity_type + entity_id, no FK possible ----
   attachments: { kind: "polymorphic", blobColumns: ["storage_path"] },

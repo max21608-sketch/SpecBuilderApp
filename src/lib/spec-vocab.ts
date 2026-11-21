@@ -75,6 +75,50 @@ export const REQUIREMENT_KINDS = ["spec_field", "readiness"] as const;
 export type RequirementKind = (typeof REQUIREMENT_KINDS)[number];
 
 /**
+ * WHO A QUESTION IS FOR (0062, decisions D and E of 2026-11-20).
+ *
+ * `kind` says whether BWS has a column for the answer; this says who answers
+ * it. Only a `client` question may be put in a chase to a designer or a
+ * client; a `cam` question is the CAM's, on the fill-in screen; an `in_house`
+ * one is the PM's and is never sent. Seed data (db/seed/0015), and one
+ * project may move one question with `project_question_routes` ("ask the
+ * client"). 0062 set it from `kind` — readiness in-house, a spec field the
+ * client's — so until that seed ran nothing read differently.
+ */
+export const QUESTION_AUDIENCES = ["in_house", "cam", "client"] as const;
+export type QuestionAudience = (typeof QUESTION_AUDIENCES)[number];
+
+export const QUESTION_AUDIENCE_LABELS: Record<QuestionAudience, string> = {
+  in_house: "In-house",
+  cam: "CAM",
+  client: "Client",
+};
+
+export function isQuestionAudience(value: unknown): value is QuestionAudience {
+  return typeof value === "string" && (QUESTION_AUDIENCES as readonly string[]).includes(value);
+}
+
+/**
+ * Read off a row: a value the constant does not know is `in_house`, the
+ * direction that never puts a question in front of a client unseen.
+ */
+export function normaliseQuestionAudience(raw: unknown): QuestionAudience {
+  return isQuestionAudience(raw) ? raw : "in_house";
+}
+
+/**
+ * ITEM, OR ONCE FOR AN AREA (0062, decision C). Project-wide is NOT here: it
+ * is the cheat sheet's "Project / commercial" section, and a second spelling
+ * of one scope is how TGQ came to mean four numbers.
+ */
+export const ANSWER_SCOPES = ["item", "area"] as const;
+export type AnswerScope = (typeof ANSWER_SCOPES)[number];
+
+export function normaliseAnswerScope(raw: unknown): AnswerScope {
+  return raw === "area" ? "area" : "item";
+}
+
+/**
  * Where an answer came from. `source_id` points at the row, per kind.
  *
  * Three of these are a PERSON'S answer and one is not. `manual` is typed,
