@@ -222,9 +222,10 @@ Built by four Opus coders in sequence on `intake-2026-11-20` (sixteen
 commits, about 6,000 lines with tests), reviewed by an agent that wrote none
 of it, and walked in a browser on the local stack with real reads.
 
-- **The four checks pass** with the database tier required (5,629 tests at
-  the last full run before the final three screen fixes; the number after them
-  is in `docs/plans/README.md`).
+- **The four checks pass** with the database tier required: 5,638 tests at
+  `fd83017`, the last code commit, on the local stack. `tools/overflow-audit.mjs`
+  found no box wider than itself on 26 pages at 1920 and 1440, the three test
+  projects' screens among them.
 - **The independent review found nine defects, all fixed, each with a test.**
   The three that mattered: changing a part's kind after other parts were
   registered re-registered the same pages (a second charged read); a
@@ -252,6 +253,14 @@ of it, and walked in a browser on the local stack with real reads.
   preamble read of pages 12–30 returned 114 notes. The bill's
   value-engineering sheet was held with "Reads as a bill: 14 lines; code and
   quantity columns found."
+- **Found on the last walk and fixed:** the pilot pack's own bill workbook
+  (MUR, MAIN RUN, MAIN RUN - VE) had started to need a press on every upload,
+  because the survey is never certain the value-engineering sheet is a bill.
+  An uncertain bill sheet beside a certain bill sheet of the same workbook is
+  now one more tab of that bill — every sheet is staged as a tab, nothing is
+  written before the bill's Confirm, and its review is where a tab is dropped —
+  so the workbook is one certain bill again, as it was before this build. A
+  lone uncertain sheet, and any PDF part, still wait for a person.
 - **Survey wording: no change.** Three rewordings, twice each over all six
   keys, each made a pack worse; the table is in `open-intake-2026-11-20.md`.
 
